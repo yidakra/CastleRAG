@@ -7,9 +7,9 @@ CastleRAG is a multimodal RAG system for verifiable multiple-choice question ans
 1. reads the official CASTLE dataset layout from Hugging Face,
 2. slices long videos into short clips and extracts representative frames,
 3. runs offline frame captioning and OCR, then compresses clip evidence into searchable event summaries,
-4. normalizes transcripts into short timestamped windows for lexical retrieval,
+4. normalizes transcripts into short timestamped windows for dual-path retrieval,
 5. embeds dense multimodal evidence with `Tevatron/OmniEmbed-v0.1-multivent`,
-6. indexes dense evidence in Qdrant with filterable payload while keeping transcripts in a separate lexical index,
+6. indexes dense evidence in Qdrant with filterable payload while keeping a separate BM25 lexical index,
 7. routes each question into static visual, speech/text, temporal, or mixed handling,
 8. reranks route-specific evidence packs and generates one of the four answer choices with citations,
 9. optionally adapts the answer model with LoRA on CASTLE QA training data,
@@ -28,6 +28,8 @@ This spec still targets a pragmatic end-to-end baseline, but after reading the W
 - The CASTLE Codabench page describes the question file as a JSON object keyed by question id, with a `query` string and four answer options under `answers`. Submission output is a JSON mapping from question id to `a|b|c|d`. Accuracy is exact-match over all questions.
 - WDL, the first-place 2026 system, routes questions into four types: static visual, speech/text, temporal, and mixed. It uses up to 30 transcript chunks, up to 4 candidate videos, 32 frames per candidate video, and up to 16 auxiliary images per question as its high-cost evidence budget.
 - MARS, the second-place 2026 system, explicitly converts long raw videos into captions, OCR notes, and compressed summaries offline because direct long-video prompting is infeasible under context and cost limits.
+- TAHAKOM, the third-place 2026 system, validated 30-second clips sampled at 1 fps on CASTLE and found that indexing only the 10 egocentric streams was sufficient for the base system without hurting benchmark accuracy.
+- CuriosAI, the fourth-place 2026 system, independently confirmed the value of BM25-style lexical transcript retrieval with answer-option and metadata overlap, and also emphasized strict anti-confabulation prompt rules at generation time.
 
 ## 1. Repository Structure
 
@@ -40,14 +42,14 @@ Proposed repository layout:
 - `configs/snellius.yaml`: Snellius-specific paths, SLURM defaults, and Qdrant settings.
 - `scripts/slurm/`: batch templates for preprocessing, embedding, indexing, reranking, and evaluation.
 - `data/manifests/`: generated manifests for discovered CASTLE assets and derived chunks.
-- `data/derived/`: chunk JSONL or Parquet outputs, keyframes, clip manifests, and optional visual summaries.
+- `data/derived/`: chunk JSONL or Parquet outputs, 1fps frame sets, clip manifests, and optional visual summaries.
 - `src/castlerag/config.py`: Pydantic config models and config loader.
 - `src/castlerag/cli.py`: Typer CLI entrypoint.
 - `src/castlerag/dataset/layout.py`: CASTLE path discovery, naming rules, and camera metadata.
 - `src/castlerag/dataset/transcripts.py`: transcript JSON parsing and absolute timestamp alignment.
 - `src/castlerag/dataset/metadata.py`: hourly sensor CSV loaders from `main/.../metadata`.
 - `src/castlerag/preprocess/windows.py`: sliding-window creation for main video chunks.
-- `src/castlerag/preprocess/media.py`: ffmpeg-based subclip and keyframe extraction.
+- `src/castlerag/preprocess/media.py`: ffmpeg-based subclip extraction and 1fps frame sampling.
 - `src/castlerag/preprocess/caption_ocr.py`: offline frame captioning and OCR over representative clip frames.
 - `src/castlerag/preprocess/event_compress.py`: compression of adjacent clip evidence into searchable event summaries.
 - `src/castlerag/preprocess/auxiliary.py`: photo, auxiliary video, thermal, heartrate, and gaze normalization.
@@ -56,10 +58,10 @@ Proposed repository layout:
 - `src/castlerag/embed/omniembed.py`: OmniEmbed processor and batch inference wrappers.
 - `src/castlerag/routing/question_router.py`: hint extraction and routing into static visual, speech/text, temporal, and mixed paths.
 - `src/castlerag/index/qdrant.py`: collection creation, payload indexes, deterministic ids, and batched upserts.
-- `src/castlerag/index/transcript_lexical.py`: transcript lexical index creation and query-time scoring.
+- `src/castlerag/index/transcript_lexical.py`: transcript BM25 index creation and query-time scoring.
 - `src/castlerag/retrieval/search.py`: query encoding, modality-scoped Qdrant search, candidate collapse, and score fusion.
 - `src/castlerag/retrieval/filters.py`: day, camera, participant, room, time range, and modality filters.
-- `src/castlerag/retrieval/transcript_lexical.py`: transcript lexical retrieval and bonus scoring over day/person/room/option overlap.
+- `src/castlerag/retrieval/transcript_lexical.py`: transcript BM25 retrieval and bonus scoring over day/person/room/option overlap.
 - `src/castlerag/retrieval/candidate_expand.py`: expansion from candidate videos to frame packs and linked evidence packs.
 - `src/castlerag/rerank/llm_reranker.py`: local LLM-as-reranker prompts and scoring.
 - `src/castlerag/training/lora_mcqa.py`: LoRA fine-tuning and held-out evaluation for CASTLE multiple-choice answering.
@@ -101,17 +103,26 @@ This avoids the `rainrag` assumption that each source file is already a single d
 
 ### 2.3 Main Video Windowing
 
+Default camera scope:
+
+- index only the 10 egocentric participant cameras in the first working pipeline
+- keep the 5 exocentric fixed cameras as an optional extension
+
+This is a validated simplification from TAHAKOM. It removes roughly one third of the video indexing load relative to a 15-camera build while preserving the core scene signal for CASTLE QA.
+
 Primary clip units:
 
 - window size: 30 seconds
-- stride: 15 seconds
-- overlap: 15 seconds
+- stride: 30 seconds
+- overlap: 0 seconds
+- sampled frame rate: 1 fps for derived retrieval frames
+- preserve source resolution at extraction time (`3840x2160`) and resize only at model-input time
 
 Reasoning:
 
 - 30 seconds is short enough for tractable offline captioning, OCR, and dense video embedding.
-- 15-second stride reduces boundary misses for events that cross window edges.
-- At 600 hours total, this yields about `600 * 3600 / 15 = 144,000` main clips before filtering.
+- TAHAKOM validated 30-second clips at 1 fps directly on CASTLE.
+- Egocentric-only indexing yields about `400 * 3600 / 30 = 48,000` main clips before filtering.
 
 Filtering rules:
 
@@ -149,11 +160,11 @@ Derived transcript fields per utterance window:
 
 For each retained 30-second main clip:
 
-- extract 8 JPEG keyframes at uniform offsets
-- default offsets: `0s, 4s, 8s, 12s, 16s, 20s, 24s, 28s`
-- store them under `data/derived/keyframes/{day}/{camera}/{hour}/{clip_id}/`
+- extract one JPEG frame per second, yielding 30 derived frames per clip
+- preserve the original resolution on disk and defer resizing to the model processor
+- store them under `data/derived/frames_1fps/{day}/{camera}/{hour}/{clip_id}/`
 
-These keyframes are used for:
+These sampled frames are used for:
 
 - offline captioning
 - OCR when text or screens are visible
@@ -166,13 +177,13 @@ For each retained main clip:
 
 - extract a 30-second MP4 subclip with audio
 - keep original frame rate for archival traceability
-- create a retrieval copy when needed for efficient video embedding
+- create a retrieval copy that exposes 1 fps sampled frames for efficient video embedding while keeping the original-resolution reference clip
 
 Stored paths:
 
 - `source_video_path`
 - `retrieval_clip_path`
-- `keyframe_paths`
+- `sampled_frame_paths`
 
 ### 2.7 Offline Captioning, OCR, and Event Compression
 
@@ -180,7 +191,7 @@ The offline pipeline must do more than chunk and embed. Following MARS, CastleRA
 
 Per 30-second clip:
 
-- input: 8 keyframes plus the transcript text if present
+- input: 30 sampled frames at 1 fps plus the transcript text if present
 - generate frame-level or clip-level captions emphasizing:
   - people
   - objects
@@ -241,7 +252,7 @@ This is intentionally simple because the exact gaze columns must be confirmed ag
 #### Auxiliary Video
 
 - one record per video file if duration <= 30 seconds
-- otherwise re-window into 30-second clips with 15-second stride
+- otherwise re-window into 30-second clips with 30-second stride
 - embed as video modality
 
 ### 2.9 Output Format Per Chunk
@@ -264,7 +275,7 @@ Main clip records are written as JSONL or Parquet with at least:
 - `absolute_end`
 - `source_video_path`
 - `retrieval_clip_path`
-- `keyframe_paths`
+- `sampled_frame_paths`
 - `transcript_text`
 - `ocr_text`
 - `clip_caption`
@@ -307,28 +318,31 @@ Auxiliary records share the same top-level schema and add modality-specific payl
 
 CastleRAG uses two retrieval stores:
 
-1. transcript lexical index:
+1. transcript BM25 lexical index:
    - stores transcript utterance windows only
    - optimized for exact and near-exact overlap with question text, answer choices, people, days, rooms, and temporal markers
 2. Qdrant dense multimodal index:
+   - stores transcript-window text embeddings for semantic retrieval
    - stores clip video embeddings
    - stores event-summary text embeddings
    - stores dense auxiliary embeddings for photos, auxiliary videos, thermal, and optional textual auxiliary summaries
 
-This is a deliberate design choice. WDL’s transcript path is lexical, not dense, and MARS also keeps transcripts as searchable text windows. For CASTLE QA, transcript retrieval must preserve exact names, counts, days, rooms, and answer-option wording, which makes a lexical path the safer primary choice.
+This is a deliberate dual-path design. WDL and CuriosAI both show that transcript retrieval needs a lexical lane with metadata-aware scoring, but CASTLE also benefits from a semantic dense lane for paraphrased questions. Transcript windows are therefore searched twice: BM25 for exactness and OmniEmbed for semantic similarity, then fused before reranking.
 
 Approximate point counts for the first build:
 
-- main clip video points: about 144,000
-- event-summary dense points: about 36,000
+- main clip video points: about 48,000
+- event-summary dense points: about 12,000
+- transcript dense text points: roughly 130,000 to 200,000
 - auxiliary points: expected low tens of thousands
-- total Qdrant points: roughly 180,000 to 220,000
-- transcript lexical rows: roughly 200,000 to 300,000 depending on utterance-window density
+- total Qdrant points: roughly 190,000 to 280,000
+- transcript BM25 rows: roughly 130,000 to 200,000 depending on utterance-window density
 
 ### 3.2 OmniEmbed Batching Strategy
 
 Batch separately by modality:
 
+- transcript-window text batches: 128 records
 - event-summary text batches: 64 records
 - image batches: 16 records
 - video batches: 4 records
@@ -371,7 +385,7 @@ Payload fields stored with every point:
 - `clip_caption`
 - `ocr_text`
 - `asset_path`
-- `keyframe_paths`
+- `sampled_frame_paths`
 - `has_speech`
 - `is_placeholder`
 - `linked_aux_ids`
@@ -396,10 +410,10 @@ Create Qdrant payload indexes for:
 
 Jobs:
 
-- `preprocess_main.slurm`: discover files, build 30-second clips, extract subclips and keyframes
+- `preprocess_main.slurm`: discover files, build 30-second clips, extract subclips and 1fps frame sets
 - `caption_ocr.slurm`: run frame captioning and OCR on main clips
 - `compress_events.slurm`: build 2-minute event summaries from adjacent clips
-- `index_transcripts.slurm`: build the transcript lexical index from normalized utterance windows
+- `index_transcripts.slurm`: build the transcript BM25 index and dense transcript embeddings from normalized utterance windows
 - `preprocess_aux.slurm`: normalize heartrate, gaze, photo, thermal, and auxiliary video
 - `embed_text.slurm`: event-summary and optional auxiliary text records
 - `embed_video.slurm`: main-clip video points and auxiliary video points
@@ -420,30 +434,32 @@ This section is an estimate, not a measured benchmark. The OmniEmbed model card 
 
 Assumptions:
 
-- 144,000 main clips
-- 36,000 event summaries
-- transcript lexical indexing is CPU-heavy but not the main GPU cost
+- 48,000 main clips from the 10 egocentric streams
+- 12,000 event summaries
+- transcript BM25 indexing is CPU-heavy but not the main GPU cost
+- dense transcript embeddings add moderate text-only GPU work
 - dense video embedding dominates runtime
 - captioning/OCR plus event compression adds a substantial pre-index cost before embedding
+- relative to a 15-camera build, the egocentric-only default removes roughly one third of the video-side indexing load
 
 Estimated runtime:
 
-- transcript lexical indexing: 2 to 4 CPU-hours
-- clip captioning/OCR: 40 to 80 GPU-hours total
-- event compression: 20 to 40 GPU-hours total
-- dense text and auxiliary embeddings: 2 to 6 GPU-hours total
-- dense video embeddings: 100 to 140 GPU-hours total
-- full offline evidence-memory build: 162 to 270 GPU-hours total
-- on 8 concurrent A100 GPUs: about 21 to 34 wall-clock hours
+- transcript BM25 indexing: 2 to 4 CPU-hours
+- clip captioning/OCR: 16 to 32 GPU-hours total
+- event compression: 8 to 16 GPU-hours total
+- dense transcript, event-summary, and auxiliary embeddings: 4 to 10 GPU-hours total
+- dense video embeddings: 32 to 48 GPU-hours total
+- full offline evidence-memory build: 60 to 106 GPU-hours total
+- on 8 concurrent A100 GPUs: about 8 to 14 wall-clock hours
 
 Estimated Snellius cost:
 
 - 1 A100 GPU-hour = 128 SBU
-- 162 to 270 GPU-hours = 20,736 to 34,560 SBU
+- 60 to 106 GPU-hours = 7,680 to 13,568 SBU
 - official rate is EUR 15 per 1,000 SBU
-- total offline build cost estimate = about EUR 311 to EUR 518
+- total offline build cost estimate = about EUR 115 to EUR 204
 
-Add 10 to 20% headroom for retries, cold starts, and prompt/compression experiments.
+Add 10 to 20% headroom for retries, cold starts, and prompt/compression experiments. Indexing the 5 exocentric cameras as well should be treated as a measured extension, not the starting baseline.
 
 ## 4. Retrieval and Routing Pipeline
 
@@ -484,17 +500,20 @@ Routing is mandatory. WDL and MARS both report that a single prompt strategy is 
 
 ### 4.3 Transcript Retrieval Strategy
 
-Transcript retrieval uses a separate lexical path rather than OmniEmbed dense search.
+Transcript retrieval uses a mandatory dual-path lane:
+
+1. BM25 lexical scoring over transcript windows
+2. OmniEmbed dense retrieval over the same transcript windows
 
 Justification:
 
 - WDL explicitly reports lexical scoring over question words, answer options, and day/person/room bonuses.
-- Transcript QA in CASTLE often depends on exact strings, quiz numbers, named entities, and room/day references.
-- MARS also normalizes transcripts into short timestamped text windows rather than treating them as just another dense modality.
+- CuriosAI independently confirmed that lexical overlap and metadata hints remain critical even with a strong generator.
+- Transcript QA in CASTLE often depends on exact strings, quiz numbers, named entities, and room/day references, while semantic retrieval helps when the query paraphrases the underlying speech.
 
-Scoring formula:
+BM25 scoring formula:
 
-- base lexical score over transcript window text and query text
+- base BM25 score over transcript window text and query text
 - add overlap score from answer options
 - add phrase-match bonus
 - add day bonus
@@ -502,19 +521,28 @@ Scoring formula:
 - add room bonus
 - add temporal-keyword bonus
 
-Return:
-
-- top 30 transcript windows per question as the global cap
-- fewer windows for static-visual routes when transcript evidence is clearly secondary
-
-### 4.4 Dense Multimodal Retrieval
-
-For dense retrieval, encode both:
+Dense transcript query forms:
 
 - `Query: {question}`
 - `Query: {question} Choices: A {a}. B {b}. C {c}. D {d}.`
 
-Use the max score across the two query forms during fusion.
+Fusion:
+
+- run both transcript retrievers independently
+- merge them with Reciprocal Rank Fusion before reranking
+- optional extension: add `e5-large-v2` as a second dense text retriever in this transcript lane if time allows
+
+Return:
+
+- up to 30 transcript windows after transcript-lane fusion
+- fewer windows for static-visual routes when transcript evidence is clearly secondary
+
+### 4.4 Dense Multimodal Retrieval
+
+For non-transcript dense retrieval, encode both:
+
+- `Query: {question}`
+- `Query: {question} Choices: A {a}. B {b}. C {c}. D {d}.`
 
 Run separate filtered Qdrant searches and fuse them:
 
@@ -530,7 +558,7 @@ Fusion:
 
 - Reciprocal Rank Fusion with `k=60`
 
-Then collapse hits into up to 4 candidate videos or candidate windows, matching WDL’s high-cost budget.
+Then merge the transcript lane and multimodal lane, and collapse hits into up to 4 candidate videos or candidate windows before reranking.
 
 ### 4.5 Filtering
 
@@ -555,6 +583,9 @@ Hard starting-point caps, derived from WDL:
 - candidate videos: up to 4
 - frames per candidate video: 32
 - auxiliary images: up to 16
+- total evidence rows passed to the generation LLM: 50
+
+The 50-row working-memory cap is validated by TAHAKOM. Their ablation showed that a mid-sized context outperformed both very small (`top-5`) and much larger (`top-250`) evidence sets because excessive context increased hallucination.
 
 Route-specific behavior:
 
@@ -599,13 +630,17 @@ Use one open-weight model for both reranking and generation.
 
 Default:
 
-- `Qwen2.5-VL-7B-Instruct`
+- `Qwen/Qwen3-VL-8B-Instruct`
 
-Fallback:
+- Ablation baseline:
 
-- `InternVL2-8B`
+- `OpenGVLab/InternVL3-8B`
 
-The model is run locally on Snellius or an equivalent GPU host.
+Justification:
+
+- `Qwen/Qwen3-VL-8B-Instruct` has a dedicated ViT encoder, strong OCR performance, and is currently the strongest open-weight VLM in the 8 to 12B class while still fitting on a single Snellius A100 80GB.
+
+The model is run locally on Snellius or an equivalent GPU host through `vLLM`.
 
 ### 5.2 Candidate Representation
 
@@ -690,12 +725,13 @@ Generation receives:
 
 - the routed question type
 - top 4 reranked evidence packs
+- a flattened top-50 evidence-row working set for the final prompt
 - per-choice cumulative support scores
 - the original retrieval scores
 
 ## 6. Generation
 
-The default generator for the final pipeline is the LoRA-adapted variant of the selected open-weight model once issue work for LoRA fine-tuning is complete. The non-LoRA checkpoint remains the baseline.
+The default generator for the final pipeline is the LoRA-adapted variant of `Qwen/Qwen3-VL-8B-Instruct` once issue work for LoRA fine-tuning is complete. The non-LoRA checkpoint remains the baseline, and `OpenGVLab/InternVL3-8B` is the main ablation alternative.
 
 ### 6.1 Prompt Template
 
@@ -709,6 +745,7 @@ Rules:
 - Every factual claim used in the decision must cite at least one evidence item.
 - Citations must use the format [camera={camera_id} time={day} {start}-{end}] or [aux={source_type} id={record_id}].
 - Follow the route-specific instruction block exactly.
+- Follow the anti-confabulation rules exactly.
 - End with exactly one line: FINAL_ANSWER: a|b|c|d
 
 Question route:
@@ -732,6 +769,21 @@ Choice support priors:
 Evidence:
 {top_reranked_evidence}
 ```
+
+### 6.1.1 Anti-Confabulation Rules
+
+The system prompt must include these four hard constraints, derived from CuriosAI's SVA pipeline:
+
+1. `no echo`
+   - do not repeat prompt text, answer options, or route hints as if they were evidence
+2. `abstain`
+   - if no retrieved clip or transcript window supports a claim, say the evidence is insufficient instead of inventing support; when the benchmark still requires a final letter, the model should choose the least unsupported option and mark the rationale as low-confidence
+3. `localise`
+   - every count, object-location claim, or spatial relation must be tied to a specific camera and timestamp citation
+4. `ground`
+   - confidence must be explained using explicit retrieved evidence, not answer-option plausibility or world knowledge
+
+These are concrete prompt requirements, not optional style guidance.
 
 Route prompt blocks:
 
@@ -758,6 +810,11 @@ Auxiliary evidence:
 ### 6.3 Handling the 4-Choice Format
 
 The model sees the four options verbatim and must choose one of `a`, `b`, `c`, or `d`.
+
+Working-memory rule:
+
+- pass at most 50 evidence rows into the final generation prompt after reranking and candidate-pack flattening
+- if more than 50 rows remain, truncate by rerank score while preserving at least one row per kept candidate pack when possible
 
 Post-processing:
 
@@ -899,12 +956,13 @@ Outputs:
 ### 9.1 Dataset and Ground Truth
 
 - It is unclear whether the local workspace will include an answer key for the 185 questions. Without it, the pipeline can export predictions but cannot compute accuracy offline.
+- The Hugging Face dataset page currently exposes the raw CASTLE dataset under a `train` split, but it does not clearly expose a CASTLE QA train/validation benchmark split. LoRA fine-tuning is therefore blocked until the QA training labels are located explicitly.
 - Auxiliary timestamp quality needs validation, especially for thermal and personal media.
 
 ### 9.2 Throughput and Storage
 
 - OmniEmbed-multivent A100 throughput is not documented in the model card. Runtime and SBU estimates in this spec are planning numbers and must be replaced with measured benchmark logs.
-- 8 keyframes per 144,000 windows produces roughly 1.15 million JPEGs. Storage and inode pressure need to be managed carefully.
+- 30 sampled frames per 48,000 ego-only clips produces roughly 1.44 million JPEGs. Storage and inode pressure need to be managed carefully.
 - Offline captioning, OCR, and event compression are likely to dominate engineering complexity before dense indexing even starts.
 
 ### 9.3 Placeholder and Gap Detection
