@@ -94,7 +94,11 @@ All derived records must use:
 - `day`: `day1` to `day4`
 - `hour`: integer 8 to 20 from the source filename
 - `start_seconds` and `end_seconds`: offsets within the hour
-- `absolute_start` and `absolute_end`: `day + hour + offset`
+- `absolute_start` and `absolute_end`: signed 64-bit Unix epoch timestamps in milliseconds, UTC only, anchored to `1970-01-01T00:00:00Z`
+- required invariant: `absolute_start < absolute_end`
+- required precision: millisecond integers only, with no string encoding and no timezone-local variants
+- Qdrant payload requirement: store both fields as numeric integer payload values so range filters are unambiguous across producers and consumers
+- example: `1672531200000` represents `2023-01-01T00:00:00Z`
 - `camera_id`: exact folder name, e.g. `Allie`, `Kitchen`, `Living1`
 - `camera_type`: `ego` for participant cameras, `fixed` for room cameras
 - `participant_id`: participant name for ego cameras, null for fixed cameras
@@ -574,6 +578,7 @@ Qdrant filters are applied server-side using payload indexes for:
 Time overlap rule:
 
 - retrieve points where `absolute_end >= query_start` and `absolute_start <= query_end`
+- `query_start` and `query_end` must use the same UTC Unix-millisecond integer encoding as `absolute_start` and `absolute_end`
 
 ### 4.6 Evidence Budgets by Route
 
@@ -888,8 +893,8 @@ If `answers_path` is missing:
 Per question:
 
 1. load question and options
-2. retrieve candidates
-3. route question type
+2. route question type and extract route hints
+3. retrieve route-aware candidates
 4. rerank candidate evidence packs
 5. generate final choice
 6. save prediction plus evidence trace
@@ -927,8 +932,8 @@ Outputs:
 ### 8.2 Reusable Conceptually But Not Directly
 
 - `src/rainrag/query.py`
-  - Reuse the orchestration shape: retrieve, rerank, prompt, answer.
-  - Replace text-only assumptions, online API providers, and Cohere rerank with lexical transcript retrieval, dense multimodal retrieval, question routing, and local LLM reranking.
+  - Reuse the orchestration shape: route, retrieve, rerank, prompt, answer.
+  - Replace text-only assumptions, online API providers, and Cohere rerank with pre-retrieval question routing, lexical transcript retrieval, dense multimodal retrieval, and local LLM reranking.
 
 - `src/rainrag` hybrid BM25 path
   - The generic pattern is relevant, but the implementation is not.
