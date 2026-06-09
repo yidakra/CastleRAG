@@ -52,5 +52,67 @@ def merge_into_windows(
     """Merge adjacent ASR segments into utterance windows (≤15 s, ≤96 token-equiv chars).
 
     Returns transcript windows with absolute UTC millisecond timestamps.
+    Each window carries its raw constituent segments for downstream BM25 and
+    dense retrieval.  Windows with no speech text are still emitted so that
+    silent stretches are represented in the time index.
     """
-    raise NotImplementedError("Implemented in issue #4 (transcript normalization)")
+    windows: List[TranscriptWindow] = []
+
+    bucket_segs: List[TranscriptSegment] = []
+    bucket_start: float | None = None
+    bucket_end: float = 0.0
+    bucket_chars: int = 0
+
+    def _flush() -> None:
+        nonlocal bucket_segs, bucket_start, bucket_end, bucket_chars
+        if not bucket_segs:
+            return
+        text = " ".join(s.text for s in bucket_segs if s.text).strip()
+        abs_start = base_unix_ms + int(bucket_start * 1000)  # type: ignore[operator]
+        abs_end = base_unix_ms + int(bucket_end * 1000)
+        if abs_end <= abs_start:
+            abs_end = abs_start + 1
+        win_id = (
+            f"{day}_{camera_id}_{hour:02d}_{int(bucket_start * 1000):010d}"  # type: ignore[operator]
+        )
+        windows.append(TranscriptWindow(
+            transcript_window_id=win_id,
+            day=day,
+            camera_id=camera_id,
+            camera_type=camera_type,  # type: ignore[arg-type]
+            participant_id=participant_id,
+            room=room,
+            hour=hour,
+            transcript_text=text,
+            transcript_segments=list(bucket_segs),
+            has_speech=bool(text),
+            transcript_char_len=len(text),
+            absolute_start=abs_start,
+            absolute_end=abs_end,
+            version=version,
+        ))
+        bucket_segs = []
+        bucket_start = None
+        bucket_end = 0.0
+        bucket_chars = 0
+
+    for seg in segments:
+        if bucket_start is not None:
+            span = seg.end - bucket_start
+            new_chars = bucket_chars + len(seg.text)
+            if span > max_seconds or new_chars > max_chars:
+                _flush()
+        if bucket_start is None:
+            bucket_start = seg.start
+        bucket_end = seg.end
+        bucket_chars += len(seg.text)
+        bucket_segs.append(seg)
+        # If this single segment already exceeds limits, emit immediately so
+        # we never accumulate further into an already-over-limit window.
+        if len(bucket_segs) == 1:
+            span = bucket_end - bucket_start
+            if span > max_seconds or bucket_chars > max_chars:
+                _flush()
+
+    _flush()
+    return windows
