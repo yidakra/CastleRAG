@@ -1,0 +1,39 @@
+# CastleRAG Snellius HPC configuration
+# Deep-merges on top of configs/base.yaml — only overrides what differs.
+# Snellius gpu_a100: 1 GPU (quarter-node), 18 CPU cores, 120 GiB RAM, 128 SBU/GPU-hour.
+
+dataset:
+  root: "/scratch/shared/castle2024"
+
+preprocessing:
+  frames_dir: "/scratch/$USER/castle_derived/frames_1fps"
+  clips_dir: "/scratch/$USER/castle_derived/clips"
+  manifests_dir: "/scratch/$USER/castle_derived/manifests"
+  chunks_dir: "/scratch/$USER/castle_derived/chunks"
+
+embedding:
+  cache_dir: "/scratch/$USER/castle_derived/embeddings"
+  vllm_tensor_parallel: 1
+
+qdrant:
+  host: "localhost"   # Qdrant started on the compute node before SLURM array tasks
+  port: 6333
+
+outputs:
+  dir: "/scratch/$USER/castle_outputs"
+  predictions: "/scratch/$USER/castle_outputs/predictions.json"
+  evidence_traces: "/scratch/$USER/castle_outputs/evidence_traces.jsonl"
+  submissions: "/scratch/$USER/castle_outputs/submissions.json"
+  metrics: "/scratch/$USER/castle_outputs/metrics.json"
+
+slurm:
+  partition: "gpu_a100"
+  account: ""         # fill in your Snellius project account
+  time: "04:00:00"
+  nodes: 1
+  ntasks: 1
+  cpus_per_task: 18
+  mem: "120G"
+  gpus: 1
+  mail_type: "FAIL"
+  mail_user: ""       # fill in your Snellius email

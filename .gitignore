@@ -1,15 +1,37 @@
+# OS
 .DS_Store
 
+# Editors
 .idea/
 .vscode/
 
+# Python
 .venv/
 venv/
-
 **/__pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
+# Build
 dist/
 build/
+*.egg-info/
+
+# CastleRAG generated data — never commit raw dataset or derived artifacts
+data/derived/
+data/manifests/
+outputs/
+
+# Embeddings cache
+data/derived/embeddings/
+
+# LoRA checkpoints
+data/lora_checkpoints/
+
+# Logs from SLURM jobs
+logs/
+
+# Environment config with secrets
+.env
