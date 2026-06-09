@@ -1,0 +1,124 @@
+# CastleRAG base configuration (local dev / CPU-only preview)
+# All paths are relative to the repo root unless absolute.
+
+dataset:
+  root: "/data/castle2024"
+  hf_repo: "castle-challenge/castle2024"
+  days: [1, 2, 3, 4]
+  # 10 egocentric participant cameras — TAHAKOM-validated baseline scope
+  ego_cameras:
+    - "Allie"
+    - "Bjorn"
+    - "Celine"
+    - "Deon"
+    - "Estella"
+    - "Finn"
+    - "Greta"
+    - "Harvey"
+    - "Isla"
+    - "Jian"
+  # 5 fixed room cameras — extension only, excluded from baseline indexing
+  exo_cameras:
+    - "Kitchen"
+    - "Living1"
+    - "Living2"
+    - "Office"
+    - "Hallway"
+  camera_scope: "ego"   # ego | all
+  hours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+preprocessing:
+  clip_seconds: 30
+  stride_seconds: 30
+  fps: 1
+  placeholder_frame_threshold: 0.80
+  max_transcript_window_seconds: 15
+  max_transcript_tokens: 96
+  frames_dir: "data/derived/frames_1fps"
+  clips_dir: "data/derived/clips"
+  manifests_dir: "data/manifests"
+  chunks_dir: "data/derived/chunks"
+
+embedding:
+  model: "Tevatron/OmniEmbed-v0.1-multivent"
+  backend: "vllm"       # vllm (default on GPU) | transformers (fallback)
+  batch_sizes:
+    transcript: 128
+    event_summary: 64
+    image: 16
+    video: 4
+  cache_dir: "data/derived/embeddings"
+  vllm_tensor_parallel: 1
+  vllm_gpu_memory_utilization: 0.90
+
+qdrant:
+  host: "localhost"
+  port: 6333
+  collection: "castle_multimodal_v1"
+  vector_size: null     # discovered from first OmniEmbed batch
+  distance: "Cosine"
+  on_disk_payload: true
+
+retrieval:
+  transcript_top_k: 30
+  event_summary_top_k: 20
+  video_top_k: 20
+  photo_top_k: 16
+  aux_video_top_k: 8
+  heartrate_top_k: 8
+  gaze_top_k: 8
+  thermal_top_k: 8
+  rrf_k: 60
+  max_candidate_videos: 4
+  frames_per_candidate: 32
+  max_aux_images: 16
+  max_evidence_rows: 50  # TAHAKOM-validated working-memory cap
+
+generation:
+  model: "Qwen/Qwen3-VL-8B-Instruct"
+  ablation_model: "OpenGVLab/InternVL3-8B"
+  backend: "vllm"
+  max_new_tokens: 512
+  temperature: 0.0
+  vllm_tensor_parallel: 1
+  vllm_gpu_memory_utilization: 0.90
+
+reranking:
+  model: "Qwen/Qwen3-VL-8B-Instruct"
+  top_k: 4
+  relevance_weight: 0.7
+  support_weight: 0.3
+  min_relevance: 1
+
+outputs:
+  dir: "outputs"
+  predictions: "outputs/predictions.json"
+  evidence_traces: "outputs/evidence_traces.jsonl"
+  submissions: "outputs/submissions.json"
+  metrics: "outputs/metrics.json"
+
+# BLOCKED: do not enable until a CASTLE QA train/val split is explicitly found
+lora:
+  enabled: false
+  base_model: "Qwen/Qwen3-VL-8B-Instruct"
+  rank: 16
+  alpha: 32
+  target_modules: ["q_proj", "v_proj"]
+  epochs: 3
+  batch_size: 4
+  learning_rate: 0.0002
+  output_dir: "data/lora_checkpoints"
+
+slurm:
+  partition: "gpu_a100"
+  account: ""
+  time: "04:00:00"
+  nodes: 1
+  ntasks: 1
+  cpus_per_task: 18
+  mem: "120G"
+  gpus: 1
+  mail_type: "FAIL"
+  mail_user: ""
+
+version: "0.1.0"
