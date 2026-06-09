@@ -96,6 +96,7 @@ class HourAsset:
     video_path: Path
     transcript_path: Optional[Path]
     metadata_paths: List[Path] = field(default_factory=list)
+    missing_video: bool = False
 
 
 def discover_hours(
@@ -105,12 +106,16 @@ def discover_hours(
     days: List[int],
     hours: List[int],
     camera_scope: str = "ego",
+    include_novideo: bool = False,
 ) -> Iterator[HourAsset]:
-    """Yield one HourAsset for every available, non-novideo hour in scope.
+    """Yield one HourAsset for every available hour in scope.
 
     camera_scope="ego" (default) skips exo cameras entirely — this is the
     TAHAKOM-validated baseline that indexes only the 10 egocentric streams.
     Pass "all" to include fixed cameras as an extension.
+
+    include_novideo=False (default) skips .novideo hours; set True to yield
+    them with missing_video=True so manifest writers can record them explicitly.
     """
     registry = build_camera_registry(ego_cameras, exo_cameras)
 
@@ -123,7 +128,23 @@ def discover_hours(
         for camera_id in in_scope:
             cam = registry[camera_id]
             for hour in hours:
-                if is_novideo(root, day_str, camera_id, hour):
+                novideo = is_novideo(root, day_str, camera_id, hour)
+                if novideo:
+                    if include_novideo:
+                        video_path = hour_video_path(root, day_str, camera_id, hour)
+                        tx_path = hour_transcript_path(root, day_str, camera_id, hour)
+                        yield HourAsset(
+                            day=day_str,
+                            camera_id=camera_id,
+                            camera_type=cam.camera_type,
+                            participant_id=cam.participant_id,
+                            room=cam.room,
+                            hour=hour,
+                            video_path=video_path,
+                            transcript_path=tx_path if tx_path.exists() else None,
+                            metadata_paths=hour_metadata_paths(root, day_str, camera_id, hour),
+                            missing_video=True,
+                        )
                     continue
                 video_path = hour_video_path(root, day_str, camera_id, hour)
                 if not video_path.exists():
@@ -139,4 +160,5 @@ def discover_hours(
                     video_path=video_path,
                     transcript_path=tx_path if tx_path.exists() else None,
                     metadata_paths=hour_metadata_paths(root, day_str, camera_id, hour),
+                    missing_video=False,
                 )
