@@ -71,17 +71,24 @@ def extract_subclip(
 ) -> Path:
     """Extract a 30-second MP4 subclip with audio, returning out_path.
 
-    Keeps original frame rate and codec (-c copy) for archival traceability.
+    Uses accurate seeking and resets timestamps so the derived subclip aligns
+    with transcript and frame metadata. This re-encodes the clip instead of
+    stream-copying because `-c copy` with pre-input `-ss` is not frame-accurate
+    for non-keyframe boundaries.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     duration = end_seconds - start_seconds
     subprocess.run(
         [
             "ffmpeg", "-y",
-            "-ss", str(start_seconds),
             "-i", str(source_path),
+            "-ss", str(start_seconds),
             "-t", str(duration),
-            "-c", "copy",
+            "-reset_timestamps", "1",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "18",
+            "-c:a", "aac",
             str(out_path),
         ],
         capture_output=True,

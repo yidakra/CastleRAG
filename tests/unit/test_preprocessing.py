@@ -328,7 +328,11 @@ def test_extract_subclip_calls_ffmpeg(tmp_path: Path):
         assert out == tmp_path / "out.mp4"
         args = mock_run.call_args[0][0]
         assert "ffmpeg" in args
-        assert "-c" in args and "copy" in args
+        assert "-i" in args
+        assert args.index("-i") < args.index("-ss")
+        assert "-reset_timestamps" in args
+        assert "-c:v" in args and "libx264" in args
+        assert "-c:a" in args and "aac" in args
 
 
 def test_extract_frames_1fps_calls_ffmpeg(tmp_path: Path):
@@ -582,6 +586,25 @@ def test_iter_aux_video_rewindowed_unique_clip_ids(tmp_path: Path):
         records = list(iter_aux_video_records(tmp_path, "Allie", "day1"))
     clip_ids = [r.clip_id for r in records]
     assert len(clip_ids) == len(set(clip_ids)), "re-windowed clips must have unique clip_ids"
+
+
+def test_aux_record_ids_do_not_collide_for_same_basename(tmp_path: Path):
+    from castlerag.preprocess.auxiliary import iter_photo_records
+
+    allie_dir = tmp_path / "photo" / "Allie"
+    bjorn_dir = tmp_path / "photo" / "Bjorn"
+    allie_dir.mkdir(parents=True)
+    bjorn_dir.mkdir(parents=True)
+    (allie_dir / "IMG_0001.jpg").touch()
+    (bjorn_dir / "IMG_0001.jpg").touch()
+
+    with patch("castlerag.preprocess.auxiliary._exif_unix_ms", return_value=0):
+        allie = list(iter_photo_records(tmp_path, "Allie", "day1"))
+        bjorn = list(iter_photo_records(tmp_path, "Bjorn", "day1"))
+
+    assert len(allie) == 1
+    assert len(bjorn) == 1
+    assert allie[0].clip_id != bjorn[0].clip_id
 
 
 def test_iter_photo_records_uses_filename_hint(tmp_path: Path):

@@ -1,6 +1,7 @@
 """Normalization of auxiliary modalities: heartrate, gaze, photo, thermal, aux video."""
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import Iterator, Optional
@@ -22,8 +23,22 @@ def _aux_record(
     summary_text: Optional[str] = None,
     version: str = "0.1.0",
 ) -> AuxRecord:
+    id_material = "|".join(
+        [
+            source_type,
+            participant or "",
+            day,
+            str(path),
+            str(absolute_start),
+            str(absolute_end),
+        ]
+    )
+    stable_suffix = hashlib.sha1(id_material.encode()).hexdigest()[:12]
     return AuxRecord(
-        clip_id=f"{source_type}_{path.stem}_{absolute_start:013d}_{absolute_end:013d}",
+        clip_id=(
+            f"{source_type}_{path.stem}_{absolute_start:013d}_{absolute_end:013d}_"
+            f"{stable_suffix}"
+        ),
         source_type=source_type,  # type: ignore[arg-type]
         modality=_modality_for(source_type),
         day=day,
