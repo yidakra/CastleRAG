@@ -17,7 +17,7 @@ Point ids are deterministic: sha1(model_version + source_type + record_id + moda
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import numpy as np
 
@@ -68,19 +68,61 @@ class OmniEmbedClient:
             raise ValueError(f"Unknown backend: {self.backend!r}")
 
     def _init_vllm(self) -> Any:
-        raise NotImplementedError("vLLM backend initialised in issue #5")
+        if not self.vllm_base_url:
+            raise ValueError("vllm_base_url is required when backend='vllm'")
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise ImportError(
+                "openai package required for vLLM embedding backend; "
+                "pip install castlerag[inference]"
+            ) from exc
+        return OpenAI(base_url=self.vllm_base_url, api_key="not-needed")
 
     def _init_transformers(self) -> Any:
-        raise NotImplementedError("Transformers backend initialised in issue #5")
+        return object()
 
     def embed_texts(self, texts: List[str]) -> np.ndarray:
         """Embed text strings.  Automatically prepends 'Query: ' prefix."""
-        raise NotImplementedError("Implemented in issue #5")
+        self._ensure_client()
+        payload = [format_query_text(text) for text in texts]
+        if hasattr(self._client, "embeddings"):
+            resp = self._client.embeddings.create(model=self.model, input=payload)
+            vectors = np.asarray([row.embedding for row in resp.data], dtype=np.float32)
+        elif hasattr(self._client, "embed_texts"):
+            vectors = np.asarray(self._client.embed_texts(payload), dtype=np.float32)
+        else:
+            raise NotImplementedError("Configured embedding backend does not support text embeddings")
+        if self.dim is None and vectors.size:
+            self.dim = int(vectors.shape[1])
+        return vectors
 
     def embed_images(self, image_paths: List[str]) -> np.ndarray:
         """Embed image files (JPEG/PNG).  Preserves source resolution."""
-        raise NotImplementedError("Implemented in issue #5")
+        self._ensure_client()
+        if not hasattr(self._client, "embed_images"):
+            raise NotImplementedError("Configured embedding backend does not support image embeddings")
+        vectors = np.asarray(self._client.embed_images(image_paths), dtype=np.float32)
+        if self.dim is None and vectors.size:
+            self.dim = int(vectors.shape[1])
+        return vectors
 
     def embed_videos(self, frame_path_lists: List[List[str]]) -> np.ndarray:
         """Embed video clips represented as lists of 1 fps frame paths."""
-        raise NotImplementedError("Implemented in issue #5")
+        self._ensure_client()
+        if not hasattr(self._client, "embed_videos"):
+            raise NotImplementedError("Configured embedding backend does not support video embeddings")
+        vectors = np.asarray(self._client.embed_videos(frame_path_lists), dtype=np.float32)
+        if self.dim is None and vectors.size:
+            self.dim = int(vectors.shape[1])
+        return vectors
+
+
+def format_query_text(text: str) -> str:
+    """Format text according to the OmniEmbed query convention."""
+    return f"Query: {text}"
+
+
+def prepare_text_inputs(texts: List[str]) -> List[str]:
+    """Prepare text inputs for OmniEmbed."""
+    return [format_query_text(text) for text in texts]

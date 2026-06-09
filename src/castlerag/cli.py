@@ -111,7 +111,7 @@ def index(
     if dry_run:
         console.print("[yellow]dry-run: no Qdrant writes[/yellow]")
         return
-    console.print("[red]index not yet implemented — see issue #6[/red]")
+    console.print("[red]index not yet implemented — see issue #5[/red]")
     raise typer.Exit(1)
 
 
