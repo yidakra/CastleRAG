@@ -1,6 +1,7 @@
 #!/bin/bash
 # embed_text.slurm
 # OmniEmbed encoding for event-summary text points and auxiliary text records.
+# Transcript dense text embeddings run through index_transcripts.slurm.
 # Batch size: 64 (event summaries), 128 (transcript windows) — see SPEC §3.2.
 # Array: one job per day.
 #
@@ -38,6 +39,11 @@ source "${VENV}/bin/activate"
 castlerag embed \
     --config "${CONFIG}" \
     --modality event_summary \
+    --day "${DAY}"
+
+castlerag embed \
+    --config "${CONFIG}" \
+    --modality text \
     --day "${DAY}"
 
 echo "[embed_text] day=${DAY}  done=$(date -Iseconds)"

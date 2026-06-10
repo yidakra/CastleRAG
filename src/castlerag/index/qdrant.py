@@ -9,7 +9,16 @@ Payload indexes (for server-side filtering):
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List
+
+from castlerag.embed.omniembed import make_point_id
+from castlerag.schemas import (
+    AuxRecord,
+    ClipRecord,
+    EventSummaryRecord,
+    QdrantPoint,
+    TranscriptWindow,
+)
 
 log = logging.getLogger(__name__)
 
@@ -162,3 +171,137 @@ def bootstrap_collection(
     )
     create_payload_indexes(client, collection_name)
     return client
+
+
+def record_to_qdrant_point(
+    record: TranscriptWindow | ClipRecord | EventSummaryRecord | AuxRecord,
+    model_version: str,
+    model_name: str | None = None,
+    model_revision: str | None = None,
+    build_id: str | None = None,
+) -> QdrantPoint:
+    """Convert a CastleRAG record into a Qdrant payload model."""
+    if isinstance(record, TranscriptWindow):
+        record_id = record.transcript_window_id
+        source_type = "transcript_window"
+        modality = "text"
+        payload = QdrantPoint(
+            point_id=make_point_id(model_version, source_type, record_id, modality),
+            record_id=record_id,
+            source_type=source_type,
+            modality=modality,
+            day=record.day,
+            hour=record.hour,
+            camera_id=record.camera_id,
+            camera_type=record.camera_type,
+            participant_id=record.participant_id,
+            room=record.room,
+            absolute_start=record.absolute_start,
+            absolute_end=record.absolute_end,
+            transcript_text=record.transcript_text,
+            has_speech=record.has_speech,
+            model_name=model_name,
+            model_revision=model_revision,
+            build_id=build_id,
+        )
+        return payload
+
+    if isinstance(record, ClipRecord):
+        record_id = record.clip_id
+        payload = QdrantPoint(
+            point_id=make_point_id(model_version, record.source_type, record_id, record.modality),
+            record_id=record_id,
+            parent_source_id=record.parent_source_id,
+            source_type=record.source_type,
+            modality=record.modality,
+            day=record.day,
+            hour=record.hour,
+            camera_id=record.camera_id,
+            camera_type=record.camera_type,
+            participant_id=record.participant_id,
+            room=record.room,
+            start_seconds=record.start_seconds,
+            end_seconds=record.end_seconds,
+            absolute_start=record.absolute_start,
+            absolute_end=record.absolute_end,
+            duration_seconds=record.end_seconds - record.start_seconds,
+            transcript_text=record.transcript_text,
+            clip_caption=record.clip_caption,
+            ocr_text=record.ocr_text,
+            asset_path=record.retrieval_clip_path or record.source_video_path,
+            sampled_frame_paths=record.sampled_frame_paths,
+            has_speech=record.has_speech,
+            is_placeholder=record.is_placeholder,
+            linked_aux_ids=record.linked_aux_ids,
+            model_name=model_name,
+            model_revision=model_revision,
+            build_id=build_id,
+        )
+        return payload
+
+    if isinstance(record, EventSummaryRecord):
+        record_id = record.event_summary_id
+        payload = QdrantPoint(
+            point_id=make_point_id(model_version, record.source_type, record_id, "text"),
+            record_id=record_id,
+            source_type=record.source_type,
+            modality="text",
+            day=record.day,
+            camera_id=record.camera_id,
+            camera_type=record.camera_type,
+            participant_id=record.participant_id,
+            room=record.room,
+            absolute_start=record.absolute_start,
+            absolute_end=record.absolute_end,
+            event_summary=record.event_summary,
+            ocr_text=record.aggregated_ocr_text,
+            linked_aux_ids=record.linked_aux_ids,
+            model_name=model_name,
+            model_revision=model_revision,
+            build_id=build_id,
+        )
+        return payload
+
+    if isinstance(record, AuxRecord):
+        record_id = record.clip_id
+        payload = QdrantPoint(
+            point_id=make_point_id(model_version, record.source_type, record_id, record.modality),
+            record_id=record_id,
+            source_type=record.source_type,
+            modality=record.modality,
+            day=record.day,
+            camera_id=record.camera_id,
+            camera_type=record.camera_type,
+            participant_id=record.participant_id,
+            room=record.room,
+            absolute_start=record.absolute_start,
+            absolute_end=record.absolute_end,
+            event_summary=record.summary_text if record.modality == "text" else None,
+            asset_path=record.asset_path,
+            model_name=model_name,
+            model_revision=model_revision,
+            build_id=build_id,
+        )
+        return payload
+
+    raise TypeError(f"Unsupported record type for Qdrant payload conversion: {type(record).__name__}")
+
+
+def build_point_batches(
+    records: List[TranscriptWindow | ClipRecord | EventSummaryRecord | AuxRecord],
+    model_version: str,
+    model_name: str | None = None,
+    model_revision: str | None = None,
+    build_id: str | None = None,
+) -> List[QdrantPoint]:
+    """Convert records to QdrantPoint payload models."""
+    return [
+        record_to_qdrant_point(
+            record,
+            model_version=model_version,
+            model_name=model_name,
+            model_revision=model_revision,
+            build_id=build_id,
+        )
+        for record in records
+    ]

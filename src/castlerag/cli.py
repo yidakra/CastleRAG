@@ -4,6 +4,7 @@ Commands: preprocess, embed, index, retrieve, answer, eval, smoke-test
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,14 @@ import typer
 from rich.console import Console
 
 from castlerag.config import CastleRAGConfig, load_config
+from castlerag.embed.omniembed import OmniEmbedClient
+from castlerag.index.pipeline import (
+    build_bm25_artifact,
+    build_qdrant_index,
+    cache_dense_embeddings,
+    filter_records,
+    load_chunk_records,
+)
 
 app = typer.Typer(
     name="castlerag",
@@ -41,6 +50,17 @@ def _resolve_config(config: Optional[Path], snellius: bool) -> CastleRAGConfig:
     elif config is not None:
         override = config
     return load_config(override_path=override)
+
+
+def _count_records(records: object) -> int:
+    return sum(
+        len(getattr(records, field))
+        for field in ("transcripts", "clips", "events", "aux")
+    )
+
+
+def _vllm_base_url() -> Optional[str]:
+    return os.getenv("VLLM_BASE_URL")
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +97,7 @@ def embed(
     snellius: bool = typer.Option(False, "--snellius"),
     modality: Optional[str] = typer.Option(
         None, "--modality",
-        help="Filter by modality: transcript | video | image | event_summary",
+        help="Filter by modality: transcript | event_summary | text | image | video",
     ),
     day: Optional[int] = typer.Option(None, "--day", min=1, max=4),
     dry_run: bool = typer.Option(False, "--dry-run"),
@@ -91,8 +111,22 @@ def embed(
     if dry_run:
         console.print("[yellow]dry-run: no embeddings written[/yellow]")
         return
-    console.print("[red]embed not yet implemented — see issue #5[/red]")
-    raise typer.Exit(1)
+    records = load_chunk_records(Path(cfg.preprocessing.chunks_dir))
+    scoped = filter_records(records, cfg, day=day)
+    if _count_records(scoped) == 0:
+        console.print("[red]No chunk records found — run preprocess first.[/red]")
+        raise typer.Exit(1)
+    embed_client = OmniEmbedClient(
+        model=cfg.embedding.model,
+        backend=cfg.embedding.backend,
+        vllm_base_url=_vllm_base_url(),
+        vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
+        vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
+    )
+    paths = cache_dense_embeddings(records, cfg, embed_client, modality=modality, day=day)
+    console.print(f"  caches  : {len(paths)} written under {cfg.embedding.cache_dir}")
+    if embed_client.dim is not None:
+        console.print(f"  dim     : {embed_client.dim}")
 
 
 @app.command()
@@ -111,8 +145,30 @@ def index(
     if dry_run:
         console.print("[yellow]dry-run: no Qdrant writes[/yellow]")
         return
-    console.print("[red]index not yet implemented — see issue #6[/red]")
-    raise typer.Exit(1)
+    records = load_chunk_records(Path(cfg.preprocessing.chunks_dir))
+    scoped = filter_records(records, cfg)
+    if _count_records(scoped) == 0:
+        console.print("[red]No chunk records found — run preprocess first.[/red]")
+        raise typer.Exit(1)
+    cache_dir = Path(cfg.embedding.cache_dir)
+    if not any(cache_dir.glob("*.npz")):
+        embed_client = OmniEmbedClient(
+            model=cfg.embedding.model,
+            backend=cfg.embedding.backend,
+            vllm_base_url=_vllm_base_url(),
+            vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
+            vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
+        )
+        cache_dense_embeddings(records, cfg, embed_client)
+    bm25_path = build_bm25_artifact(scoped, Path(cfg.embedding.cache_dir))
+    vector_size, cache_paths = build_qdrant_index(
+        cfg,
+        scoped,
+        recreate=create_collection,
+    )
+    console.print(f"  BM25    : {bm25_path}")
+    console.print(f"  dense   : {len(cache_paths)} cache bundles upserted")
+    console.print(f"  dim     : {vector_size}")
 
 
 @app.command()
