@@ -1,11 +1,12 @@
 """Offline visual summaries for chunks using the selected open-weight VL model."""
+
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import List, Optional
 
 from castlerag.preprocess.caption_ocr import _vllm_chat
-import base64
 
 
 def generate_visual_summary(
@@ -30,10 +31,12 @@ def generate_visual_summary(
     content: list = []
     for fp in sample:
         img_b64 = base64.b64encode(fp.read_bytes()).decode()
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
-        })
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+            }
+        )
 
     prompt = "Summarise what is happening in this video clip in one concise sentence."
     if transcript_text:

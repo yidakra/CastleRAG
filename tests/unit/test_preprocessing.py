@@ -1,4 +1,5 @@
-"""Tests for preprocessing modules: windows, transcripts, media, event_compress, auxiliary."""
+"""Tests for preprocessing modules and artifact contracts."""
+
 from __future__ import annotations
 
 import json
@@ -10,10 +11,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from castlerag.dataset.transcripts import load_raw_segments, merge_into_windows
-from castlerag.preprocess.event_compress import _event_summary_id, compress_clips_to_event
-from castlerag.preprocess.windows import VideoWindow, iter_windows, mark_placeholder_windows
+from castlerag.preprocess.event_compress import (
+    _event_summary_id,
+    compress_clips_to_event,
+)
+from castlerag.preprocess.windows import (
+    VideoWindow,
+    iter_windows,
+    mark_placeholder_windows,
+)
 from castlerag.schemas import ClipRecord, TranscriptSegment
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,7 +52,9 @@ def _make_clip(
 
 def _four_clips() -> List[ClipRecord]:
     base = 1_672_531_200_000
-    return [_make_clip(i, base + i * 30_000, base + i * 30_000 + 30_000) for i in range(4)]
+    return [
+        _make_clip(i, base + i * 30_000, base + i * 30_000 + 30_000) for i in range(4)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +111,11 @@ def test_iter_windows_metadata():
 
 
 def test_iter_windows_non_default_clip_seconds():
-    wins = list(iter_windows(Path("v.mp4"), "Allie", "day1", 8, 60.0,
-                              clip_seconds=15, stride_seconds=15))
+    wins = list(
+        iter_windows(
+            Path("v.mp4"), "Allie", "day1", 8, 60.0, clip_seconds=15, stride_seconds=15
+        )
+    )
     assert len(wins) == 4
     assert wins[0].end_seconds == 15.0
 
@@ -135,8 +147,8 @@ def test_mark_placeholder_windows_no_frames(tmp_path: Path):
 
 
 def test_mark_placeholder_windows_all_placeholder(tmp_path: Path):
-    from PIL import Image
     import numpy as np
+    from PIL import Image
 
     clip_dir = tmp_path / "0"
     clip_dir.mkdir(parents=True)
@@ -151,8 +163,8 @@ def test_mark_placeholder_windows_all_placeholder(tmp_path: Path):
 
 
 def test_mark_placeholder_windows_real_scene(tmp_path: Path):
-    from PIL import Image
     import numpy as np
+    from PIL import Image
 
     clip_dir = tmp_path / "0"
     clip_dir.mkdir(parents=True)
@@ -200,7 +212,9 @@ def test_merge_into_windows_splits_on_max_seconds():
     # first seg 0-14, second 14-16 → should split because adding second would exceed 15s
     segs = [_seg(0.0, 14.0, "A " * 10), _seg(14.0, 16.0, "B")]
     base = 1_672_531_200_000
-    wins = merge_into_windows(segs, base, "Allie", "ego", "Allie", None, "day1", 8, max_seconds=15.0)
+    wins = merge_into_windows(
+        segs, base, "Allie", "ego", "Allie", None, "day1", 8, max_seconds=15.0
+    )
     assert len(wins) == 2
 
 
@@ -208,7 +222,9 @@ def test_merge_into_windows_splits_on_max_chars():
     long_text = "x" * 400
     segs = [_seg(0.0, 1.0, long_text), _seg(1.0, 2.0, long_text)]
     base = 1_672_531_200_000
-    wins = merge_into_windows(segs, base, "Allie", "ego", "Allie", None, "day1", 8, max_chars=384)
+    wins = merge_into_windows(
+        segs, base, "Allie", "ego", "Allie", None, "day1", 8, max_chars=384
+    )
     assert len(wins) == 2
 
 
@@ -257,7 +273,9 @@ def test_merge_into_windows_oversized_single_segment_emitted_alone():
     """A segment that alone exceeds max_seconds must be emitted as its own window."""
     segs = [_seg(0.0, 20.0, "Big"), _seg(20.0, 25.0, "Small")]
     base = 0
-    wins = merge_into_windows(segs, base, "Allie", "ego", "Allie", None, "day1", 8, max_seconds=15.0)
+    wins = merge_into_windows(
+        segs, base, "Allie", "ego", "Allie", None, "day1", 8, max_seconds=15.0
+    )
     # oversized segment (20s > 15s) gets its own window; "Small" in a second window
     assert len(wins) == 2
     assert wins[0].transcript_text == "Big"
@@ -268,7 +286,9 @@ def test_merge_into_windows_oversized_does_not_accumulate():
     """No further text should be added to a window after a single-segment overflow."""
     segs = [_seg(0.0, 20.0, "X" * 500), _seg(20.0, 21.0, "Y")]
     base = 0
-    wins = merge_into_windows(segs, base, "Allie", "ego", "Allie", None, "day1", 8, max_chars=384)
+    wins = merge_into_windows(
+        segs, base, "Allie", "ego", "Allie", None, "day1", 8, max_chars=384
+    )
     assert len(wins) == 2
     assert "Y" not in wins[0].transcript_text
 
@@ -279,10 +299,12 @@ def test_merge_into_windows_oversized_does_not_accumulate():
 
 
 def test_load_raw_segments(tmp_path: Path):
-    data = {"chunks": [
-        {"timestamp": [0.0, 5.2], "text": "Hello"},
-        {"timestamp": [5.2, 10.0], "text": "world"},
-    ]}
+    data = {
+        "chunks": [
+            {"timestamp": [0.0, 5.2], "text": "Hello"},
+            {"timestamp": [5.2, 10.0], "text": "world"},
+        ]
+    }
     f = tmp_path / "08.json"
     f.write_text(json.dumps(data))
     segs = load_raw_segments(f)
@@ -314,6 +336,7 @@ def test_get_video_duration_calls_ffprobe():
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="120.5\n", returncode=0)
         from castlerag.preprocess.media import get_video_duration
+
         dur = get_video_duration(Path("08.mp4"))
         assert dur == pytest.approx(120.5)
         args = mock_run.call_args[0][0]
@@ -324,6 +347,7 @@ def test_extract_subclip_calls_ffmpeg(tmp_path: Path):
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
         from castlerag.preprocess.media import extract_subclip
+
         out = extract_subclip(Path("src.mp4"), tmp_path / "out.mp4", 0.0, 30.0)
         assert out == tmp_path / "out.mp4"
         args = mock_run.call_args[0][0]
@@ -346,14 +370,16 @@ def test_extract_frames_1fps_calls_ffmpeg(tmp_path: Path):
 
     with patch("subprocess.run", side_effect=fake_run):
         from castlerag.preprocess.media import extract_frames_1fps
+
         frames = extract_frames_1fps(Path("src.mp4"), tmp_path / "frames", 0.0, 30.0)
         assert len(frames) == 3
         assert all(str(f).endswith(".jpg") for f in frames)
 
 
 def test_is_placeholder_frame_uniform(tmp_path: Path):
-    from PIL import Image
     import numpy as np
+    from PIL import Image
+
     from castlerag.preprocess.media import is_placeholder_frame
 
     img = Image.fromarray(np.full((100, 100), 200, dtype=np.uint8), mode="L")
@@ -363,8 +389,9 @@ def test_is_placeholder_frame_uniform(tmp_path: Path):
 
 
 def test_is_placeholder_frame_real_scene(tmp_path: Path):
-    from PIL import Image
     import numpy as np
+    from PIL import Image
+
     from castlerag.preprocess.media import is_placeholder_frame
 
     rng = np.random.default_rng(0)
@@ -420,8 +447,7 @@ def test_compress_clips_time_span():
 def test_compress_clips_aggregates_ocr():
     base = 1_672_531_200_000
     clips = [
-        _make_clip(i, base + i * 30_000, base + i * 30_000 + 30_000)
-        for i in range(4)
+        _make_clip(i, base + i * 30_000, base + i * 30_000 + 30_000) for i in range(4)
     ]
     clips[0] = clips[0].model_copy(update={"ocr_text": "EXIT"})
     clips[2] = clips[2].model_copy(update={"ocr_text": "FIRE"})
@@ -433,8 +459,12 @@ def test_compress_clips_aggregates_ocr():
 
 def test_compress_clips_calls_vllm(tmp_path: Path):
     clips = _four_clips()
-    with patch("castlerag.preprocess.event_compress._vllm_chat", return_value="Summary text") as mock_chat:
-        evt = compress_clips_to_event(clips, "model", vllm_base_url="http://localhost:8000/v1")
+    with patch(
+        "castlerag.preprocess.event_compress._vllm_chat", return_value="Summary text"
+    ) as mock_chat:
+        evt = compress_clips_to_event(
+            clips, "model", vllm_base_url="http://localhost:8000/v1"
+        )
     assert evt.event_summary == "Summary text"
     mock_chat.assert_called_once()
 
@@ -448,7 +478,9 @@ def test_compress_clips_rejects_mixed_camera():
 
 def test_compress_clips_rejects_overlapping():
     base = 1_672_531_200_000
-    clips = [_make_clip(i, base + i * 30_000, base + i * 30_000 + 30_000) for i in range(4)]
+    clips = [
+        _make_clip(i, base + i * 30_000, base + i * 30_000 + 30_000) for i in range(4)
+    ]
     # Make clip 1 start before clip 0 ends
     clips[1] = clips[1].model_copy(update={"absolute_start": base + 5_000})
     with pytest.raises(ValueError, match="adjacent"):
@@ -457,7 +489,9 @@ def test_compress_clips_rejects_overlapping():
 
 def test_compress_clips_rejects_gapped_sequence():
     base = 1_672_531_200_000
-    clips = [_make_clip(i, base + i * 30_000, base + i * 30_000 + 30_000) for i in range(4)]
+    clips = [
+        _make_clip(i, base + i * 30_000, base + i * 30_000 + 30_000) for i in range(4)
+    ]
     clips[1] = clips[1].model_copy(
         update={"absolute_start": base + 35_000, "absolute_end": base + 65_000}
     )
@@ -472,29 +506,39 @@ def test_compress_clips_rejects_gapped_sequence():
 
 def test_annotate_clip_requires_vllm_url():
     from castlerag.preprocess.caption_ocr import annotate_clip
+
     with pytest.raises(ValueError, match="vllm_base_url"):
         annotate_clip("clip_1", [], None, "model", vllm_base_url=None)
 
 
 def test_annotate_clip_no_frames_returns_empty():
     from castlerag.preprocess.caption_ocr import annotate_clip
-    ann = annotate_clip("clip_1", [], None, "model", vllm_base_url="http://localhost:8000/v1")
+
+    ann = annotate_clip(
+        "clip_1", [], None, "model", vllm_base_url="http://localhost:8000/v1"
+    )
     assert ann.clip_caption is None
     assert ann.ocr_text is None
     assert ann.caption_confidence == 0.0
 
 
 def test_annotate_clip_calls_vllm(tmp_path: Path):
-    from PIL import Image
     import numpy as np
+    from PIL import Image
+
     from castlerag.preprocess.caption_ocr import annotate_clip
 
     # create a fake frame
     p = tmp_path / "0001.jpg"
     Image.fromarray(np.zeros((10, 10), dtype=np.uint8), mode="L").save(p)
 
-    with patch("castlerag.preprocess.caption_ocr._vllm_chat", side_effect=["Caption text", "NONE"]):
-        ann = annotate_clip("clip_1", [p], "Hello world", "model", "http://localhost:8000/v1")
+    with patch(
+        "castlerag.preprocess.caption_ocr._vllm_chat",
+        side_effect=["Caption text", "NONE"],
+    ):
+        ann = annotate_clip(
+            "clip_1", [p], "Hello world", "model", "http://localhost:8000/v1"
+        )
     assert ann.clip_caption == "Caption text"
     assert ann.ocr_text is None
 
@@ -581,8 +625,10 @@ def test_iter_aux_video_skips_ffprobe_failure(tmp_path: Path):
     video_dir.mkdir(parents=True)
     (video_dir / "2023-01-05_08-00-00_bad.mp4").touch()
 
-    with patch("castlerag.preprocess.auxiliary.get_video_duration",
-               side_effect=subprocess.CalledProcessError(1, "ffprobe")):
+    with patch(
+        "castlerag.preprocess.auxiliary.get_video_duration",
+        side_effect=subprocess.CalledProcessError(1, "ffprobe"),
+    ):
         records = list(iter_aux_video_records(tmp_path, "Allie", "day1"))
     assert records == []
 
@@ -597,7 +643,9 @@ def test_iter_aux_video_rewindowed_unique_clip_ids(tmp_path: Path):
     with patch("castlerag.preprocess.auxiliary.get_video_duration", return_value=90.0):
         records = list(iter_aux_video_records(tmp_path, "Allie", "day1"))
     clip_ids = [r.clip_id for r in records]
-    assert len(clip_ids) == len(set(clip_ids)), "re-windowed clips must have unique clip_ids"
+    assert len(clip_ids) == len(set(clip_ids)), (
+        "re-windowed clips must have unique clip_ids"
+    )
 
 
 def test_iter_aux_video_skips_missing_timestamp_hint(tmp_path: Path):

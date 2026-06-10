@@ -1,11 +1,9 @@
 """Tests for src/castlerag/dataset/manifest.py"""
-from pathlib import Path
 
-import pytest
+from pathlib import Path
 
 from castlerag.dataset.manifest import (
     AuxAssetRow,
-    MainHourRow,
     _extract_timestamp_hint,
     _participant_from_stem,
     discover_aux_manifest,
@@ -101,8 +99,12 @@ def test_discover_main_manifest_ego_scope_only(tmp_path: Path):
     for cam in ("Allie", "Kitchen"):
         _make_video(tmp_path, "day1", cam, 8)
     rows = discover_main_manifest(
-        tmp_path, ego_cameras=["Allie"], exo_cameras=["Kitchen"],
-        days=[1], hours=[8], camera_scope="ego",
+        tmp_path,
+        ego_cameras=["Allie"],
+        exo_cameras=["Kitchen"],
+        days=[1],
+        hours=[8],
+        camera_scope="ego",
     )
     camera_ids = {r.camera_id for r in rows}
     assert "Allie" in camera_ids
@@ -113,8 +115,12 @@ def test_discover_main_manifest_all_scope_includes_exo(tmp_path: Path):
     for cam in ("Allie", "Kitchen"):
         _make_video(tmp_path, "day1", cam, 8)
     rows = discover_main_manifest(
-        tmp_path, ego_cameras=["Allie"], exo_cameras=["Kitchen"],
-        days=[1], hours=[8], camera_scope="all",
+        tmp_path,
+        ego_cameras=["Allie"],
+        exo_cameras=["Kitchen"],
+        days=[1],
+        hours=[8],
+        camera_scope="all",
     )
     camera_ids = {r.camera_id for r in rows}
     assert "Kitchen" in camera_ids
@@ -123,8 +129,12 @@ def test_discover_main_manifest_all_scope_includes_exo(tmp_path: Path):
 def test_discover_main_manifest_fixed_camera_metadata(tmp_path: Path):
     _make_video(tmp_path, "day2", "Kitchen", 12)
     rows = discover_main_manifest(
-        tmp_path, ego_cameras=[], exo_cameras=["Kitchen"],
-        days=[2], hours=[12], camera_scope="all",
+        tmp_path,
+        ego_cameras=[],
+        exo_cameras=["Kitchen"],
+        days=[2],
+        hours=[12],
+        camera_scope="all",
     )
     assert rows[0].camera_type == "fixed"
     assert rows[0].participant_id is None
@@ -138,7 +148,9 @@ def test_discover_main_manifest_metadata_dir(tmp_path: Path):
 
 def test_discover_main_manifest_version_field(tmp_path: Path):
     _make_video(tmp_path, "day1", "Allie", 8)
-    rows = discover_main_manifest(tmp_path, EGO, EXO, days=[1], hours=[8], version="1.2.3")
+    rows = discover_main_manifest(
+        tmp_path, EGO, EXO, days=[1], hours=[8], version="1.2.3"
+    )
     assert rows[0].version == "1.2.3"
 
 
@@ -301,9 +313,7 @@ def test_write_read_aux_manifest_roundtrip(tmp_path: Path):
 
 
 def test_write_manifest_creates_parent_dirs(tmp_path: Path):
-    row = AuxAssetRow(
-        source_type="aux_thermal", participant_id=None, path="/aux/t.bmp"
-    )
+    row = AuxAssetRow(source_type="aux_thermal", participant_id=None, path="/aux/t.bmp")
     out = tmp_path / "deep" / "nested" / "dir" / "aux.jsonl"
     write_manifest([row], out)
     assert out.exists()

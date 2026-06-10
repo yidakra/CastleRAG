@@ -1,4 +1,5 @@
 """Pydantic config models and YAML loader for CastleRAG."""
+
 from __future__ import annotations
 
 import os
@@ -14,14 +15,30 @@ class DatasetConfig(BaseModel):
     hf_repo: str = "castle-challenge/castle2024"
     days: List[int] = Field(default=[1, 2, 3, 4])
     # 10 egocentric participant cameras (TAHAKOM-validated baseline scope)
-    ego_cameras: List[str] = Field(default=[
-        "Allie", "Bjorn", "Celine", "Deon", "Estella",
-        "Finn", "Greta", "Harvey", "Isla", "Jian",
-    ])
+    ego_cameras: List[str] = Field(
+        default=[
+            "Allie",
+            "Bjorn",
+            "Celine",
+            "Deon",
+            "Estella",
+            "Finn",
+            "Greta",
+            "Harvey",
+            "Isla",
+            "Jian",
+        ]
+    )
     # 5 fixed room cameras — extension only, not in baseline
-    exo_cameras: List[str] = Field(default=[
-        "Kitchen", "Living1", "Living2", "Office", "Hallway",
-    ])
+    exo_cameras: List[str] = Field(
+        default=[
+            "Kitchen",
+            "Living1",
+            "Living2",
+            "Office",
+            "Hallway",
+        ]
+    )
     camera_scope: Literal["ego", "all"] = "ego"
     hours: List[int] = Field(default=list(range(8, 21)))
 

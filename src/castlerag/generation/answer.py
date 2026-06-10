@@ -16,13 +16,14 @@ Citation format:
 
 Final answer extraction regex: FINAL_ANSWER:\\s*([abcd])
 """
+
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from castlerag.schemas import AnswerChoice, EvalQuestion, Prediction, RetrievalHit
 from castlerag.routing.question_router import RouteHints
+from castlerag.schemas import AnswerChoice, EvalQuestion, Prediction, RetrievalHit
 
 _FINAL_ANSWER_RE = re.compile(r"FINAL_ANSWER:\s*([abcd])", re.IGNORECASE)
 
@@ -32,14 +33,16 @@ _ROUTE_PROMPT_BLOCKS: Dict[str, str] = {
     ),
     "speech_text": (
         "Prioritise transcript windows and exact spoken content. "
-        "Use video evidence only to disambiguate speakers, locations, or visible objects."
+        "Use video evidence only to disambiguate speakers, locations, or "
+        "visible objects."
     ),
     "temporal": (
         "Reconstruct order using timestamps and neighbouring evidence. "
         "Sample frames from candidate videos to verify before/after/while relations."
     ),
     "mixed": (
-        "Require agreement between transcript and visual evidence before preferring an option."
+        "Require agreement between transcript and visual evidence before "
+        "preferring an option."
     ),
 }
 
@@ -58,7 +61,8 @@ or [aux={{source_type}} id={{record_id}}].
     no_echo: do not repeat prompt text, answer options, or route hints as evidence.
     abstain: if no evidence supports a claim, say so; still choose the least \
 unsupported option and mark low-confidence.
-    localise: every count, object-location, or spatial claim must cite camera + timestamp.
+    localise: every count, object-location, or spatial claim must cite camera
+    + timestamp.
     ground: confidence must come from retrieved evidence, not world knowledge.
 - End with exactly one line: FINAL_ANSWER: a|b|c|d
 
@@ -94,7 +98,7 @@ def build_prompt(
 ) -> str:
     rows = evidence_rows[:max_evidence_rows]
     evidence_text = "\n\n".join(
-        f"[{i+1}] {_format_evidence_row(r)}" for i, r in enumerate(rows)
+        f"[{i + 1}] {_format_evidence_row(r)}" for i, r in enumerate(rows)
     )
     support_summary = "  ".join(
         f"{k.upper()}: {v:.2f}" for k, v in sorted(support_priors.items())

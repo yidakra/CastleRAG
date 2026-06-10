@@ -1,4 +1,5 @@
 """Tests for src/castlerag/schemas.py"""
+
 import pytest
 
 from castlerag.schemas import (
@@ -9,7 +10,6 @@ from castlerag.schemas import (
     Prediction,
     QdrantPoint,
     RerankerOutput,
-    RetrievalHit,
     TranscriptSegment,
     TranscriptWindow,
 )

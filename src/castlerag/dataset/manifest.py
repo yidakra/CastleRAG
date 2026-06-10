@@ -11,6 +11,7 @@ Manifests are written as JSONL (one JSON object per line), versioned via the
 `version` field on each row.  The output is deterministic given a fixed dataset
 root: paths are sorted before iteration and rows carry no wall-clock timestamps.
 """
+
 from __future__ import annotations
 
 import re
@@ -19,13 +20,13 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
-from castlerag.schemas import AuxSourceType, CameraType
 from castlerag.dataset.layout import (
     build_camera_registry,
     hour_transcript_path,
     hour_video_path,
     is_novideo,
 )
+from castlerag.schemas import AuxSourceType, CameraType
 
 # ---------------------------------------------------------------------------
 # Manifest row models
@@ -36,6 +37,7 @@ _MANIFEST_VERSION = "0.1.0"
 
 class MainHourRow(BaseModel):
     """One row in the main-hour manifest."""
+
     day: str
     camera_id: str
     camera_type: CameraType
@@ -50,6 +52,7 @@ class MainHourRow(BaseModel):
 
 class AuxAssetRow(BaseModel):
     """One row in the auxiliary-asset manifest."""
+
     source_type: AuxSourceType
     participant_id: Optional[str]
     path: str
@@ -133,18 +136,20 @@ def discover_main_manifest(
                     continue
                 tx_path = hour_transcript_path(root, day_str, camera_id, hour)
                 meta_dir = root / "main" / day_str / camera_id / "metadata"
-                rows.append(MainHourRow(
-                    day=day_str,
-                    camera_id=camera_id,
-                    camera_type=cam.camera_type,
-                    participant_id=cam.participant_id,
-                    hour=hour,
-                    video_path=str(video_path),
-                    transcript_path=str(tx_path) if tx_path.exists() else None,
-                    metadata_dir=str(meta_dir),
-                    missing_video=novideo,
-                    version=version,
-                ))
+                rows.append(
+                    MainHourRow(
+                        day=day_str,
+                        camera_id=camera_id,
+                        camera_type=cam.camera_type,
+                        participant_id=cam.participant_id,
+                        hour=hour,
+                        video_path=str(video_path),
+                        transcript_path=str(tx_path) if tx_path.exists() else None,
+                        metadata_dir=str(meta_dir),
+                        missing_video=novideo,
+                        version=version,
+                    )
+                )
     return rows
 
 
@@ -177,13 +182,15 @@ def discover_aux_manifest(
     rows: List[AuxAssetRow] = []
 
     def _add(source_type: AuxSourceType, participant: Optional[str], f: Path) -> None:
-        rows.append(AuxAssetRow(
-            source_type=source_type,
-            participant_id=participant,
-            path=str(f),
-            timestamp_hint=_extract_timestamp_hint(f),
-            version=version,
-        ))
+        rows.append(
+            AuxAssetRow(
+                source_type=source_type,
+                participant_id=participant,
+                path=str(f),
+                timestamp_hint=_extract_timestamp_hint(f),
+                version=version,
+            )
+        )
 
     # heartrate/{participant}/{files}
     hr_root = aux_root / "heartrate"

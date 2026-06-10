@@ -8,14 +8,14 @@ Scoring formula (SPEC §5.4):
   Discard if keep=False or relevance <= 1.
   Retain top 4 candidate packs globally.
 """
+
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Dict, List
 
-from castlerag.schemas import EvalQuestion, RerankerOutput, RetrievalHit
 from castlerag.routing.question_router import RouteHints
+from castlerag.schemas import EvalQuestion, RerankerOutput, RetrievalHit
 
 _RERANKER_PROMPT_TEMPLATE = """\
 You are ranking a route-specific evidence pack for a multiple-choice CASTLE question.

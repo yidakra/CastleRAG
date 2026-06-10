@@ -5,6 +5,7 @@ This module handles:
 - persisting cached embedding matrices to disk
 - loading cached embedding matrices back for Qdrant upsert
 """
+
 from __future__ import annotations
 
 import json
@@ -14,7 +15,12 @@ from typing import Iterable, List, Sequence, TypeVar
 import numpy as np
 from pydantic import BaseModel
 
-from castlerag.schemas import AuxRecord, ClipRecord, EventSummaryRecord, TranscriptWindow
+from castlerag.schemas import (
+    AuxRecord,
+    ClipRecord,
+    EventSummaryRecord,
+    TranscriptWindow,
+)
 
 RecordT = TypeVar("RecordT", bound=BaseModel)
 
@@ -70,7 +76,8 @@ def write_embedding_cache(
         raise ValueError(f"vectors must be 2D, got shape {vectors.shape}")
     if len(record_ids) != vectors.shape[0]:
         raise ValueError(
-            f"record_ids length ({len(record_ids)}) must match vectors rows ({vectors.shape[0]})"
+            "record_ids length "
+            f"({len(record_ids)}) must match vectors rows ({vectors.shape[0]})"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(

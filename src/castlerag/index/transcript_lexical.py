@@ -6,6 +6,7 @@ temporal markers.
 
 See retrieval/transcript_lexical.py for query-time scoring with bonuses.
 """
+
 from __future__ import annotations
 
 import pickle
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any, List
 
 from rank_bm25 import BM25Okapi
+
 from castlerag.schemas import TranscriptWindow
 
 
@@ -66,10 +68,7 @@ def load_bm25_index(index_path: Path) -> Any:
     with index_path.open("rb") as fh:
         payload = pickle.load(fh)
 
-    windows = [
-        TranscriptWindow.model_validate(window)
-        for window in payload["windows"]
-    ]
+    windows = [TranscriptWindow.model_validate(window) for window in payload["windows"]]
     tokenized_corpus = payload["tokenized_corpus"]
     bm25 = BM25Okapi(tokenized_corpus)
     return BM25IndexBundle(

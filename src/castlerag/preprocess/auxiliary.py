@@ -1,4 +1,5 @@
 """Normalization of auxiliary modalities: heartrate, gaze, photo, thermal, aux video."""
+
 from __future__ import annotations
 
 import hashlib
@@ -69,14 +70,18 @@ def iter_heartrate_records(
     summary_text rendered as:
       "Heartrate for {participant} at {day} {HH:MM}-{HH:MM}: mean {bpm} bpm, ..."
     """
-    raise NotImplementedError("Implemented after auxiliary timestamp validation (SPEC §9.4)")
+    raise NotImplementedError(
+        "Implemented after auxiliary timestamp validation (SPEC §9.4)"
+    )
 
 
 def iter_gaze_records(
     aux_root: Path, participant: str, day: str, version: str = "0.1.0"
 ) -> Iterator[AuxRecord]:
     """Yield 10-second gaze summary records for intervals with data rows."""
-    raise NotImplementedError("Implemented after gaze column semantics are validated (SPEC §9.4)")
+    raise NotImplementedError(
+        "Implemented after gaze column semantics are validated (SPEC §9.4)"
+    )
 
 
 def iter_photo_records(
@@ -168,7 +173,9 @@ def iter_aux_video_records(
             continue
         base_unix_ms = _parse_hint_to_ms(ts_hint)
         if base_unix_ms <= 0:
-            log.warning("Skipping aux video %s: could not parse timestamp hint %r", f, ts_hint)
+            log.warning(
+                "Skipping aux video %s: could not parse timestamp hint %r", f, ts_hint
+            )
             continue
         try:
             duration = get_video_duration(f)
@@ -226,6 +233,7 @@ def _exif_unix_ms(path: Path) -> Optional[int]:
         if not dto:
             return None
         from datetime import datetime, timezone
+
         dt = datetime.strptime(str(dto), "%Y:%m:%d %H:%M:%S").replace(
             tzinfo=timezone.utc
         )
@@ -244,7 +252,11 @@ def _parse_hint_to_ms(hint: str) -> int:
     from datetime import datetime, timezone
 
     patterns = [
-        (r"(\d{4})[_-](\d{2})[_-](\d{2})[T_-](\d{2})[_:-](\d{2})[_:-](\d{2})", "%Y%m%d%H%M%S", 6),
+        (
+            r"(\d{4})[_-](\d{2})[_-](\d{2})[T_-](\d{2})[_:-](\d{2})[_:-](\d{2})",
+            "%Y%m%d%H%M%S",
+            6,
+        ),
         (r"(\d{4})(\d{2})(\d{2})[T_](\d{2})(\d{2})(\d{2})", "%Y%m%d%H%M%S", 6),
         (r"(\d{4})[_-](\d{2})[_-](\d{2})", "%Y%m%d", 3),
     ]

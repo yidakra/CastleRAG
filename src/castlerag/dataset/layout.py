@@ -9,6 +9,7 @@ Camera types:
   ego   — participant-worn camera; camera_id == participant_id
   fixed — room-mounted camera; participant_id is None
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,9 +20,9 @@ from typing import Dict, Iterator, List, Optional
 @dataclass(frozen=True)
 class CameraInfo:
     camera_id: str
-    camera_type: str        # "ego" | "fixed"
+    camera_type: str  # "ego" | "fixed"
     participant_id: Optional[str]  # None for fixed cameras
-    room: Optional[str]            # None for ego cameras
+    room: Optional[str]  # None for ego cameras
 
 
 def build_camera_registry(
@@ -142,7 +143,9 @@ def discover_hours(
                             hour=hour,
                             video_path=video_path,
                             transcript_path=tx_path if tx_path.exists() else None,
-                            metadata_paths=hour_metadata_paths(root, day_str, camera_id, hour),
+                            metadata_paths=hour_metadata_paths(
+                                root, day_str, camera_id, hour
+                            ),
                             missing_video=True,
                         )
                     continue

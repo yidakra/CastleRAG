@@ -6,6 +6,7 @@ See SPEC §9.1 and config.lora.enabled.
 Target: answer-format alignment only (emit 'a'|'b'|'c'|'d', not long explanations).
 Eval metric: exact-match accuracy on a held-out validation split.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -43,4 +44,6 @@ def train_lora(
             "LoRA training is blocked: no CASTLE QA train/val split found. "
             "Locate the official split before enabling lora.enabled in config."
         )
-    raise NotImplementedError("Implemented only after QA split is confirmed (SPEC §9.1)")
+    raise NotImplementedError(
+        "Implemented only after QA split is confirmed (SPEC §9.1)"
+    )

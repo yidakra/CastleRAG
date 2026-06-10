@@ -5,6 +5,7 @@ Official format:
 
 Timestamps are relative to the enclosing hour file (e.g. 08.json → 08:00 base).
 """
+
 from __future__ import annotations
 
 import json
@@ -28,11 +29,13 @@ def load_raw_segments(path: Path) -> List[TranscriptSegment]:
                 f"Malformed timestamp in chunk {i} of {path}: "
                 f"expected [start, end], got {ts!r}"
             )
-        segments.append(TranscriptSegment(
-            start=float(ts[0]),
-            end=float(ts[1]),
-            text=chunk.get("text", "").strip(),
-        ))
+        segments.append(
+            TranscriptSegment(
+                start=float(ts[0]),
+                end=float(ts[1]),
+                text=chunk.get("text", "").strip(),
+            )
+        )
     return segments
 
 
@@ -49,7 +52,7 @@ def merge_into_windows(
     max_chars: int = 96 * 4,  # approx token→char factor
     version: str = "0.1.0",
 ) -> List[TranscriptWindow]:
-    """Merge adjacent ASR segments into utterance windows (≤15 s, ≤96 token-equiv chars).
+    """Merge adjacent ASR segments into utterance windows.
 
     Returns transcript windows with absolute UTC millisecond timestamps.
     Each window carries its raw constituent segments for downstream BM25 and
@@ -72,25 +75,25 @@ def merge_into_windows(
         abs_end = base_unix_ms + int(bucket_end * 1000)
         if abs_end <= abs_start:
             abs_end = abs_start + 1
-        win_id = (
-            f"{day}_{camera_id}_{hour:02d}_{int(bucket_start * 1000):010d}"  # type: ignore[operator]
+        win_id = f"{day}_{camera_id}_{hour:02d}_{int(bucket_start * 1000):010d}"  # type: ignore[operator]
+        windows.append(
+            TranscriptWindow(
+                transcript_window_id=win_id,
+                day=day,
+                camera_id=camera_id,
+                camera_type=camera_type,  # type: ignore[arg-type]
+                participant_id=participant_id,
+                room=room,
+                hour=hour,
+                transcript_text=text,
+                transcript_segments=list(bucket_segs),
+                has_speech=bool(text),
+                transcript_char_len=len(text),
+                absolute_start=abs_start,
+                absolute_end=abs_end,
+                version=version,
+            )
         )
-        windows.append(TranscriptWindow(
-            transcript_window_id=win_id,
-            day=day,
-            camera_id=camera_id,
-            camera_type=camera_type,  # type: ignore[arg-type]
-            participant_id=participant_id,
-            room=room,
-            hour=hour,
-            transcript_text=text,
-            transcript_segments=list(bucket_segs),
-            has_speech=bool(text),
-            transcript_char_len=len(text),
-            absolute_start=abs_start,
-            absolute_end=abs_end,
-            version=version,
-        ))
         bucket_segs = []
         bucket_start = None
         bucket_end = 0.0

@@ -3,6 +3,7 @@
 One event-summary block covers 2 minutes (4 × 30 s clips).
 The compression model must be a local open-weight summarizer (no hosted API).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -38,7 +39,11 @@ def compress_clips_to_event(
     # Validate all clips share the same identity fields
     for c in clips_sorted[1:]:
         if (c.day, c.camera_id, c.camera_type, c.participant_id, c.room) != (
-            first.day, first.camera_id, first.camera_type, first.participant_id, first.room
+            first.day,
+            first.camera_id,
+            first.camera_type,
+            first.participant_id,
+            first.room,
         ):
             raise ValueError(
                 f"All clips must share the same (day, camera_id, camera_type, "
@@ -50,15 +55,14 @@ def compress_clips_to_event(
         if curr.absolute_start != prev.absolute_end:
             raise ValueError(
                 f"Clips must be adjacent; {prev.clip_id!r} ends at "
-                f"{prev.absolute_end} but {curr.clip_id!r} starts at {curr.absolute_start}"
+                f"{prev.absolute_end} but {curr.clip_id!r} starts at "
+                f"{curr.absolute_start}"
             )
 
     member_clip_ids = [c.clip_id for c in clips_sorted]
     abs_start = clips_sorted[0].absolute_start
     abs_end = clips_sorted[-1].absolute_end
-    aggregated_ocr = " ".join(
-        c.ocr_text for c in clips_sorted if c.ocr_text
-    ) or None
+    aggregated_ocr = " ".join(c.ocr_text for c in clips_sorted if c.ocr_text) or None
 
     event_summary_text: Optional[str] = None
     if vllm_base_url:
@@ -67,7 +71,8 @@ def compress_clips_to_event(
             for i, c in enumerate(clips_sorted)
         )
         prompt = (
-            "You are summarising a 2-minute egocentric video segment from the CASTLE dataset.\n\n"
+            "You are summarising a 2-minute egocentric video segment from "
+            "the CASTLE dataset.\n\n"
             f"Clip notes:\n{clip_notes}\n\n"
             "Write a 3–5 sentence event summary describing what happened during this "
             "2-minute period. Focus on people, objects, actions, and locations."

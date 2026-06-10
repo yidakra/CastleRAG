@@ -1,4 +1,5 @@
 """Loaders for official CASTLE questions, local answer keys, and submission export."""
+
 from __future__ import annotations
 
 import json
@@ -13,7 +14,10 @@ def load_questions(path: Path) -> Dict[str, EvalQuestion]:
 
     Expected format:
       {
-        "2026_q1": {"query": "...", "answers": {"a": ..., "b": ..., "c": ..., "d": ...}},
+        "2026_q1": {
+          "query": "...",
+          "answers": {"a": ..., "b": ..., "c": ..., "d": ...},
+        },
         ...
       }
     """
@@ -76,5 +80,7 @@ def compute_accuracy(
 
 def export_submission(predictions: Dict[str, Prediction], out_path: Path) -> None:
     """Write submission JSON in the official format: {question_id: answer}."""
-    submission = {qid: pred.predicted_answer for qid, pred in sorted(predictions.items())}
+    submission = {
+        qid: pred.predicted_answer for qid, pred in sorted(predictions.items())
+    }
     out_path.write_text(json.dumps(submission, indent=2))

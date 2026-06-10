@@ -4,6 +4,7 @@ Preservation rule (SPEC §2.3):
   - keep source resolution (3840x2160) on disk
   - resize only at model-input time (never here)
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -17,9 +18,13 @@ def get_video_duration(source_path: Path) -> float:
     """Return video duration in seconds using ffprobe."""
     result = subprocess.run(
         [
-            "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             str(source_path),
         ],
         capture_output=True,
@@ -48,12 +53,18 @@ def extract_frames_1fps(
     duration = end_seconds - start_seconds
     subprocess.run(
         [
-            "ffmpeg", "-y",
-            "-ss", str(start_seconds),
-            "-i", str(source_path),
-            "-t", str(duration),
-            "-vf", f"fps={fps}",
-            "-q:v", "2",
+            "ffmpeg",
+            "-y",
+            "-ss",
+            str(start_seconds),
+            "-i",
+            str(source_path),
+            "-t",
+            str(duration),
+            "-vf",
+            f"fps={fps}",
+            "-q:v",
+            "2",
             str(out_dir / "%04d.jpg"),
         ],
         capture_output=True,
@@ -80,15 +91,24 @@ def extract_subclip(
     duration = end_seconds - start_seconds
     subprocess.run(
         [
-            "ffmpeg", "-y",
-            "-i", str(source_path),
-            "-ss", str(start_seconds),
-            "-t", str(duration),
-            "-reset_timestamps", "1",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "18",
-            "-c:a", "aac",
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(source_path),
+            "-ss",
+            str(start_seconds),
+            "-t",
+            str(duration),
+            "-reset_timestamps",
+            "1",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "18",
+            "-c:a",
+            "aac",
             str(out_path),
         ],
         capture_output=True,
@@ -106,8 +126,8 @@ def is_placeholder_frame(frame_path: Path) -> bool:
     heuristic; real scene frames consistently exceed 20.  This threshold can
     be tightened once the exact test-card image is available from the dataset.
     """
-    from PIL import Image
     import numpy as np
+    from PIL import Image
 
     with Image.open(frame_path) as img:
         arr = np.array(img.convert("L"), dtype=np.float32)

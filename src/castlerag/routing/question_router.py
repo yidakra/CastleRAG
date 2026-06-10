@@ -1,4 +1,5 @@
 """Question router: extract hints and assign exactly one route."""
+
 from __future__ import annotations
 
 import re
@@ -8,8 +9,16 @@ from typing import List, Optional
 from castlerag.schemas import QuestionRoute
 
 _PARTICIPANTS = (
-    "Allie", "Bjorn", "Celine", "Deon", "Estella",
-    "Finn", "Greta", "Harvey", "Isla", "Jian",
+    "Allie",
+    "Bjorn",
+    "Celine",
+    "Deon",
+    "Estella",
+    "Finn",
+    "Greta",
+    "Harvey",
+    "Isla",
+    "Jian",
 )
 _ROOM_PATTERNS = {
     "kitchen": "Kitchen",
@@ -19,20 +28,67 @@ _ROOM_PATTERNS = {
     "living1": "Living1",
     "living2": "Living2",
 }
-_TEMPORAL_KEYWORDS = frozenset([
-    "before", "after", "while", "during", "then", "when", "next",
-    "previously", "later", "first", "last", "finally", "once",
-])
-_SPEECH_KEYWORDS = frozenset([
-    "say", "said", "tell", "told", "ask", "asked", "speak", "spoken",
-    "conversation", "transcript", "announce", "called", "call", "word",
-    "words", "hear", "heard",
-])
-_VISUAL_KEYWORDS = frozenset([
-    "wearing", "visible", "look", "see", "shown", "screen", "text",
-    "logo", "object", "holding", "brand", "count", "color", "colour",
-    "where", "which room", "what is on", "photo", "thermal",
-])
+_TEMPORAL_KEYWORDS = frozenset(
+    [
+        "before",
+        "after",
+        "while",
+        "during",
+        "then",
+        "when",
+        "next",
+        "previously",
+        "later",
+        "first",
+        "last",
+        "finally",
+        "once",
+    ]
+)
+_SPEECH_KEYWORDS = frozenset(
+    [
+        "say",
+        "said",
+        "tell",
+        "told",
+        "ask",
+        "asked",
+        "speak",
+        "spoken",
+        "conversation",
+        "transcript",
+        "announce",
+        "called",
+        "call",
+        "word",
+        "words",
+        "hear",
+        "heard",
+    ]
+)
+_VISUAL_KEYWORDS = frozenset(
+    [
+        "wearing",
+        "visible",
+        "look",
+        "see",
+        "shown",
+        "screen",
+        "text",
+        "logo",
+        "object",
+        "holding",
+        "brand",
+        "count",
+        "color",
+        "colour",
+        "where",
+        "which room",
+        "what is on",
+        "photo",
+        "thermal",
+    ]
+)
 
 
 @dataclass

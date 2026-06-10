@@ -1,4 +1,5 @@
 """Tests for src/castlerag/generation/answer.py (pure logic, no LLM calls)."""
+
 import pytest
 
 from castlerag.generation.answer import (
@@ -95,8 +96,9 @@ def test_build_prompt_truncates_evidence():
 def test_parse_reranker_response_with_preamble():
     """parse_reranker_response must skip extra text before the JSON object."""
     from castlerag.rerank.llm_reranker import parse_reranker_response
+
     raw = (
-        'Sure, here is my assessment:\n'
+        "Sure, here is my assessment:\n"
         '{"relevance": 3, "support": {"a": 2, "b": 1, "c": 0, "d": 3}, '
         '"keep": true, "rationale": "Strong match"}\nDone.'
     )
@@ -108,8 +110,9 @@ def test_parse_reranker_response_with_preamble():
 def test_parse_reranker_response_with_extra_braces():
     """Should not over-capture when the model emits extra {} in preamble."""
     from castlerag.rerank.llm_reranker import parse_reranker_response
+
     raw = (
-        'Context: {} not relevant.\n'
+        "Context: {} not relevant.\n"
         '{"relevance": 2, "support": {"a": 1, "b": 2, "c": 0, "d": 0}, '
         '"keep": true, "rationale": "Moderate"}'
     )
@@ -119,6 +122,7 @@ def test_parse_reranker_response_with_extra_braces():
 
 def test_parse_reranker_response_no_json_raises():
     from castlerag.rerank.llm_reranker import parse_reranker_response
+
     with pytest.raises(ValueError, match="No valid"):
         parse_reranker_response("No JSON here at all.")
 

@@ -1,4 +1,5 @@
 """Artifact discovery and dense-index build orchestration for issue #5."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,9 +20,18 @@ from castlerag.index.io import (
     write_embedding_cache,
     write_json,
 )
-from castlerag.index.qdrant import bootstrap_collection, build_point_batches, upsert_batch
+from castlerag.index.qdrant import (
+    bootstrap_collection,
+    build_point_batches,
+    upsert_batch,
+)
 from castlerag.index.transcript_lexical import build_bm25_index
-from castlerag.schemas import AuxRecord, ClipRecord, EventSummaryRecord, TranscriptWindow
+from castlerag.schemas import (
+    AuxRecord,
+    ClipRecord,
+    EventSummaryRecord,
+    TranscriptWindow,
+)
 
 Record = TranscriptWindow | ClipRecord | EventSummaryRecord | AuxRecord
 
@@ -83,9 +93,13 @@ def discover_chunk_artifacts(chunks_dir: Path) -> ChunkArtifacts:
 def load_chunk_records(chunks_dir: Path) -> LoadedArtifacts:
     """Load all discovered chunk artifacts into typed record lists."""
     artifacts = discover_chunk_artifacts(chunks_dir)
-    transcripts = [row for path in artifacts.transcripts for row in load_transcript_windows(path)]
+    transcripts = [
+        row for path in artifacts.transcripts for row in load_transcript_windows(path)
+    ]
     clips = [row for path in artifacts.clips for row in load_clip_records(path)]
-    events = [row for path in artifacts.events for row in load_event_summary_records(path)]
+    events = [
+        row for path in artifacts.events for row in load_event_summary_records(path)
+    ]
     aux = [row for path in artifacts.aux for row in load_aux_records(path)]
     return LoadedArtifacts(transcripts=transcripts, clips=clips, events=events, aux=aux)
 
@@ -109,22 +123,26 @@ def filter_records(
 
     return LoadedArtifacts(
         transcripts=[
-            row for row in records.transcripts
+            row
+            for row in records.transcripts
             if (day_label is None or row.day == day_label)
             and _camera_allowed(row.camera_id, row.camera_type)
         ],
         clips=[
-            row for row in records.clips
+            row
+            for row in records.clips
             if (day_label is None or row.day == day_label)
             and _camera_allowed(row.camera_id, row.camera_type)
         ],
         events=[
-            row for row in records.events
+            row
+            for row in records.events
             if (day_label is None or row.day == day_label)
             and _camera_allowed(row.camera_id, row.camera_type)
         ],
         aux=[
-            row for row in records.aux
+            row
+            for row in records.aux
             if (day_label is None or row.day == day_label)
             and _camera_allowed(row.camera_id, row.camera_type)
         ],
@@ -197,7 +215,9 @@ def cache_dense_embeddings(
             )
         )
         aux_video_records = [
-            row for row in scoped.aux if row.modality == "video" and _aux_video_frames(row)
+            row
+            for row in scoped.aux
+            if row.modality == "video" and _aux_video_frames(row)
         ]
         cache_paths.append(
             _cache_records(
@@ -265,7 +285,9 @@ def load_dense_caches(cache_dir: Path, records: LoadedArtifacts) -> List[CacheAr
     cache_paths = sorted(cache_dir.glob("*.npz"))
     for path in cache_paths:
         record_ids, vectors = load_embedding_cache(path)
-        typed_records = [index[record_id] for record_id in record_ids if record_id in index]
+        typed_records = [
+            index[record_id] for record_id in record_ids if record_id in index
+        ]
         if len(typed_records) != len(record_ids):
             missing = [record_id for record_id in record_ids if record_id not in index]
             raise KeyError(f"Missing records for cached ids in {path}: {missing[:5]}")
@@ -346,7 +368,8 @@ def _cache_records(
     vectors = _batched_embed(embed_fn, payloads, batch_size)
     if len(record_ids) != vectors.shape[0]:
         raise ValueError(
-            f"{name} cache size mismatch: record_ids={len(record_ids)} vectors={vectors.shape[0]}"
+            f"{name} cache size mismatch: "
+            f"record_ids={len(record_ids)} vectors={vectors.shape[0]}"
         )
     return write_embedding_cache(record_ids, vectors, cache_path)
 
@@ -361,7 +384,7 @@ def _batched_embed(
         return np.zeros((0, 0), dtype=np.float32)
     batches: List[np.ndarray] = []
     for start in range(0, len(payloads), batch_size):
-        batch = list(payloads[start:start + batch_size])
+        batch = list(payloads[start : start + batch_size])
         vectors = np.asarray(embed_fn(batch), dtype=np.float32)
         if vectors.ndim != 2:
             raise ValueError(f"Embedding batch must be 2D, got shape {vectors.shape}")

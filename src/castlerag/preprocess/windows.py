@@ -8,6 +8,7 @@ Policy (fixed by spec):
 Placeholder detection:
   skip windows where >80% of sampled frames match the CASTLE test-card.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,7 +21,7 @@ class VideoWindow:
     camera_id: str
     day: str
     hour: int
-    clip_index: int       # 0-based within the hour
+    clip_index: int  # 0-based within the hour
     start_seconds: float
     end_seconds: float
     source_video_path: Path
@@ -91,14 +92,16 @@ def mark_placeholder_windows(
             continue
         n_placeholder = sum(1 for f in frames if is_placeholder_frame(f))
         frac = n_placeholder / len(frames)
-        result.append(VideoWindow(
-            camera_id=w.camera_id,
-            day=w.day,
-            hour=w.hour,
-            clip_index=w.clip_index,
-            start_seconds=w.start_seconds,
-            end_seconds=w.end_seconds,
-            source_video_path=w.source_video_path,
-            is_placeholder=frac > placeholder_threshold,
-        ))
+        result.append(
+            VideoWindow(
+                camera_id=w.camera_id,
+                day=w.day,
+                hour=w.hour,
+                clip_index=w.clip_index,
+                start_seconds=w.start_seconds,
+                end_seconds=w.end_seconds,
+                source_video_path=w.source_video_path,
+                is_placeholder=frac > placeholder_threshold,
+            )
+        )
     return result

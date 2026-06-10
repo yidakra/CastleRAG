@@ -2,6 +2,7 @@
 
 Commands: preprocess, embed, index, retrieve, answer, eval, smoke-test
 """
+
 from __future__ import annotations
 
 import os
@@ -74,20 +75,32 @@ def _vllm_base_url() -> Optional[str]:
 
 @app.command()
 def preprocess(
-    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Override config YAML"),
-    snellius: bool = typer.Option(False, "--snellius", help="Apply configs/snellius.yaml overlay"),
-    day: Optional[int] = typer.Option(None, "--day", min=1, max=4, help="Process a single day (1-4)"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without writing files"),
+    config: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="Override config YAML"
+    ),
+    snellius: bool = typer.Option(
+        False, "--snellius", help="Apply configs/snellius.yaml overlay"
+    ),
+    day: Optional[int] = typer.Option(
+        None, "--day", min=1, max=4, help="Process a single day (1-4)"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print actions without writing files"
+    ),
 ) -> None:
-    """Discover CASTLE files, create 30-second clips, extract 1 fps frames, normalize transcripts."""
+    """Discover CASTLE files and build normalized preprocessing artifacts."""
     cfg = _resolve_config(config, snellius)
     days = [day] if day is not None else cfg.dataset.days
     console.print(f"[bold]castlerag preprocess[/bold]  days={days}  dry_run={dry_run}")
     console.print(f"  dataset root  : {cfg.dataset.root}")
-    console.print(f"  camera scope  : {cfg.dataset.camera_scope}  "
-                  f"({len(cfg.dataset.ego_cameras)} ego cameras)")
-    console.print(f"  clip / stride : {cfg.preprocessing.clip_seconds}s / "
-                  f"{cfg.preprocessing.stride_seconds}s  @ {cfg.preprocessing.fps} fps")
+    console.print(
+        f"  camera scope  : {cfg.dataset.camera_scope}  "
+        f"({len(cfg.dataset.ego_cameras)} ego cameras)"
+    )
+    console.print(
+        f"  clip / stride : {cfg.preprocessing.clip_seconds}s / "
+        f"{cfg.preprocessing.stride_seconds}s  @ {cfg.preprocessing.fps} fps"
+    )
     if dry_run:
         console.print("[yellow]dry-run: no files written[/yellow]")
         return
@@ -100,7 +113,8 @@ def embed(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     snellius: bool = typer.Option(False, "--snellius"),
     modality: Optional[str] = typer.Option(
-        None, "--modality",
+        None,
+        "--modality",
         help="Filter by modality: transcript | event_summary | text | image | video",
     ),
     day: Optional[int] = typer.Option(None, "--day", min=1, max=4),
@@ -108,8 +122,10 @@ def embed(
 ) -> None:
     """Encode derived chunks with OmniEmbed (vLLM) and cache embeddings to disk."""
     cfg = _resolve_config(config, snellius)
-    console.print(f"[bold]castlerag embed[/bold]  modality={modality or 'all'}  "
-                  f"day={day if day is not None else 'all'}")
+    console.print(
+        f"[bold]castlerag embed[/bold]  modality={modality or 'all'}  "
+        f"day={day if day is not None else 'all'}"
+    )
     console.print(f"  model   : {cfg.embedding.model}")
     console.print(f"  backend : {cfg.embedding.backend}")
     if dry_run:
@@ -127,7 +143,9 @@ def embed(
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
-    paths = cache_dense_embeddings(records, cfg, embed_client, modality=modality, day=day)
+    paths = cache_dense_embeddings(
+        records, cfg, embed_client, modality=modality, day=day
+    )
     console.print(f"  caches  : {len(paths)} written under {cfg.embedding.cache_dir}")
     if embed_client.dim is not None:
         console.print(f"  dim     : {embed_client.dim}")
@@ -191,7 +209,9 @@ def retrieve(
     console.print(f"  question : {question[:80]}")
     bm25_path = Path(cfg.embedding.cache_dir) / "transcripts.pkl"
     if not bm25_path.exists():
-        console.print("[red]BM25 transcript index not found — run `castlerag index` first.[/red]")
+        console.print(
+            "[red]BM25 transcript index not found — run `castlerag index` first.[/red]"
+        )
         raise typer.Exit(1)
     hints = route_question(
         question=question,
@@ -234,7 +254,9 @@ def answer(
     questions_path: Path = typer.Argument(..., help="Official CASTLE questions JSON"),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     snellius: bool = typer.Option(False, "--snellius"),
-    question_id: Optional[str] = typer.Option(None, "--id", help="Run only this question id"),
+    question_id: Optional[str] = typer.Option(
+        None, "--id", help="Run only this question id"
+    ),
     out: Optional[Path] = typer.Option(None, "--out", help="Output predictions path"),
 ) -> None:
     """Run full retrieve → rerank → generate pipeline on CASTLE questions."""
@@ -281,7 +303,9 @@ def eval_cmd(
             f"({n_correct}/{len(questions)})"
         )
     else:
-        console.print("[yellow]No answer key provided — exporting submission only.[/yellow]")
+        console.print(
+            "[yellow]No answer key provided — exporting submission only.[/yellow]"
+        )
 
     sub_path = Path(cfg.outputs.submissions)
     sub_path.parent.mkdir(parents=True, exist_ok=True)
@@ -296,9 +320,11 @@ def smoke_test(
     n: int = typer.Option(5, "--n", help="Number of questions to run (default 5)"),
 ) -> None:
     """5-question end-to-end smoke test (issue #15)."""
-    cfg = _resolve_config(config, False)
+    _resolve_config(config, False)
     console.print(f"[bold]castlerag smoke-test[/bold]  n={n}")
-    console.print("[red]smoke-test not yet implemented — depends on issues #3–#14[/red]")
+    console.print(
+        "[red]smoke-test not yet implemented — depends on issues #3–#14[/red]"
+    )
     raise typer.Exit(1)
 
 

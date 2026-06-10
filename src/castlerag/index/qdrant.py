@@ -6,6 +6,7 @@ Payload indexes (for server-side filtering):
   day, camera_id, camera_type, participant_id, room,
   modality, source_type, absolute_start, absolute_end, has_speech
 """
+
 from __future__ import annotations
 
 import logging
@@ -50,7 +51,9 @@ def get_client(host: str = "localhost", port: int = 6333) -> Any:
     try:
         from qdrant_client import QdrantClient
     except ImportError as e:
-        raise ImportError("qdrant-client not installed; run: pip install qdrant-client") from e
+        raise ImportError(
+            "qdrant-client not installed; run: pip install qdrant-client"
+        ) from e
     return QdrantClient(host=host, port=port)
 
 
@@ -88,7 +91,12 @@ def create_collection(
         ),
         on_disk_payload=on_disk_payload,
     )
-    log.info("Created collection %s  dim=%d  distance=%s", collection_name, vector_size, distance)
+    log.info(
+        "Created collection %s  dim=%d  distance=%s",
+        collection_name,
+        vector_size,
+        distance,
+    )
 
 
 def create_payload_indexes(client: Any, collection_name: str) -> None:
@@ -138,7 +146,8 @@ def upsert_batch(
     if not (len(point_ids) == len(vectors) == len(payloads)):
         raise ValueError(
             f"upsert_batch requires equal-length inputs; got "
-            f"point_ids={len(point_ids)}, vectors={len(vectors)}, payloads={len(payloads)}"
+            f"point_ids={len(point_ids)}, vectors={len(vectors)}, "
+            f"payloads={len(payloads)}"
         )
     from qdrant_client.http import models as qm
 
@@ -166,8 +175,12 @@ def bootstrap_collection(
     """
     client = get_client(host, port)
     create_collection(
-        client, collection_name, vector_size,
-        distance=distance, on_disk_payload=on_disk_payload, recreate=recreate,
+        client,
+        collection_name,
+        vector_size,
+        distance=distance,
+        on_disk_payload=on_disk_payload,
+        recreate=recreate,
     )
     create_payload_indexes(client, collection_name)
     return client
@@ -209,7 +222,9 @@ def record_to_qdrant_point(
     if isinstance(record, ClipRecord):
         record_id = record.clip_id
         payload = QdrantPoint(
-            point_id=make_point_id(model_version, record.source_type, record_id, record.modality),
+            point_id=make_point_id(
+                model_version, record.source_type, record_id, record.modality
+            ),
             record_id=record_id,
             parent_source_id=record.parent_source_id,
             source_type=record.source_type,
@@ -242,7 +257,9 @@ def record_to_qdrant_point(
     if isinstance(record, EventSummaryRecord):
         record_id = record.event_summary_id
         payload = QdrantPoint(
-            point_id=make_point_id(model_version, record.source_type, record_id, "text"),
+            point_id=make_point_id(
+                model_version, record.source_type, record_id, "text"
+            ),
             record_id=record_id,
             source_type=record.source_type,
             modality="text",
@@ -265,7 +282,9 @@ def record_to_qdrant_point(
     if isinstance(record, AuxRecord):
         record_id = record.clip_id
         payload = QdrantPoint(
-            point_id=make_point_id(model_version, record.source_type, record_id, record.modality),
+            point_id=make_point_id(
+                model_version, record.source_type, record_id, record.modality
+            ),
             record_id=record_id,
             source_type=record.source_type,
             modality=record.modality,
@@ -284,7 +303,10 @@ def record_to_qdrant_point(
         )
         return payload
 
-    raise TypeError(f"Unsupported record type for Qdrant payload conversion: {type(record).__name__}")
+    raise TypeError(
+        "Unsupported record type for Qdrant payload conversion: "
+        f"{type(record).__name__}"
+    )
 
 
 def build_point_batches(

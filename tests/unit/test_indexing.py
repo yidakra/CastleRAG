@@ -1,4 +1,5 @@
 """Tests for indexing and embedding helpers."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,7 +26,13 @@ from castlerag.index.pipeline import (
 )
 from castlerag.index.qdrant import build_point_batches, record_to_qdrant_point
 from castlerag.index.transcript_lexical import build_bm25_index, load_bm25_index
-from castlerag.schemas import AuxRecord, ClipRecord, EventSummaryRecord, TranscriptSegment, TranscriptWindow
+from castlerag.schemas import (
+    AuxRecord,
+    ClipRecord,
+    EventSummaryRecord,
+    TranscriptSegment,
+    TranscriptWindow,
+)
 
 
 def _transcript_window() -> TranscriptWindow:
@@ -190,7 +197,9 @@ def test_build_point_batches_mixed_records():
         model_name="Tevatron/OmniEmbed-v0.1-multivent",
     )
     assert len(points) == 3
-    assert all(point.model_name == "Tevatron/OmniEmbed-v0.1-multivent" for point in points)
+    assert all(
+        point.model_name == "Tevatron/OmniEmbed-v0.1-multivent" for point in points
+    )
 
 
 def test_write_and_load_transcript_windows(tmp_path: Path):
@@ -309,13 +318,21 @@ def test_cache_dense_embeddings_writes_expected_npz_files(tmp_path: Path):
             self.dim = 3
 
         def embed_texts(self, payloads: list[str]) -> np.ndarray:
-            return np.asarray([[float(len(text)), 1.0, 0.0] for text in payloads], dtype=np.float32)
+            return np.asarray(
+                [[float(len(text)), 1.0, 0.0] for text in payloads], dtype=np.float32
+            )
 
         def embed_images(self, payloads: list[str]) -> np.ndarray:
-            return np.asarray([[float(idx), 2.0, 0.0] for idx, _ in enumerate(payloads)], dtype=np.float32)
+            return np.asarray(
+                [[float(idx), 2.0, 0.0] for idx, _ in enumerate(payloads)],
+                dtype=np.float32,
+            )
 
         def embed_videos(self, payloads: list[list[str]]) -> np.ndarray:
-            return np.asarray([[float(len(frames)), 3.0, 0.0] for frames in payloads], dtype=np.float32)
+            return np.asarray(
+                [[float(len(frames)), 3.0, 0.0] for frames in payloads],
+                dtype=np.float32,
+            )
 
     cfg = _config(tmp_path)
     records = load_chunk_records(tmp_path / "missing")
@@ -375,22 +392,41 @@ def test_cache_dense_embeddings_uses_day_scoped_filenames(tmp_path: Path):
             self.dim = 2
 
         def embed_texts(self, payloads: list[str]) -> np.ndarray:
-            return np.asarray([[1.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32)
+            return np.asarray(
+                [[1.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32
+            )
 
         def embed_images(self, payloads: list[str]) -> np.ndarray:
-            return np.asarray([[2.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32)
+            return np.asarray(
+                [[2.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32
+            )
 
         def embed_videos(self, payloads: list[list[str]]) -> np.ndarray:
-            return np.asarray([[3.0, float(len(frames))] for frames in payloads], dtype=np.float32)
+            return np.asarray(
+                [[3.0, float(len(frames))] for frames in payloads], dtype=np.float32
+            )
 
     cfg = _config(tmp_path)
     records = load_chunk_records(tmp_path / "missing")
-    records.transcripts = [_transcript_window(), _transcript_window().model_copy(update={"day": "day2"})]
-    records.clips = [_clip_record(), _clip_record().model_copy(update={"clip_id": "clip_day2", "day": "day2"})]
-    records.events = [_event_record(), _event_record().model_copy(update={"event_summary_id": "evt_day2", "day": "day2"})]
+    records.transcripts = [
+        _transcript_window(),
+        _transcript_window().model_copy(update={"day": "day2"}),
+    ]
+    records.clips = [
+        _clip_record(),
+        _clip_record().model_copy(update={"clip_id": "clip_day2", "day": "day2"}),
+    ]
+    records.events = [
+        _event_record(),
+        _event_record().model_copy(
+            update={"event_summary_id": "evt_day2", "day": "day2"}
+        ),
+    ]
     records.aux = []
 
-    paths = cache_dense_embeddings(records, cfg, FakeEmbedClient(), modality="transcript", day=1)
+    paths = cache_dense_embeddings(
+        records, cfg, FakeEmbedClient(), modality="transcript", day=1
+    )
     assert [path.name for path in paths] == ["transcripts_day1.npz"]
     loaded_ids, _ = load_embedding_cache(paths[0])
     assert loaded_ids == ["tx_0001"]
@@ -402,13 +438,19 @@ def test_build_qdrant_index_upserts_all_cached_artifacts(tmp_path: Path, monkeyp
             self.dim = 2
 
         def embed_texts(self, payloads: list[str]) -> np.ndarray:
-            return np.asarray([[1.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32)
+            return np.asarray(
+                [[1.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32
+            )
 
         def embed_images(self, payloads: list[str]) -> np.ndarray:
-            return np.asarray([[2.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32)
+            return np.asarray(
+                [[2.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32
+            )
 
         def embed_videos(self, payloads: list[list[str]]) -> np.ndarray:
-            return np.asarray([[3.0, float(len(frames))] for frames in payloads], dtype=np.float32)
+            return np.asarray(
+                [[3.0, float(len(frames))] for frames in payloads], dtype=np.float32
+            )
 
     cfg = _config(tmp_path)
     records = load_chunk_records(tmp_path / "missing")
@@ -469,7 +511,11 @@ def test_embed_texts_uses_openai_embeddings_shape():
 
         def create(self, model: str, input: list[str]):  # noqa: A002
             self.last_input = input
-            return type("Resp", (), {"data": [_EmbeddingRow([1.0, 2.0]), _EmbeddingRow([3.0, 4.0])]})()
+            return type(
+                "Resp",
+                (),
+                {"data": [_EmbeddingRow([1.0, 2.0]), _EmbeddingRow([3.0, 4.0])]},
+            )()
 
     fake_api = _EmbeddingsAPI()
     fake_client = type("Client", (), {"embeddings": fake_api})()

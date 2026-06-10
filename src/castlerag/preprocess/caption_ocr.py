@@ -3,6 +3,7 @@
 Per-clip inputs: 30 sampled JPEG frames at 1 fps + optional transcript text.
 Outputs per clip: clip_caption, ocr_text, caption_confidence.
 """
+
 from __future__ import annotations
 
 import base64
@@ -31,8 +32,7 @@ def _vllm_chat(
         from openai import OpenAI
     except ImportError as exc:
         raise ImportError(
-            "openai package required for caption/OCR; "
-            "pip install castlerag[inference]"
+            "openai package required for caption/OCR; pip install castlerag[inference]"
         ) from exc
     client = OpenAI(base_url=vllm_base_url, api_key="not-needed", timeout=timeout)
     resp = client.chat.completions.create(
@@ -73,10 +73,12 @@ def annotate_clip(
     content: list = []
     for fp in sample:
         img_b64 = base64.b64encode(fp.read_bytes()).decode()
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
-        })
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+            }
+        )
 
     caption_prompt = (
         "Describe this video clip in 1-2 sentences, emphasising people, objects, "
@@ -109,7 +111,8 @@ def annotate_clip(
                         "type": "text",
                         "text": (
                             "Extract any visible text from this frame exactly as it "
-                            "appears. Return only the text, or 'NONE' if no text is visible."
+                            "appears. Return only the text, or 'NONE' if no "
+                            "text is visible."
                         ),
                     },
                 ],

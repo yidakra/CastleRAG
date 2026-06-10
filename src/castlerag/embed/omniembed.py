@@ -14,6 +14,7 @@ Query format per OmniEmbed model card:
 
 Point ids are deterministic: sha1(model_version + source_type + record_id + modality)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -92,7 +93,9 @@ class OmniEmbedClient:
         elif hasattr(self._client, "embed_texts"):
             vectors = np.asarray(self._client.embed_texts(payload), dtype=np.float32)
         else:
-            raise NotImplementedError("Configured embedding backend does not support text embeddings")
+            raise NotImplementedError(
+                "Configured embedding backend does not support text embeddings"
+            )
         if self.dim is None and vectors.size:
             self.dim = int(vectors.shape[1])
         return vectors
@@ -101,7 +104,9 @@ class OmniEmbedClient:
         """Embed image files (JPEG/PNG).  Preserves source resolution."""
         self._ensure_client()
         if not hasattr(self._client, "embed_images"):
-            raise NotImplementedError("Configured embedding backend does not support image embeddings")
+            raise NotImplementedError(
+                "Configured embedding backend does not support image embeddings"
+            )
         vectors = np.asarray(self._client.embed_images(image_paths), dtype=np.float32)
         if self.dim is None and vectors.size:
             self.dim = int(vectors.shape[1])
@@ -111,8 +116,12 @@ class OmniEmbedClient:
         """Embed video clips represented as lists of 1 fps frame paths."""
         self._ensure_client()
         if not hasattr(self._client, "embed_videos"):
-            raise NotImplementedError("Configured embedding backend does not support video embeddings")
-        vectors = np.asarray(self._client.embed_videos(frame_path_lists), dtype=np.float32)
+            raise NotImplementedError(
+                "Configured embedding backend does not support video embeddings"
+            )
+        vectors = np.asarray(
+            self._client.embed_videos(frame_path_lists), dtype=np.float32
+        )
         if self.dim is None and vectors.size:
             self.dim = int(vectors.shape[1])
         return vectors

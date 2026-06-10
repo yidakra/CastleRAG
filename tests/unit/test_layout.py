@@ -1,10 +1,10 @@
 """Tests for src/castlerag/dataset/layout.py"""
+
 from pathlib import Path
 
 import pytest
 
 from castlerag.dataset.layout import (
-    HourAsset,
     build_camera_registry,
     discover_hours,
     hour_transcript_path,
@@ -74,14 +74,16 @@ def test_discover_hours_ego_scope(tmp_path: Path):
     video_dir.mkdir(parents=True)
     (video_dir / "08.mp4").touch()
 
-    assets = list(discover_hours(
-        root=tmp_path,
-        ego_cameras=["Allie"],
-        exo_cameras=["Kitchen"],
-        days=[1],
-        hours=[8],
-        camera_scope="ego",
-    ))
+    assets = list(
+        discover_hours(
+            root=tmp_path,
+            ego_cameras=["Allie"],
+            exo_cameras=["Kitchen"],
+            days=[1],
+            hours=[8],
+            camera_scope="ego",
+        )
+    )
     assert len(assets) == 1
     assert assets[0].camera_id == "Allie"
     assert assets[0].camera_type == "ego"
@@ -94,14 +96,16 @@ def test_discover_hours_skips_exo_by_default(tmp_path: Path):
         video_dir.mkdir(parents=True)
         (video_dir / "08.mp4").touch()
 
-    assets = list(discover_hours(
-        root=tmp_path,
-        ego_cameras=["Allie"],
-        exo_cameras=["Kitchen"],
-        days=[1],
-        hours=[8],
-        camera_scope="ego",  # default — Kitchen must be skipped
-    ))
+    assets = list(
+        discover_hours(
+            root=tmp_path,
+            ego_cameras=["Allie"],
+            exo_cameras=["Kitchen"],
+            days=[1],
+            hours=[8],
+            camera_scope="ego",  # default — Kitchen must be skipped
+        )
+    )
     camera_ids = {a.camera_id for a in assets}
     assert "Allie" in camera_ids
     assert "Kitchen" not in camera_ids
@@ -113,14 +117,16 @@ def test_discover_hours_all_scope_includes_exo(tmp_path: Path):
         video_dir.mkdir(parents=True)
         (video_dir / "08.mp4").touch()
 
-    assets = list(discover_hours(
-        root=tmp_path,
-        ego_cameras=["Allie"],
-        exo_cameras=["Kitchen"],
-        days=[1],
-        hours=[8],
-        camera_scope="all",
-    ))
+    assets = list(
+        discover_hours(
+            root=tmp_path,
+            ego_cameras=["Allie"],
+            exo_cameras=["Kitchen"],
+            days=[1],
+            hours=[8],
+            camera_scope="all",
+        )
+    )
     camera_ids = {a.camera_id for a in assets}
     assert "Allie" in camera_ids
     assert "Kitchen" in camera_ids
@@ -136,11 +142,13 @@ def test_discover_hours_skips_novideo(tmp_path: Path):
     video_dir.mkdir(parents=True)
     (video_dir / "08.novideo").touch()  # no mp4
 
-    assets = list(discover_hours(
-        root=tmp_path,
-        ego_cameras=["Allie"],
-        exo_cameras=[],
-        days=[1],
-        hours=[8],
-    ))
+    assets = list(
+        discover_hours(
+            root=tmp_path,
+            ego_cameras=["Allie"],
+            exo_cameras=[],
+            days=[1],
+            hours=[8],
+        )
+    )
     assert len(assets) == 0

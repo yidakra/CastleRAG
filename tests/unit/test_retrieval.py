@@ -1,4 +1,5 @@
 """Tests for routing and retrieval logic."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -8,7 +9,12 @@ import numpy as np
 from castlerag.retrieval.search import reciprocal_rank_fusion, retrieve
 from castlerag.retrieval.transcript_lexical import score_windows
 from castlerag.routing.question_router import route_question
-from castlerag.schemas import EvalQuestion, RetrievalHit, TranscriptSegment, TranscriptWindow
+from castlerag.schemas import (
+    EvalQuestion,
+    RetrievalHit,
+    TranscriptSegment,
+    TranscriptWindow,
+)
 
 
 def _question() -> EvalQuestion:
@@ -34,8 +40,13 @@ def _windows() -> list[TranscriptWindow]:
             participant_id="Allie",
             room="Kitchen",
             hour=8,
-            transcript_text="After breakfast Allie said she would call Bjorn from the kitchen.",
-            transcript_segments=[TranscriptSegment(start=0.0, end=4.0, text="After breakfast")],
+            transcript_text=(
+                "After breakfast Allie said she would call Bjorn from the "
+                "kitchen."
+            ),
+            transcript_segments=[
+                TranscriptSegment(start=0.0, end=4.0, text="After breakfast")
+            ],
             has_speech=True,
             transcript_char_len=66,
             absolute_start=1_672_531_200_000,
@@ -93,9 +104,30 @@ def test_score_windows_prefers_exact_overlap_and_hints():
 
 
 def test_reciprocal_rank_fusion_merges_on_record_id():
-    hit_a = RetrievalHit(rank=1, score=1.0, point_id="p1", record_id="r1", source_type="main_clip", modality="video")
-    hit_b = RetrievalHit(rank=2, score=0.8, point_id="p2", record_id="r2", source_type="main_clip", modality="video")
-    hit_c = RetrievalHit(rank=1, score=0.9, point_id="x1", record_id="r1", source_type="transcript_window", modality="text")
+    hit_a = RetrievalHit(
+        rank=1,
+        score=1.0,
+        point_id="p1",
+        record_id="r1",
+        source_type="main_clip",
+        modality="video",
+    )
+    hit_b = RetrievalHit(
+        rank=2,
+        score=0.8,
+        point_id="p2",
+        record_id="r2",
+        source_type="main_clip",
+        modality="video",
+    )
+    hit_c = RetrievalHit(
+        rank=1,
+        score=0.9,
+        point_id="x1",
+        record_id="r1",
+        source_type="transcript_window",
+        modality="text",
+    )
     fused = reciprocal_rank_fusion([[hit_a, hit_b], [hit_c]], k=60)
     assert fused[0].record_id == "r1"
     assert fused[1].record_id == "r2"

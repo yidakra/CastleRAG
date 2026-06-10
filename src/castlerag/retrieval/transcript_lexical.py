@@ -1,4 +1,5 @@
 """Transcript BM25 retrieval with answer-option and metadata bonus scoring."""
+
 from __future__ import annotations
 
 import re
@@ -11,10 +12,23 @@ from castlerag.schemas import RetrievalHit, TranscriptWindow
 _TOKEN_RE = re.compile(r"\b\w+\b")
 
 # Temporal keywords for bonus scoring (derived from WDL pattern)
-_TEMPORAL_KEYWORDS = frozenset([
-    "before", "after", "while", "during", "then", "when", "next",
-    "previously", "later", "first", "last", "finally", "once",
-])
+_TEMPORAL_KEYWORDS = frozenset(
+    [
+        "before",
+        "after",
+        "while",
+        "during",
+        "then",
+        "when",
+        "next",
+        "previously",
+        "later",
+        "first",
+        "last",
+        "finally",
+        "once",
+    ]
+)
 
 
 def score_windows(
@@ -60,7 +74,10 @@ def score_windows(
         if day_hint and window.day == day_hint:
             score += 0.75
         if person_hint and (
-            (window.participant_id and window.participant_id.lower() == person_hint.lower())
+            (
+                window.participant_id
+                and window.participant_id.lower() == person_hint.lower()
+            )
             or person_hint.lower() in transcript_lower
         ):
             score += 0.75
@@ -77,7 +94,11 @@ def score_windows(
 
     ranked = sorted(
         scored,
-        key=lambda item: (-item[0], item[1].absolute_start, item[1].transcript_window_id),
+        key=lambda item: (
+            -item[0],
+            item[1].absolute_start,
+            item[1].transcript_window_id,
+        ),
     )[:top_k]
     return [
         RetrievalHit(

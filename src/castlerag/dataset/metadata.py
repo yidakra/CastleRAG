@@ -4,6 +4,7 @@ The exact column semantics of these CSVs must be validated against the
 raw CASTLE files before use (see SPEC §9.4).  This module provides stubs
 and a generic loader that returns the raw DataFrame for now.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,6 +16,7 @@ from typing import Any, Dict, List
 def load_metadata_csv(path: Path) -> List[Dict[str, Any]]:
     """Load a single metadata CSV and return rows as a list of dicts."""
     import csv
+
     with path.open(newline="") as f:
         reader = csv.DictReader(f)
         return list(reader)

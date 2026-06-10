@@ -14,6 +14,7 @@ Outputs:
   outputs/submissions.json
   outputs/metrics.json   (only when ground truth exists)
 """
+
 from __future__ import annotations
 
 from pathlib import Path

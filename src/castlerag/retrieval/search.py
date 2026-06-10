@@ -1,4 +1,5 @@
 """Query encoding, modality-scoped Qdrant search, and RRF score fusion."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -8,8 +9,8 @@ import numpy as np
 
 from castlerag.retrieval.filters import build_filter
 from castlerag.retrieval.transcript_lexical import score_windows
-from castlerag.schemas import EvalQuestion, RetrievalHit
 from castlerag.routing.question_router import RouteHints
+from castlerag.schemas import EvalQuestion, RetrievalHit
 
 _TRANSCRIPT_ROUTE_BUDGETS = {
     "static_visual": 10,
@@ -46,8 +47,7 @@ def reciprocal_rank_fusion(
         )
     )
     return [
-        hit.model_copy(update={"rank": rank})
-        for rank, hit in enumerate(fused, start=1)
+        hit.model_copy(update={"rank": rank}) for rank, hit in enumerate(fused, start=1)
     ]
 
 
@@ -72,9 +72,13 @@ def retrieve(
         room_hint=hints.room,
         top_k=retrieval_cfg.transcript_top_k,
     )
-    query_vectors = np.asarray(embed_client.embed_texts(query_variants), dtype=np.float32)
+    query_vectors = np.asarray(
+        embed_client.embed_texts(query_variants), dtype=np.float32
+    )
     if query_vectors.ndim != 2:
-        raise ValueError(f"Expected 2D query embedding matrix, got shape {query_vectors.shape}")
+        raise ValueError(
+            f"Expected 2D query embedding matrix, got shape {query_vectors.shape}"
+        )
 
     transcript_dense_lists = [
         _dense_search(
@@ -93,7 +97,7 @@ def retrieve(
     transcript_lane = reciprocal_rank_fusion(
         [transcript_bm25, *transcript_dense_lists],
         k=retrieval_cfg.rrf_k,
-    )[:_transcript_budget(hints.route, retrieval_cfg.transcript_top_k)]
+    )[: _transcript_budget(hints.route, retrieval_cfg.transcript_top_k)]
 
     multimodal_lists: List[List[RetrievalHit]] = []
     multimodal_specs = [
@@ -122,7 +126,9 @@ def retrieve(
                 multimodal_lists.append(hits)
 
     multimodal_lane = reciprocal_rank_fusion(multimodal_lists, k=retrieval_cfg.rrf_k)
-    merged = reciprocal_rank_fusion([transcript_lane, multimodal_lane], k=retrieval_cfg.rrf_k)
+    merged = reciprocal_rank_fusion(
+        [transcript_lane, multimodal_lane], k=retrieval_cfg.rrf_k
+    )
     return _collapse_hits(merged, hints, retrieval_cfg)
 
 
@@ -216,7 +222,9 @@ def _collapse_hits(
     aux_image_count = 0
     kept: List[RetrievalHit] = []
 
-    ordered_hits = sorted(hits, key=lambda hit: (_route_priority(hints.route, hit), hit.rank))
+    ordered_hits = sorted(
+        hits, key=lambda hit: (_route_priority(hints.route, hit), hit.rank)
+    )
 
     for hit in ordered_hits:
         if len(kept) >= max_rows:
@@ -237,8 +245,7 @@ def _collapse_hits(
         kept.append(hit)
 
     return [
-        hit.model_copy(update={"rank": rank})
-        for rank, hit in enumerate(kept, start=1)
+        hit.model_copy(update={"rank": rank}) for rank, hit in enumerate(kept, start=1)
     ]
 
 

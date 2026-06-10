@@ -1,4 +1,5 @@
 """Tests for src/castlerag/eval/io.py"""
+
 import json
 from pathlib import Path
 
@@ -60,9 +61,12 @@ def test_load_predictions_compact(tmp_path: Path):
 
 
 def test_load_predictions_rich_format(tmp_path: Path):
-    p = _write_predictions(tmp_path, {
-        "q1": {"predicted_answer": "b", "route": "speech_text"},
-    })
+    p = _write_predictions(
+        tmp_path,
+        {
+            "q1": {"predicted_answer": "b", "route": "speech_text"},
+        },
+    )
     preds = load_predictions(p)
     assert preds["q1"].predicted_answer == "b"
     assert preds["q1"].route == "speech_text"
@@ -71,8 +75,10 @@ def test_load_predictions_rich_format(tmp_path: Path):
 def test_compute_accuracy_perfect(tmp_path: Path):
     q_path = _write_questions(tmp_path, _QUESTIONS_RAW)
     qs = load_questions(q_path)
-    preds = {"q1": Prediction(question_id="q1", predicted_answer="a"),
-             "q2": Prediction(question_id="q2", predicted_answer="b")}
+    preds = {
+        "q1": Prediction(question_id="q1", predicted_answer="a"),
+        "q2": Prediction(question_id="q2", predicted_answer="b"),
+    }
     ans_path = _write_answers(tmp_path, {"q1": "a", "q2": "b"})
     acc = compute_accuracy(qs, preds, ans_path)
     assert acc == 1.0
@@ -81,8 +87,10 @@ def test_compute_accuracy_perfect(tmp_path: Path):
 def test_compute_accuracy_partial(tmp_path: Path):
     q_path = _write_questions(tmp_path, _QUESTIONS_RAW)
     qs = load_questions(q_path)
-    preds = {"q1": Prediction(question_id="q1", predicted_answer="a"),
-             "q2": Prediction(question_id="q2", predicted_answer="a")}
+    preds = {
+        "q1": Prediction(question_id="q1", predicted_answer="a"),
+        "q2": Prediction(question_id="q2", predicted_answer="a"),
+    }
     ans_path = _write_answers(tmp_path, {"q1": "a", "q2": "b"})  # q2 wrong
     acc = compute_accuracy(qs, preds, ans_path)
     assert acc == 0.5

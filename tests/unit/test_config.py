@@ -1,4 +1,5 @@
 """Tests for src/castlerag/config.py"""
+
 from pathlib import Path
 
 import pytest
@@ -109,7 +110,9 @@ def test_load_config_explicit_missing_base_raises():
 def test_expand_env_vars(tmp_path: Path):
     """$VAR references in YAML values must be expanded after load."""
     import os
+
     from castlerag.config import _expand_env
+
     os.environ["_CR_TEST_VAR"] = "expanded_value"
     result = _expand_env({"path": "/scratch/$_CR_TEST_VAR/data"})
     assert "expanded_value" in result["path"]

@@ -1,8 +1,8 @@
 """Tests for src/castlerag/cli.py"""
+
 import json
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from castlerag.cli import app
@@ -64,46 +64,64 @@ def test_index_not_yet_implemented():
 
 def test_answer_not_yet_implemented(tmp_path: Path):
     q_file = tmp_path / "questions.json"
-    q_file.write_text(json.dumps({
-        "q1": {
-            "query": "What did Allie do?",
-            "answers": {"a": "A", "b": "B", "c": "C", "d": "D"},
-        }
-    }))
+    q_file.write_text(
+        json.dumps(
+            {
+                "q1": {
+                    "query": "What did Allie do?",
+                    "answers": {"a": "A", "b": "B", "c": "C", "d": "D"},
+                }
+            }
+        )
+    )
     result = runner.invoke(app, ["answer", str(q_file)])
     assert result.exit_code != 0
 
 
 def test_eval_with_predictions(tmp_path: Path):
     q_file = tmp_path / "questions.json"
-    q_file.write_text(json.dumps({
-        "q1": {
-            "query": "Test question?",
-            "answers": {"a": "A", "b": "B", "c": "C", "d": "D"},
-        }
-    }))
+    q_file.write_text(
+        json.dumps(
+            {
+                "q1": {
+                    "query": "Test question?",
+                    "answers": {"a": "A", "b": "B", "c": "C", "d": "D"},
+                }
+            }
+        )
+    )
     pred_file = tmp_path / "predictions.json"
     pred_file.write_text(json.dumps({"q1": "b"}))
 
-    result = runner.invoke(app, [
-        "eval",
-        str(q_file),
-        str(pred_file),
-        "--config", str(Path(__file__).parent.parent.parent / "configs" / "base.yaml"),
-    ])
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            str(q_file),
+            str(pred_file),
+            "--config",
+            str(Path(__file__).parent.parent.parent / "configs" / "base.yaml"),
+        ],
+    )
     # Should succeed (no answer key, so just writes submission)
     assert result.exit_code == 0
     # Submission should have been written
-    assert (tmp_path / "submissions.json").exists() or "submission" in result.output.lower()
+    assert (
+        tmp_path / "submissions.json"
+    ).exists() or "submission" in result.output.lower()
 
 
 def test_smoke_test_not_yet_implemented(tmp_path: Path):
     q_file = tmp_path / "questions.json"
-    q_file.write_text(json.dumps({
-        "q1": {
-            "query": "Test?",
-            "answers": {"a": "A", "b": "B", "c": "C", "d": "D"},
-        }
-    }))
+    q_file.write_text(
+        json.dumps(
+            {
+                "q1": {
+                    "query": "Test?",
+                    "answers": {"a": "A", "b": "B", "c": "C", "d": "D"},
+                }
+            }
+        )
+    )
     result = runner.invoke(app, ["smoke-test", str(q_file)])
     assert result.exit_code != 0
