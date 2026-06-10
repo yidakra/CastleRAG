@@ -117,12 +117,26 @@ Edit `configs/snellius.yaml` to set your account and scratch paths, then:
 
 ```bash
 # Submit in dependency order (replace <job_id> with the id returned by sbatch):
-sbatch scripts/slurm/preprocess_main.slurm
-sbatch scripts/slurm/index_transcripts.slurm
-sbatch scripts/slurm/embed_text.slurm
-sbatch scripts/slurm/embed_video.slurm
-sbatch scripts/slurm/embed_images.slurm
-sbatch scripts/slurm/index_qdrant.slurm
+
+# 1. Base preprocessing — windowing, 1 fps frames, transcript normalization (CPU)
+JOB1=$(sbatch --parsable scripts/slurm/preprocess_main.slurm)
+
+# 2a. Per-clip caption + OCR — array job, one task per day (GPU, needs VLLM_BASE_URL)
+export VLLM_BASE_URL=http://<vllm-host>:8000/v1
+JOB2=$(sbatch --parsable --dependency=afterok:${JOB1} scripts/slurm/caption_ocr.slurm)
+
+# 2b. Auxiliary modality normalization — runs in parallel with caption_ocr (CPU)
+JOB2B=$(sbatch --parsable --dependency=afterok:${JOB1} scripts/slurm/preprocess_aux.slurm)
+
+# 3. Event compression — depends on caption_ocr (GPU, needs VLLM_BASE_URL)
+JOB3=$(sbatch --parsable --dependency=afterok:${JOB2} scripts/slurm/compress_events.slurm)
+
+# 4. Embedding and indexing
+sbatch --dependency=afterok:${JOB3} scripts/slurm/index_transcripts.slurm
+sbatch --dependency=afterok:${JOB3} scripts/slurm/embed_text.slurm
+sbatch --dependency=afterok:${JOB3} scripts/slurm/embed_video.slurm
+sbatch --dependency=afterok:${JOB3} scripts/slurm/embed_images.slurm
+sbatch --dependency=afterok:${JOB3} scripts/slurm/index_qdrant.slurm
 ```
 
 Estimated cost: ~EUR 115–204 for the full ego-only evidence build

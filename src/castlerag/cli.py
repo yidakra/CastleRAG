@@ -269,21 +269,26 @@ def preprocess(
             updated: list[ClipRecord] = []
             for cr in clip_records:
                 frames = [Path(p) for p in cr.sampled_frame_paths]
-                ann = annotate_clip(
-                    clip_id=cr.clip_id,
-                    frame_paths=frames,
-                    transcript_text=cr.transcript_text,
-                    model_name=cfg.generation.model,
-                    vllm_base_url=vllm_url,
-                )
-                updated.append(
-                    cr.model_copy(
-                        update={
-                            "clip_caption": ann.clip_caption,
-                            "ocr_text": ann.ocr_text,
-                        }
+                try:
+                    ann = annotate_clip(
+                        clip_id=cr.clip_id,
+                        frame_paths=frames,
+                        transcript_text=cr.transcript_text,
+                        model_name=cfg.generation.model,
+                        vllm_base_url=vllm_url,
                     )
-                )
+                    updated.append(
+                        cr.model_copy(
+                            update={
+                                "clip_caption": ann.clip_caption,
+                                "ocr_text": ann.ocr_text,
+                            }
+                        )
+                    )
+                except Exception as exc:
+                    console.print(
+                        f"[yellow]  caption skipped {cr.clip_id}: {exc}[/yellow]"
+                    )
             write_jsonl_records(updated, clips_path)
             n_annotated += len(updated)
         console.print(f"  caption/OCR   : {n_annotated} clips annotated")
@@ -337,7 +342,7 @@ def preprocess(
             day_label = f"day{day_num}"
             for cam in cfg.dataset.ego_cameras:
                 aux_records.extend(iter_photo_records(root, cam, day_label))
-                aux_records.extend(iter_thermal_records(root, day_label))
+            aux_records.extend(iter_thermal_records(root, day_label))
             aux_records.extend(iter_aux_video_records(root, day_label))
 
         if aux_records:
