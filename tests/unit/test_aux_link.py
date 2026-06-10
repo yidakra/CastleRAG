@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import List
 from unittest.mock import patch
 
-import pytest
-
 from castlerag.preprocess.aux_link import link_aux_records
 from castlerag.schemas import AuxRecord, ClipRecord, EventSummaryRecord
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -262,7 +258,7 @@ def test_photo_record_no_timestamp_marked_unreliable(tmp_path: Path):
 
 
 def test_photo_record_with_filename_hint_marked_reliable(tmp_path: Path):
-    """Photo whose filename contains a parseable timestamp gets has_reliable_timestamp=True."""
+    """Photo with a parseable filename timestamp gets has_reliable_timestamp=True."""
     from castlerag.preprocess.auxiliary import iter_photo_records
 
     photo_dir = tmp_path / "photo" / "Allie"
@@ -292,7 +288,7 @@ def test_thermal_record_no_ts_hint_marked_unreliable(tmp_path: Path):
 
 
 def test_thermal_record_with_ts_hint_marked_reliable(tmp_path: Path):
-    """Thermal file with a parseable filename timestamp gets has_reliable_timestamp=True."""
+    """Thermal file with a parseable timestamp hint gets has_reliable_timestamp=True."""
     from castlerag.preprocess.auxiliary import iter_thermal_records
 
     thermal_dir = tmp_path / "thermal"

@@ -91,7 +91,14 @@ def link_aux_records(
     linked: List[AuxRecord] = []
     for aux in aux_records:
         if not aux.has_reliable_timestamp:
-            linked.append(aux)
+            linked.append(
+                aux.model_copy(
+                    update={
+                        "linked_main_clip_ids": [],
+                        "linked_event_summary_ids": [],
+                    }
+                )
+            )
             continue
 
         clip_ids = [
