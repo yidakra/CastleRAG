@@ -262,26 +262,29 @@ def record_to_qdrant_point(
         )
         return payload
 
-    record_id = record.clip_id
-    payload = QdrantPoint(
-        point_id=make_point_id(model_version, record.source_type, record_id, record.modality),
-        record_id=record_id,
-        source_type=record.source_type,
-        modality=record.modality,
-        day=record.day,
-        camera_id=record.camera_id,
-        camera_type=record.camera_type,
-        participant_id=record.participant_id,
-        room=record.room,
-        absolute_start=record.absolute_start,
-        absolute_end=record.absolute_end,
-        event_summary=record.summary_text if record.modality == "text" else None,
-        asset_path=record.asset_path,
-        model_name=model_name,
-        model_revision=model_revision,
-        build_id=build_id,
-    )
-    return payload
+    if isinstance(record, AuxRecord):
+        record_id = record.clip_id
+        payload = QdrantPoint(
+            point_id=make_point_id(model_version, record.source_type, record_id, record.modality),
+            record_id=record_id,
+            source_type=record.source_type,
+            modality=record.modality,
+            day=record.day,
+            camera_id=record.camera_id,
+            camera_type=record.camera_type,
+            participant_id=record.participant_id,
+            room=record.room,
+            absolute_start=record.absolute_start,
+            absolute_end=record.absolute_end,
+            event_summary=record.summary_text if record.modality == "text" else None,
+            asset_path=record.asset_path,
+            model_name=model_name,
+            model_revision=model_revision,
+            build_id=build_id,
+        )
+        return payload
+
+    raise TypeError(f"Unsupported record type for Qdrant payload conversion: {type(record).__name__}")
 
 
 def build_point_batches(

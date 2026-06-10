@@ -67,6 +67,8 @@ Expected layout:
 castlerag preprocess --snellius --day 1
 
 # Encode derived chunks with OmniEmbed (requires GPU)
+export VLLM_BASE_URL=http://localhost:8000/v1
+castlerag embed --snellius --modality transcript --day 1
 castlerag embed --snellius --modality video --day 1
 
 # Create Qdrant collection and upsert evidence points
@@ -86,6 +88,7 @@ Edit `configs/snellius.yaml` to set your account and scratch paths, then:
 ```bash
 # Submit in dependency order (replace <job_id> with the id returned by sbatch):
 sbatch scripts/slurm/preprocess_main.slurm
+sbatch scripts/slurm/index_transcripts.slurm
 sbatch scripts/slurm/embed_text.slurm
 sbatch scripts/slurm/embed_video.slurm
 sbatch scripts/slurm/embed_images.slurm
@@ -94,7 +97,7 @@ sbatch scripts/slurm/index_qdrant.slurm
 # Not yet implemented — do not submit until the referenced issues are resolved:
 # scripts/slurm/caption_ocr.slurm      (issue #4)
 # scripts/slurm/compress_events.slurm  (issue #4)
-# scripts/slurm/index_transcripts.slurm (issues #5, #6)
+# scripts/slurm/preprocess_aux.slurm   (issue #13)
 ```
 
 Estimated cost: ~EUR 115–204 for the full ego-only evidence build

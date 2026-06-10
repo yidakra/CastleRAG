@@ -17,6 +17,7 @@ from castlerag.index.pipeline import (
     build_bm25_artifact,
     build_qdrant_index,
     cache_dense_embeddings,
+    filter_records,
     load_chunk_records,
 )
 
@@ -96,7 +97,7 @@ def embed(
     snellius: bool = typer.Option(False, "--snellius"),
     modality: Optional[str] = typer.Option(
         None, "--modality",
-        help="Filter by modality: transcript | video | image | event_summary",
+        help="Filter by modality: transcript | event_summary | text | image | video",
     ),
     day: Optional[int] = typer.Option(None, "--day", min=1, max=4),
     dry_run: bool = typer.Option(False, "--dry-run"),
@@ -111,7 +112,8 @@ def embed(
         console.print("[yellow]dry-run: no embeddings written[/yellow]")
         return
     records = load_chunk_records(Path(cfg.preprocessing.chunks_dir))
-    if _count_records(records) == 0:
+    scoped = filter_records(records, cfg, day=day)
+    if _count_records(scoped) == 0:
         console.print("[red]No chunk records found — run preprocess first.[/red]")
         raise typer.Exit(1)
     embed_client = OmniEmbedClient(
@@ -121,7 +123,7 @@ def embed(
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
-    paths = cache_dense_embeddings(records, cfg, embed_client, modality=modality)
+    paths = cache_dense_embeddings(records, cfg, embed_client, modality=modality, day=day)
     console.print(f"  caches  : {len(paths)} written under {cfg.embedding.cache_dir}")
     if embed_client.dim is not None:
         console.print(f"  dim     : {embed_client.dim}")
@@ -144,7 +146,8 @@ def index(
         console.print("[yellow]dry-run: no Qdrant writes[/yellow]")
         return
     records = load_chunk_records(Path(cfg.preprocessing.chunks_dir))
-    if _count_records(records) == 0:
+    scoped = filter_records(records, cfg)
+    if _count_records(scoped) == 0:
         console.print("[red]No chunk records found — run preprocess first.[/red]")
         raise typer.Exit(1)
     cache_dir = Path(cfg.embedding.cache_dir)
@@ -157,10 +160,10 @@ def index(
             vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
         )
         cache_dense_embeddings(records, cfg, embed_client)
-    bm25_path = build_bm25_artifact(records, Path(cfg.embedding.cache_dir))
+    bm25_path = build_bm25_artifact(scoped, Path(cfg.embedding.cache_dir))
     vector_size, cache_paths = build_qdrant_index(
         cfg,
-        records,
+        scoped,
         recreate=create_collection,
     )
     console.print(f"  BM25    : {bm25_path}")

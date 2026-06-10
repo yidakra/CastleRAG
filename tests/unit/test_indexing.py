@@ -20,6 +20,7 @@ from castlerag.index.pipeline import (
     build_qdrant_index,
     cache_dense_embeddings,
     discover_chunk_artifacts,
+    filter_records,
     load_chunk_records,
 )
 from castlerag.index.qdrant import build_point_batches, record_to_qdrant_point
@@ -173,6 +174,15 @@ def test_record_to_qdrant_point_aux_text():
     assert point.event_summary == "Heartrate rising to 92 bpm"
 
 
+def test_record_to_qdrant_point_rejects_unknown_type():
+    try:
+        record_to_qdrant_point(object(), model_version="omniembed-v1")  # type: ignore[arg-type]
+    except TypeError as exc:
+        assert "Unsupported record type" in str(exc)
+    else:
+        raise AssertionError("Expected TypeError for unsupported record type")
+
+
 def test_build_point_batches_mixed_records():
     points = build_point_batches(
         [_transcript_window(), _clip_record(), _event_record()],
@@ -276,6 +286,23 @@ def test_discover_and_load_chunk_records(tmp_path: Path):
     assert len(loaded.aux) == 1
 
 
+def test_filter_records_scopes_to_ego_and_day(tmp_path: Path):
+    cfg = _config(tmp_path)
+    day2_window = _transcript_window().model_copy(update={"day": "day2"})
+    exo_clip = _clip_record().model_copy(
+        update={"clip_id": "clip_exo", "camera_id": "Kitchen", "camera_type": "fixed"}
+    )
+    records = load_chunk_records(tmp_path / "missing")
+    records.transcripts = [_transcript_window(), day2_window]
+    records.clips = [_clip_record(), exo_clip]
+    records.events = [_event_record()]
+    records.aux = []
+
+    scoped = filter_records(records, cfg, day=1)
+    assert [row.transcript_window_id for row in scoped.transcripts] == ["tx_0001"]
+    assert [row.clip_id for row in scoped.clips] == ["clip_0001"]
+
+
 def test_cache_dense_embeddings_writes_expected_npz_files(tmp_path: Path):
     class FakeEmbedClient:
         def __init__(self) -> None:
@@ -340,6 +367,33 @@ def test_cache_dense_embeddings_writes_expected_npz_files(tmp_path: Path):
         "aux_video.npz",
     }.issubset(names)
     assert (Path(cfg.embedding.cache_dir) / "manifest.json").exists()
+
+
+def test_cache_dense_embeddings_uses_day_scoped_filenames(tmp_path: Path):
+    class FakeEmbedClient:
+        def __init__(self) -> None:
+            self.dim = 2
+
+        def embed_texts(self, payloads: list[str]) -> np.ndarray:
+            return np.asarray([[1.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32)
+
+        def embed_images(self, payloads: list[str]) -> np.ndarray:
+            return np.asarray([[2.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32)
+
+        def embed_videos(self, payloads: list[list[str]]) -> np.ndarray:
+            return np.asarray([[3.0, float(len(frames))] for frames in payloads], dtype=np.float32)
+
+    cfg = _config(tmp_path)
+    records = load_chunk_records(tmp_path / "missing")
+    records.transcripts = [_transcript_window(), _transcript_window().model_copy(update={"day": "day2"})]
+    records.clips = [_clip_record(), _clip_record().model_copy(update={"clip_id": "clip_day2", "day": "day2"})]
+    records.events = [_event_record(), _event_record().model_copy(update={"event_summary_id": "evt_day2", "day": "day2"})]
+    records.aux = []
+
+    paths = cache_dense_embeddings(records, cfg, FakeEmbedClient(), modality="transcript", day=1)
+    assert [path.name for path in paths] == ["transcripts_day1.npz"]
+    loaded_ids, _ = load_embedding_cache(paths[0])
+    assert loaded_ids == ["tx_0001"]
 
 
 def test_build_qdrant_index_upserts_all_cached_artifacts(tmp_path: Path, monkeypatch):

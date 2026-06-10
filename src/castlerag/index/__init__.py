@@ -15,6 +15,7 @@ from castlerag.index.pipeline import (
     build_qdrant_index,
     cache_dense_embeddings,
     discover_chunk_artifacts,
+    filter_records,
     load_chunk_records,
 )
 from castlerag.index.qdrant import (
@@ -43,6 +44,7 @@ __all__ = [
     "create_collection",
     "create_payload_indexes",
     "discover_chunk_artifacts",
+    "filter_records",
     "get_client",
     "load_aux_records",
     "load_bm25_index",

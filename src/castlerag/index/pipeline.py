@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, List, Sequence
+from typing import Callable, Iterable, List, Optional, Sequence
 
 import numpy as np
 
@@ -90,6 +90,47 @@ def load_chunk_records(chunks_dir: Path) -> LoadedArtifacts:
     return LoadedArtifacts(transcripts=transcripts, clips=clips, events=events, aux=aux)
 
 
+def filter_records(
+    records: LoadedArtifacts,
+    cfg: CastleRAGConfig,
+    day: Optional[int] = None,
+) -> LoadedArtifacts:
+    """Filter loaded artifacts to the configured camera scope and optional day."""
+    day_label = f"day{day}" if day is not None else None
+
+    def _camera_allowed(camera_id: Optional[str], camera_type: Optional[str]) -> bool:
+        if cfg.dataset.camera_scope == "all":
+            return True
+        if camera_type == "fixed":
+            return False
+        if camera_id is None:
+            return True
+        return camera_id in set(cfg.dataset.ego_cameras)
+
+    return LoadedArtifacts(
+        transcripts=[
+            row for row in records.transcripts
+            if (day_label is None or row.day == day_label)
+            and _camera_allowed(row.camera_id, row.camera_type)
+        ],
+        clips=[
+            row for row in records.clips
+            if (day_label is None or row.day == day_label)
+            and _camera_allowed(row.camera_id, row.camera_type)
+        ],
+        events=[
+            row for row in records.events
+            if (day_label is None or row.day == day_label)
+            and _camera_allowed(row.camera_id, row.camera_type)
+        ],
+        aux=[
+            row for row in records.aux
+            if (day_label is None or row.day == day_label)
+            and _camera_allowed(row.camera_id, row.camera_type)
+        ],
+    )
+
+
 def build_bm25_artifact(records: LoadedArtifacts, out_dir: Path) -> Path:
     """Build the transcript BM25 artifact from normalized transcript windows."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -101,19 +142,23 @@ def cache_dense_embeddings(
     cfg: CastleRAGConfig,
     embed_client: OmniEmbedClient,
     modality: str | None = None,
+    day: Optional[int] = None,
     force: bool = False,
 ) -> List[Path]:
     """Write restart-safe dense embedding caches for all available record groups."""
     cache_dir = Path(cfg.embedding.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
+    scoped = filter_records(records, cfg, day=day)
+    suffix = _cache_suffix(day)
+    day_label = f"day{day}" if day is not None else None
 
     cache_paths: List[Path] = []
     if modality in (None, "transcript"):
         cache_paths.append(
             _cache_records(
                 name="transcripts",
-                records=records.transcripts,
-                cache_path=cache_dir / _CACHE_TRANSCRIPTS,
+                records=scoped.transcripts,
+                cache_path=cache_dir / f"transcripts{suffix}.npz",
                 embed_fn=embed_client.embed_texts,
                 batch_size=cfg.embedding.batch_sizes.transcript,
                 payload_fn=lambda row: row.transcript_text,
@@ -123,12 +168,12 @@ def cache_dense_embeddings(
         )
 
     if modality in (None, "event_summary"):
-        event_records = [row for row in records.events if row.event_summary]
+        event_records = [row for row in scoped.events if row.event_summary]
         cache_paths.append(
             _cache_records(
                 name="events",
                 records=event_records,
-                cache_path=cache_dir / _CACHE_EVENTS,
+                cache_path=cache_dir / f"events{suffix}.npz",
                 embed_fn=embed_client.embed_texts,
                 batch_size=cfg.embedding.batch_sizes.event_summary,
                 payload_fn=lambda row: row.event_summary or "",
@@ -138,12 +183,12 @@ def cache_dense_embeddings(
         )
 
     if modality in (None, "video"):
-        clip_records = [row for row in records.clips if row.sampled_frame_paths]
+        clip_records = [row for row in scoped.clips if row.sampled_frame_paths]
         cache_paths.append(
             _cache_records(
                 name="clips",
                 records=clip_records,
-                cache_path=cache_dir / _CACHE_CLIPS,
+                cache_path=cache_dir / f"clips{suffix}.npz",
                 embed_fn=embed_client.embed_videos,
                 batch_size=cfg.embedding.batch_sizes.video,
                 payload_fn=lambda row: row.sampled_frame_paths,
@@ -152,13 +197,13 @@ def cache_dense_embeddings(
             )
         )
         aux_video_records = [
-            row for row in records.aux if row.modality == "video" and _aux_video_frames(row)
+            row for row in scoped.aux if row.modality == "video" and _aux_video_frames(row)
         ]
         cache_paths.append(
             _cache_records(
                 name="aux_video",
                 records=aux_video_records,
-                cache_path=cache_dir / _CACHE_AUX_VIDEO,
+                cache_path=cache_dir / f"aux_video{suffix}.npz",
                 embed_fn=embed_client.embed_videos,
                 batch_size=cfg.embedding.batch_sizes.video,
                 payload_fn=_aux_video_frames,
@@ -168,12 +213,14 @@ def cache_dense_embeddings(
         )
 
     if modality in (None, "image"):
-        aux_image_records = [row for row in records.aux if row.modality == "image" and row.asset_path]
+        aux_image_records = [
+            row for row in scoped.aux if row.modality == "image" and row.asset_path
+        ]
         cache_paths.append(
             _cache_records(
                 name="aux_image",
                 records=aux_image_records,
-                cache_path=cache_dir / _CACHE_AUX_IMAGE,
+                cache_path=cache_dir / f"aux_image{suffix}.npz",
                 embed_fn=embed_client.embed_images,
                 batch_size=cfg.embedding.batch_sizes.image,
                 payload_fn=lambda row: row.asset_path or "",
@@ -183,12 +230,14 @@ def cache_dense_embeddings(
         )
 
     if modality in (None, "text"):
-        aux_text_records = [row for row in records.aux if row.modality == "text" and row.summary_text]
+        aux_text_records = [
+            row for row in scoped.aux if row.modality == "text" and row.summary_text
+        ]
         cache_paths.append(
             _cache_records(
                 name="aux_text",
                 records=aux_text_records,
-                cache_path=cache_dir / _CACHE_AUX_TEXT,
+                cache_path=cache_dir / f"aux_text{suffix}.npz",
                 embed_fn=embed_client.embed_texts,
                 batch_size=cfg.embedding.batch_sizes.event_summary,
                 payload_fn=lambda row: row.summary_text or "",
@@ -202,9 +251,10 @@ def cache_dense_embeddings(
         "backend": cfg.embedding.backend,
         "generated_files": [str(path) for path in cache_paths if path.exists()],
         "dim": embed_client.dim,
+        "day": day_label,
         "version": __version__,
     }
-    write_json(cache_dir / "manifest.json", summary)
+    write_json(cache_dir / f"manifest{suffix}.json", summary)
     return [path for path in cache_paths if path.exists()]
 
 
@@ -212,17 +262,8 @@ def load_dense_caches(cache_dir: Path, records: LoadedArtifacts) -> List[CacheAr
     """Load available dense embedding caches and join them back to typed records."""
     index = _record_index(records)
     artifacts: List[CacheArtifact] = []
-    for name in (
-        _CACHE_TRANSCRIPTS,
-        _CACHE_EVENTS,
-        _CACHE_CLIPS,
-        _CACHE_AUX_TEXT,
-        _CACHE_AUX_IMAGE,
-        _CACHE_AUX_VIDEO,
-    ):
-        path = cache_dir / name
-        if not path.exists():
-            continue
+    cache_paths = sorted(cache_dir.glob("*.npz"))
+    for path in cache_paths:
         record_ids, vectors = load_embedding_cache(path)
         typed_records = [index[record_id] for record_id in record_ids if record_id in index]
         if len(typed_records) != len(record_ids):
@@ -247,7 +288,8 @@ def build_qdrant_index(
 ) -> tuple[int, List[Path]]:
     """Bootstrap Qdrant and upsert all available dense caches."""
     cache_dir = Path(cfg.embedding.cache_dir)
-    cache_artifacts = load_dense_caches(cache_dir, records)
+    scoped = filter_records(records, cfg)
+    cache_artifacts = load_dense_caches(cache_dir, scoped)
     if not cache_artifacts:
         raise FileNotFoundError(f"No embedding caches found under {cache_dir}")
 
@@ -356,3 +398,7 @@ def _aux_video_frames(record: Record) -> List[str]:
     if not isinstance(frame_paths, list):
         return []
     return [str(path) for path in frame_paths if isinstance(path, str)]
+
+
+def _cache_suffix(day: Optional[int]) -> str:
+    return f"_day{day}" if day is not None else ""
