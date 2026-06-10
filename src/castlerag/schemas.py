@@ -248,6 +248,21 @@ class RetrievalHit(BaseModel):
     asset_path: Optional[str] = None
 
 
+class EvidencePack(BaseModel):
+    """Route-aware reranker candidate assembled from retrieval hits."""
+
+    pack_id: str
+    route: QuestionRoute
+    primary_hit: RetrievalHit
+    retrieval_score: float = 0.0
+    evidence_rows: List[RetrievalHit] = Field(default_factory=list)
+    transcript_evidence: List[str] = Field(default_factory=list)
+    event_summaries: List[str] = Field(default_factory=list)
+    ocr_spans: List[str] = Field(default_factory=list)
+    frame_descriptions: List[str] = Field(default_factory=list)
+    auxiliary_notes: List[str] = Field(default_factory=list)
+
+
 class RerankerOutput(BaseModel):
     """Structured JSON output from the reranker LLM per candidate pack."""
 
@@ -266,6 +281,25 @@ class RerankerOutput(BaseModel):
             if not 0 <= v[key] <= 4:
                 raise ValueError(f"support['{key}'] must be 0-4, got {v[key]}")
         return v
+
+
+class RerankedEvidencePack(BaseModel):
+    """Candidate pack plus reranker output and final score."""
+
+    pack: EvidencePack
+    reranker_output: RerankerOutput
+    final_rerank_score: float
+
+
+class RerankResult(BaseModel):
+    """Top reranked packs, support priors, and flattened evidence rows."""
+
+    route: QuestionRoute
+    kept_packs: List[RerankedEvidencePack] = Field(default_factory=list)
+    support_priors: Dict[str, float] = Field(
+        default_factory=lambda: {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}
+    )
+    evidence_rows: List[RetrievalHit] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

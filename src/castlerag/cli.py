@@ -14,6 +14,7 @@ from rich.console import Console
 
 from castlerag.config import CastleRAGConfig, load_config
 from castlerag.embed.omniembed import OmniEmbedClient
+from castlerag.eval import PipelineDependencyError, load_questions, run_eval
 from castlerag.index import get_client, load_bm25_index
 from castlerag.index.pipeline import (
     build_bm25_artifact,
@@ -262,12 +263,26 @@ def answer(
     """Run full retrieve → rerank → generate pipeline on CASTLE questions."""
     cfg = _resolve_config(config, snellius)
     out_path = out or Path(cfg.outputs.predictions)
+    override = _default_snellius_path() if snellius else config
     console.print("[bold]castlerag answer[/bold]")
     console.print(f"  questions : {questions_path}")
     console.print(f"  model     : {cfg.generation.model}")
     console.print(f"  output    : {out_path}")
-    console.print("[red]answer pipeline not yet implemented — see issues #8–#14[/red]")
-    raise typer.Exit(1)
+    questions = load_questions(questions_path)
+    try:
+        result = run_eval(
+            questions,
+            config_path=override,
+            question_ids=[question_id] if question_id else None,
+            predictions_path=out_path,
+        )
+    except (PipelineDependencyError, NotImplementedError, ValueError, KeyError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    console.print(f"  predicted : {len(result.predictions)} questions")
+    console.print(f"  traces    : {result.output_paths.evidence_traces}")
+    console.print(f"  submit    : {result.output_paths.submissions}")
 
 
 @app.command(name="eval")
@@ -280,12 +295,7 @@ def eval_cmd(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
 ) -> None:
     """Evaluate predictions against ground truth and export submission JSON."""
-    from castlerag.eval.io import (
-        compute_accuracy,
-        export_submission,
-        load_predictions,
-        load_questions,
-    )
+    from castlerag.eval.io import compute_accuracy, export_submission, load_predictions
 
     cfg = _resolve_config(config, False)
     questions = load_questions(questions_path)
@@ -320,12 +330,23 @@ def smoke_test(
     n: int = typer.Option(5, "--n", help="Number of questions to run (default 5)"),
 ) -> None:
     """5-question end-to-end smoke test (issue #15)."""
-    _resolve_config(config, False)
+    cfg = _resolve_config(config, False)
     console.print(f"[bold]castlerag smoke-test[/bold]  n={n}")
-    console.print(
-        "[red]smoke-test not yet implemented — depends on issues #3–#14[/red]"
-    )
-    raise typer.Exit(1)
+    questions = load_questions(questions_path)
+    out_dir = Path(cfg.outputs.dir) / "smoke_test"
+    try:
+        result = run_eval(
+            questions,
+            config_path=config,
+            out_dir=out_dir,
+            max_questions=n,
+        )
+    except (PipelineDependencyError, NotImplementedError, ValueError, KeyError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    console.print(f"  predicted : {len(result.predictions)} questions")
+    console.print(f"  output    : {result.output_paths.predictions}")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
-"""Loaders for official CASTLE questions, local answer keys, and submission export."""
+"""Loaders for official CASTLE questions, eval artifacts, and submission export."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Iterable, List
 
 from castlerag.schemas import EvalQuestion, Prediction
 
@@ -27,6 +27,7 @@ def load_questions(path: Path) -> Dict[str, EvalQuestion]:
             question_id=qid,
             query=item["query"],
             answers=item["answers"],
+            ground_truth=item.get("ground_truth"),
         )
         for qid, item in raw.items()
     }
@@ -78,9 +79,64 @@ def compute_accuracy(
     return correct / graded if graded > 0 else 0.0
 
 
+def select_questions(
+    questions: Dict[str, EvalQuestion],
+    *,
+    question_ids: Iterable[str] | None = None,
+    limit: int | None = None,
+) -> Dict[str, EvalQuestion]:
+    """Select a deterministic subset of questions.
+
+    The source JSON order is preserved. If ``question_ids`` is provided, the
+    subset follows that order and rejects unknown ids immediately.
+    """
+    if question_ids is not None:
+        selected: Dict[str, EvalQuestion] = {}
+        missing: List[str] = []
+        for qid in question_ids:
+            question = questions.get(qid)
+            if question is None:
+                missing.append(qid)
+                continue
+            selected[qid] = question
+        if missing:
+            missing_str = ", ".join(missing)
+            raise KeyError(f"Unknown question ids: {missing_str}")
+    else:
+        selected = dict(questions)
+
+    if limit is not None:
+        if limit <= 0:
+            raise ValueError("limit must be > 0")
+        items = list(selected.items())[:limit]
+        selected = dict(items)
+
+    return selected
+
+
+def write_predictions(predictions: Dict[str, Prediction], out_path: Path) -> None:
+    """Write rich prediction artifacts for local evaluation/debugging."""
+    payload = {
+        qid: pred.model_dump(mode="json")
+        for qid, pred in sorted(predictions.items())
+    }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2))
+
+
+def write_evidence_traces(traces: List[dict], out_path: Path) -> None:
+    """Write one JSON object per line for downstream trace inspection."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w") as f:
+        for trace in traces:
+            f.write(json.dumps(trace))
+            f.write("\n")
+
+
 def export_submission(predictions: Dict[str, Prediction], out_path: Path) -> None:
     """Write submission JSON in the official format: {question_id: answer}."""
     submission = {
         qid: pred.predicted_answer for qid, pred in sorted(predictions.items())
     }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(submission, indent=2))
