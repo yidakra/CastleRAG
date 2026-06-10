@@ -37,8 +37,6 @@ module load Python/3.11.3-GCCcore-12.3.0
 
 source "${VENV}/bin/activate"
 
-# Caption and OCR are run via the castlerag CLI once issue #4 is implemented.
-# Placeholder: will be replaced with:
-#   castlerag preprocess caption-ocr --config "${CONFIG}" --day "${DAY}"
-echo "caption_ocr not yet implemented — see issue #4"
-exit 1
+castlerag preprocess --caption --config "${CONFIG}" --day "${DAY}"
+
+echo "[caption_ocr] done  day=${DAY}  end=$(date -Iseconds)"

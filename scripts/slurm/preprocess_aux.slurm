@@ -30,5 +30,6 @@ module load Python/3.11.3-GCCcore-12.3.0
 
 source "${VENV}/bin/activate"
 
-echo "preprocess_aux not yet implemented — see issue #4"
-exit 1
+castlerag preprocess --aux --config "${CONFIG}"
+
+echo "[preprocess_aux] done  end=$(date -Iseconds)"
