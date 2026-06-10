@@ -21,7 +21,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import numpy as np
 
@@ -424,12 +424,14 @@ def main() -> None:
         tmp_dir = Path(tmp)
         print("\nBuilding in-memory index...")
         t0 = time.perf_counter()
-        bm25, qdrant, collection = _build_inmemory_index(embed_client, dim or _STUB_DIM, tmp_dir)
+        effective_dim = dim or _STUB_DIM
+        bm25, qdrant, collection = _build_inmemory_index(
+            embed_client, effective_dim, tmp_dir
+        )
         print(f"  index ready in {time.perf_counter() - t0:.1f}s")
 
         pipeline = _build_pipeline(embed_client, llm_client, bm25, qdrant, collection)
 
-        from castlerag.eval.io import load_questions
         from castlerag.eval.run_eval import run_eval
         from castlerag.schemas import EvalQuestion
 
