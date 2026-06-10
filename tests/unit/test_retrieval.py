@@ -324,6 +324,7 @@ def test_retrieve_consumes_router_budget_profile_without_reparsing():
     hints.evidence_profile = RouteEvidenceProfile(
         transcript_budget=1,
         candidate_video_budget=4,
+        frames_per_candidate_video=32,
         auxiliary_image_budget=16,
         max_evidence_rows=50,
         source_priority=("main_clip", "transcript_window"),

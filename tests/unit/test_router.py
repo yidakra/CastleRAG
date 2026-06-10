@@ -48,6 +48,7 @@ def test_route_question_static_visual_prefers_visual_sources():
     assert hints.has_visual_cue is True
     assert hints.has_speech_cue is False
     assert hints.evidence_profile.source_priority[0] == "main_clip"
+    assert hints.evidence_profile.frames_per_candidate_video == 32
 
 
 def test_route_question_mixed_combines_visual_and_speech_cues():
@@ -78,6 +79,8 @@ def test_route_hints_default_profile_matches_route_and_is_not_shared():
     assert visual_hints.evidence_profile is not None
     assert speech_hints.evidence_profile.transcript_budget == 30
     assert visual_hints.evidence_profile.transcript_budget == 10
+    assert speech_hints.evidence_profile.frames_per_candidate_video == 32
+    assert visual_hints.evidence_profile.frames_per_candidate_video == 32
     assert speech_hints.evidence_profile is not visual_hints.evidence_profile
 
 

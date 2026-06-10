@@ -153,6 +153,7 @@ class RouteEvidenceProfile:
 
     transcript_budget: int
     candidate_video_budget: int
+    frames_per_candidate_video: int
     auxiliary_image_budget: int
     max_evidence_rows: int
     source_priority: Tuple[str, ...]
@@ -162,6 +163,7 @@ _ROUTE_PROFILES: Dict[QuestionRoute, RouteEvidenceProfile] = {
     "static_visual": RouteEvidenceProfile(
         transcript_budget=10,
         candidate_video_budget=4,
+        frames_per_candidate_video=32,
         auxiliary_image_budget=16,
         max_evidence_rows=50,
         source_priority=(
@@ -178,6 +180,7 @@ _ROUTE_PROFILES: Dict[QuestionRoute, RouteEvidenceProfile] = {
     "speech_text": RouteEvidenceProfile(
         transcript_budget=30,
         candidate_video_budget=4,
+        frames_per_candidate_video=32,
         auxiliary_image_budget=16,
         max_evidence_rows=50,
         source_priority=(
@@ -194,6 +197,7 @@ _ROUTE_PROFILES: Dict[QuestionRoute, RouteEvidenceProfile] = {
     "temporal": RouteEvidenceProfile(
         transcript_budget=30,
         candidate_video_budget=4,
+        frames_per_candidate_video=32,
         auxiliary_image_budget=16,
         max_evidence_rows=50,
         source_priority=(
@@ -210,6 +214,7 @@ _ROUTE_PROFILES: Dict[QuestionRoute, RouteEvidenceProfile] = {
     "mixed": RouteEvidenceProfile(
         transcript_budget=30,
         candidate_video_budget=4,
+        frames_per_candidate_video=32,
         auxiliary_image_budget=16,
         max_evidence_rows=50,
         source_priority=(
@@ -323,6 +328,7 @@ def _profile_for_route(route: QuestionRoute) -> RouteEvidenceProfile:
     return RouteEvidenceProfile(
         transcript_budget=profile.transcript_budget,
         candidate_video_budget=profile.candidate_video_budget,
+        frames_per_candidate_video=profile.frames_per_candidate_video,
         auxiliary_image_budget=profile.auxiliary_image_budget,
         max_evidence_rows=profile.max_evidence_rows,
         source_priority=tuple(profile.source_priority),
