@@ -321,6 +321,24 @@ def test_load_raw_segments_malformed_timestamp(tmp_path: Path):
         load_raw_segments(f)
 
 
+def test_load_raw_segments_null_timestamp_skipped(tmp_path: Path):
+    """Whisper emits null timestamps for unaligned segments; skip them silently."""
+    data = {
+        "chunks": [
+            {"timestamp": [0.0, 5.0], "text": "Good"},
+            {"timestamp": [None, None], "text": "unaligned"},
+            {"timestamp": [5.0, None], "text": "partial null"},
+            {"timestamp": [10.0, 15.0], "text": "fine"},
+        ]
+    }
+    f = tmp_path / "08.json"
+    f.write_text(json.dumps(data))
+    segs = load_raw_segments(f)
+    assert len(segs) == 2
+    assert segs[0].text == "Good"
+    assert segs[1].text == "fine"
+
+
 def test_load_raw_segments_empty(tmp_path: Path):
     f = tmp_path / "empty.json"
     f.write_text(json.dumps({"chunks": []}))
