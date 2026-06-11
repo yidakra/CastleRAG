@@ -29,6 +29,8 @@ def load_raw_segments(path: Path) -> List[TranscriptSegment]:
                 f"Malformed timestamp in chunk {i} of {path}: "
                 f"expected [start, end], got {ts!r}"
             )
+        if ts[0] is None or ts[1] is None:
+            continue
         segments.append(
             TranscriptSegment(
                 start=float(ts[0]),
