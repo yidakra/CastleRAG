@@ -37,11 +37,6 @@ def test_preprocess_dry_run_shows_config():
     assert "ego" in result.output
 
 
-def test_preprocess_not_yet_implemented():
-    result = runner.invoke(app, ["preprocess"])
-    assert result.exit_code != 0
-
-
 def test_embed_dry_run():
     result = runner.invoke(app, ["embed", "--dry-run"])
     assert result.exit_code == 0

@@ -37,5 +37,11 @@ module load Python/3.11.3-GCCcore-12.3.0
 
 source "${VENV}/bin/activate"
 
-echo "compress_events not yet implemented — see issue #4"
-exit 1
+if [[ -z "${VLLM_BASE_URL:-}" ]]; then
+  echo "[compress_events] ERROR: VLLM_BASE_URL is not set. Export it before submitting this job." >&2
+  exit 1
+fi
+
+castlerag preprocess --events --config "${CONFIG}" --day "${DAY}"
+
+echo "[compress_events] done  day=${DAY}  end=$(date -Iseconds)"

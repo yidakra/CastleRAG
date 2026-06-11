@@ -85,14 +85,45 @@ def preprocess(
     day: Optional[int] = typer.Option(
         None, "--day", min=1, max=4, help="Process a single day (1-4)"
     ),
+    caption: bool = typer.Option(
+        False,
+        "--caption",
+        help="Run per-clip caption + OCR (requires VLLM_BASE_URL)",
+    ),
+    events: bool = typer.Option(
+        False,
+        "--events",
+        help="Compress clip groups into event summaries (requires VLLM_BASE_URL)",
+    ),
+    aux: bool = typer.Option(
+        False,
+        "--aux",
+        help="Normalize auxiliary modalities (photo, thermal, video)",
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print actions without writing files"
     ),
 ) -> None:
-    """Discover CASTLE files and build normalized preprocessing artifacts."""
+    """Discover CASTLE files and build normalized preprocessing artifacts.
+
+    Base phase (always): windows, 1 fps frames, transcript normalization.
+    --caption : annotate each clip with visual caption + OCR  (GPU / vLLM)
+    --events  : compress 4-clip groups into event summaries   (GPU / vLLM)
+    --aux     : normalize photo, thermal, auxiliary video     (CPU)
+    """
+    from castlerag.dataset.layout import discover_hours
+    from castlerag.dataset.transcripts import load_raw_segments, merge_into_windows
+    from castlerag.index.io import write_jsonl_records
+    from castlerag.preprocess.media import extract_frames_1fps, get_video_duration
+    from castlerag.preprocess.windows import iter_windows, mark_placeholder_windows
+    from castlerag.schemas import ClipRecord
+
     cfg = _resolve_config(config, snellius)
-    days = [day] if day is not None else cfg.dataset.days
-    console.print(f"[bold]castlerag preprocess[/bold]  days={days}  dry_run={dry_run}")
+    days_list = [day] if day is not None else cfg.dataset.days
+    console.print(
+        f"[bold]castlerag preprocess[/bold]  days={days_list}  "
+        f"caption={caption}  events={events}  aux={aux}  dry_run={dry_run}"
+    )
     console.print(f"  dataset root  : {cfg.dataset.root}")
     console.print(
         f"  camera scope  : {cfg.dataset.camera_scope}  "
@@ -105,8 +136,220 @@ def preprocess(
     if dry_run:
         console.print("[yellow]dry-run: no files written[/yellow]")
         return
-    console.print("[red]preprocess not yet implemented — see issues #3, #4[/red]")
-    raise typer.Exit(1)
+
+    if (caption or events) and not _vllm_base_url():
+        console.print(
+            "[red]--caption and --events require VLLM_BASE_URL to be set.[/red]"
+        )
+        raise typer.Exit(1)
+
+    root = Path(cfg.dataset.root)
+    chunks_dir = Path(cfg.preprocessing.chunks_dir)
+    frames_dir = Path(cfg.preprocessing.frames_dir)
+
+    # ------------------------------------------------------------------ #
+    # Base phase: windowing + frames + transcript normalization            #
+    # ------------------------------------------------------------------ #
+    n_clips = n_windows = 0
+    for asset in discover_hours(
+        root=root,
+        ego_cameras=cfg.dataset.ego_cameras,
+        exo_cameras=cfg.dataset.exo_cameras,
+        days=days_list,
+        hours=cfg.dataset.hours,
+        camera_scope=cfg.dataset.camera_scope,
+    ):
+        if asset.missing_video:
+            continue
+
+        out_dir = chunks_dir / asset.day / asset.camera_id / f"{asset.hour:02d}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            duration = get_video_duration(asset.video_path)
+        except Exception as exc:
+            console.print(
+                f"[yellow]  skip {asset.day}/{asset.camera_id}/{asset.hour:02d}"
+                f" — ffprobe failed: {exc}[/yellow]"
+            )
+            continue
+
+        windows = list(
+            iter_windows(
+                video_path=asset.video_path,
+                camera_id=asset.camera_id,
+                day=asset.day,
+                hour=asset.hour,
+                duration_seconds=duration,
+                clip_seconds=cfg.preprocessing.clip_seconds,
+                stride_seconds=cfg.preprocessing.stride_seconds,
+            )
+        )
+
+        frame_base = frames_dir / asset.day / asset.camera_id / f"{asset.hour:02d}"
+        for w in windows:
+            clip_frame_dir = frame_base / str(w.clip_index)
+            extract_frames_1fps(
+                asset.video_path,
+                clip_frame_dir,
+                w.start_seconds,
+                w.end_seconds,
+                fps=cfg.preprocessing.fps,
+            )
+
+        windows = mark_placeholder_windows(windows, frame_base)
+
+        # Relative ms base: day offset + hour offset (calendar dates TBD)
+        day_index = int(asset.day.lstrip("day")) - 1
+        base_ms = (day_index * 86400 + asset.hour * 3600) * 1000
+
+        clips: list[ClipRecord] = []
+        for w in windows:
+            clip_frame_dir = frame_base / str(w.clip_index)
+            frame_paths = sorted(clip_frame_dir.glob("*.jpg"))
+            clip_id = (
+                f"{asset.day}_{asset.camera_id}_{asset.hour:02d}_{w.clip_index:04d}"
+            )
+            clips.append(
+                ClipRecord(
+                    clip_id=clip_id,
+                    parent_source_id=(
+                        f"{asset.day}_{asset.camera_id}_{asset.hour:02d}"
+                    ),
+                    day=asset.day,
+                    hour=asset.hour,
+                    camera_id=asset.camera_id,
+                    camera_type=asset.camera_type,
+                    participant_id=asset.participant_id,
+                    room=asset.room,
+                    start_seconds=w.start_seconds,
+                    end_seconds=w.end_seconds,
+                    absolute_start=base_ms + int(w.start_seconds * 1000),
+                    absolute_end=base_ms + int(w.end_seconds * 1000),
+                    source_video_path=str(asset.video_path),
+                    sampled_frame_paths=[str(p) for p in frame_paths],
+                    is_placeholder=w.is_placeholder,
+                )
+            )
+
+        tw_list = []
+        if asset.transcript_path and asset.transcript_path.exists():
+            segments = load_raw_segments(asset.transcript_path)
+            tw_list = merge_into_windows(
+                segments=segments,
+                base_unix_ms=base_ms,
+                camera_id=asset.camera_id,
+                camera_type=asset.camera_type,
+                participant_id=asset.participant_id,
+                room=asset.room,
+                day=asset.day,
+                hour=asset.hour,
+            )
+
+        write_jsonl_records(clips, out_dir / "clips.jsonl")
+        write_jsonl_records(tw_list, out_dir / "transcripts.jsonl")
+        n_clips += len(clips)
+        n_windows += len(tw_list)
+
+    console.print(
+        f"  base          : {n_clips} clips, {n_windows} transcript windows written"
+    )
+
+    # ------------------------------------------------------------------ #
+    # Caption / OCR phase                                                  #
+    # ------------------------------------------------------------------ #
+    if caption:
+        from castlerag.index.io import load_clip_records
+        from castlerag.preprocess.caption_ocr import annotate_clip
+
+        vllm_url = _vllm_base_url()
+        n_annotated = 0
+        for clips_path in sorted(chunks_dir.rglob("clips.jsonl")):
+            clip_records = load_clip_records(clips_path)
+            updated: list[ClipRecord] = []
+            for cr in clip_records:
+                frames = [Path(p) for p in cr.sampled_frame_paths]
+                try:
+                    ann = annotate_clip(
+                        clip_id=cr.clip_id,
+                        frame_paths=frames,
+                        transcript_text=cr.transcript_text,
+                        model_name=cfg.generation.model,
+                        vllm_base_url=vllm_url,
+                    )
+                    updated.append(
+                        cr.model_copy(
+                            update={
+                                "clip_caption": ann.clip_caption,
+                                "ocr_text": ann.ocr_text,
+                            }
+                        )
+                    )
+                except Exception as exc:
+                    console.print(
+                        f"[yellow]  caption skipped {cr.clip_id}: {exc}[/yellow]"
+                    )
+            write_jsonl_records(updated, clips_path)
+            n_annotated += len(updated)
+        console.print(f"  caption/OCR   : {n_annotated} clips annotated")
+
+    # ------------------------------------------------------------------ #
+    # Event compression phase                                              #
+    # ------------------------------------------------------------------ #
+    if events:
+        from castlerag.index.io import load_clip_records
+        from castlerag.preprocess.event_compress import compress_clips_to_event
+
+        vllm_url = _vllm_base_url()
+        n_events = 0
+        for clips_path in sorted(chunks_dir.rglob("clips.jsonl")):
+            clip_records = [
+                cr for cr in load_clip_records(clips_path) if not cr.is_placeholder
+            ]
+            clip_records.sort(key=lambda c: c.absolute_start)
+            event_records = []
+            for i in range(0, len(clip_records) - 3, 4):
+                group = clip_records[i : i + 4]
+                if len(group) < 4:
+                    break
+                try:
+                    ev = compress_clips_to_event(
+                        clips=group,
+                        model_name=cfg.generation.model,
+                        vllm_base_url=vllm_url,
+                    )
+                    event_records.append(ev)
+                except Exception as exc:
+                    console.print(f"[yellow]  event compress skipped: {exc}[/yellow]")
+            if event_records:
+                ev_path = clips_path.parent / "events.jsonl"
+                write_jsonl_records(event_records, ev_path)
+                n_events += len(event_records)
+        console.print(f"  events        : {n_events} event summaries written")
+
+    # ------------------------------------------------------------------ #
+    # Auxiliary phase                                                      #
+    # ------------------------------------------------------------------ #
+    if aux:
+        from castlerag.preprocess.auxiliary import (
+            iter_aux_video_records,
+            iter_photo_records,
+            iter_thermal_records,
+        )
+
+        aux_records = []
+        for day_num in days_list:
+            day_label = f"day{day_num}"
+            for cam in cfg.dataset.ego_cameras:
+                aux_records.extend(iter_photo_records(root, cam, day_label))
+            aux_records.extend(iter_thermal_records(root, day_label))
+            aux_records.extend(iter_aux_video_records(root, day_label))
+
+        if aux_records:
+            aux_out = chunks_dir / "aux.jsonl"
+            aux_out.parent.mkdir(parents=True, exist_ok=True)
+            write_jsonl_records(aux_records, aux_out)
+        console.print(f"  aux           : {len(aux_records)} auxiliary records written")
 
 
 @app.command()

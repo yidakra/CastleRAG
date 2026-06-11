@@ -63,22 +63,52 @@ Expected layout:
 ## Pipeline commands
 
 ```bash
-# Discover files, create 30 s clips, extract 1 fps frames, normalize transcripts
+# Base preprocessing — windowing, 1 fps frames, transcript normalization (CPU)
 castlerag preprocess --snellius --day 1
 
-# Encode derived chunks with OmniEmbed (requires GPU)
+# Per-clip caption + OCR (GPU, requires VLLM_BASE_URL)
 export VLLM_BASE_URL=http://localhost:8000/v1
+castlerag preprocess --caption --snellius --day 1
+
+# Compress 4-clip groups into 2-minute event summaries (GPU)
+castlerag preprocess --events --snellius --day 1
+
+# Normalize auxiliary modalities — photo, thermal, video (CPU)
+castlerag preprocess --aux --snellius
+
+# Encode derived chunks with OmniEmbed (GPU)
 castlerag embed --snellius --modality transcript --day 1
 castlerag embed --snellius --modality video --day 1
 
 # Create Qdrant collection and upsert evidence points
 castlerag index --snellius --create-collection
 
-# Evaluate predictions
+# Run full pipeline on CASTLE questions
+castlerag answer questions.json --snellius
+
+# Evaluate predictions against ground truth
 castlerag eval questions.json predictions.json --answers ground_truth.json
 
-# 5-question smoke test (issue #15)
+# 5-question smoke test against a live vLLM endpoint
 castlerag smoke-test questions.json --n 5
+```
+
+## Local offline smoke test
+
+Verify pipeline wiring without any models or running services:
+
+```bash
+python scripts/smoke_local.py
+```
+
+Uses in-memory Qdrant, random-vector embeddings, and a stub LLM to confirm all
+code paths connect end-to-end. Exit 0 = all 5 synthetic questions produce a
+valid `a|b|c|d` prediction.
+
+With a real local model endpoint (Ollama, llama.cpp, local vLLM):
+
+```bash
+VLLM_BASE_URL=http://localhost:11434/v1 python scripts/smoke_local.py --real
 ```
 
 ## Running on Snellius
@@ -87,17 +117,26 @@ Edit `configs/snellius.yaml` to set your account and scratch paths, then:
 
 ```bash
 # Submit in dependency order (replace <job_id> with the id returned by sbatch):
-sbatch scripts/slurm/preprocess_main.slurm
-sbatch scripts/slurm/index_transcripts.slurm
-sbatch scripts/slurm/embed_text.slurm
-sbatch scripts/slurm/embed_video.slurm
-sbatch scripts/slurm/embed_images.slurm
-sbatch scripts/slurm/index_qdrant.slurm
 
-# Not yet implemented — do not submit until the referenced issues are resolved:
-# scripts/slurm/caption_ocr.slurm      (issue #4)
-# scripts/slurm/compress_events.slurm  (issue #4)
-# scripts/slurm/preprocess_aux.slurm   (issue #13)
+# 1. Base preprocessing — windowing, 1 fps frames, transcript normalization (CPU)
+JOB1=$(sbatch --parsable scripts/slurm/preprocess_main.slurm)
+
+# 2a. Per-clip caption + OCR — array job, one task per day (GPU, needs VLLM_BASE_URL)
+export VLLM_BASE_URL=http://<vllm-host>:8000/v1
+JOB2=$(sbatch --parsable --dependency=afterok:${JOB1} scripts/slurm/caption_ocr.slurm)
+
+# 2b. Auxiliary modality normalization — runs in parallel with caption_ocr (CPU)
+JOB2B=$(sbatch --parsable --dependency=afterok:${JOB1} scripts/slurm/preprocess_aux.slurm)
+
+# 3. Event compression — depends on caption_ocr (GPU, needs VLLM_BASE_URL)
+JOB3=$(sbatch --parsable --dependency=afterok:${JOB2} scripts/slurm/compress_events.slurm)
+
+# 4. Embedding and indexing
+sbatch --dependency=afterok:${JOB3} scripts/slurm/index_transcripts.slurm
+sbatch --dependency=afterok:${JOB3} scripts/slurm/embed_text.slurm
+sbatch --dependency=afterok:${JOB3} scripts/slurm/embed_video.slurm
+sbatch --dependency=afterok:${JOB3} scripts/slurm/embed_images.slurm
+sbatch --dependency=afterok:${JOB3} scripts/slurm/index_qdrant.slurm
 ```
 
 Estimated cost: ~EUR 115–204 for the full ego-only evidence build
