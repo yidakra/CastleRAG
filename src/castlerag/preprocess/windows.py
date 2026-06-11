@@ -81,7 +81,7 @@ def mark_placeholder_windows(
     """
     if not (0.0 <= placeholder_threshold <= 1.0):
         raise ValueError("placeholder_threshold must be between 0.0 and 1.0")
-    from castlerag.preprocess.media import is_placeholder_frame
+    from castlerag.preprocess.media import is_placeholder_frame, is_static_window
 
     result: List[VideoWindow] = []
     for w in windows:
@@ -92,6 +92,9 @@ def mark_placeholder_windows(
             continue
         n_placeholder = sum(1 for f in frames if is_placeholder_frame(f))
         frac = n_placeholder / len(frames)
+        # Also flag windows where all frames are nearly identical regardless of
+        # their per-frame variance (catches coloured or patterned test cards).
+        static = is_static_window(frames)
         result.append(
             VideoWindow(
                 camera_id=w.camera_id,
@@ -101,7 +104,7 @@ def mark_placeholder_windows(
                 start_seconds=w.start_seconds,
                 end_seconds=w.end_seconds,
                 source_video_path=w.source_video_path,
-                is_placeholder=frac > placeholder_threshold,
+                is_placeholder=frac > placeholder_threshold or static,
             )
         )
     return result

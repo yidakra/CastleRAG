@@ -402,6 +402,117 @@ def test_is_placeholder_frame_real_scene(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# is_static_window
+# ---------------------------------------------------------------------------
+
+
+def _save_gray(path: Path, value: int) -> Path:
+    import numpy as np
+    from PIL import Image
+
+    Image.fromarray(np.full((32, 32), value, dtype=np.uint8), mode="L").save(path)
+    return path
+
+
+def _save_noise(path: Path, seed: int) -> Path:
+    import numpy as np
+    from PIL import Image
+
+    rng = np.random.default_rng(seed)
+    Image.fromarray(
+        rng.integers(0, 256, (32, 32), dtype=np.uint8), mode="L"
+    ).save(path)
+    return path
+
+
+def test_is_static_window_identical_frames(tmp_path: Path):
+    from castlerag.preprocess.media import is_static_window
+
+    frames = [_save_gray(tmp_path / f"f{i}.jpg", 128) for i in range(5)]
+    assert is_static_window(frames) is True
+
+
+def test_is_static_window_colorful_static_card(tmp_path: Path):
+    """Patterned test card with high per-frame variance is still detected as static."""
+    import numpy as np
+    from PIL import Image
+
+    from castlerag.preprocess.media import is_placeholder_frame, is_static_window
+
+    pattern = np.tile(np.arange(32, dtype=np.uint8), (32, 1))
+    frames = []
+    for i in range(5):
+        p = tmp_path / f"f{i}.jpg"
+        Image.fromarray(pattern, mode="L").save(p)
+        frames.append(p)
+    assert is_placeholder_frame(frames[0]) is False  # high variance, not caught alone
+    assert is_static_window(frames) is True  # but caught by inter-frame check
+
+
+def test_is_static_window_real_scene(tmp_path: Path):
+    from castlerag.preprocess.media import is_static_window
+
+    frames = [_save_noise(tmp_path / f"f{i}.jpg", seed=i) for i in range(5)]
+    assert is_static_window(frames) is False
+
+
+def test_is_static_window_too_few_frames(tmp_path: Path):
+    from castlerag.preprocess.media import is_static_window
+
+    frames = [_save_gray(tmp_path / "f0.jpg", 100)]
+    assert is_static_window(frames) is False
+
+
+def test_is_static_window_empty():
+    from castlerag.preprocess.media import is_static_window
+
+    assert is_static_window([]) is False
+
+
+def test_is_static_window_respects_threshold(tmp_path: Path):
+    """Slightly varying frames pass a loose threshold but fail a tight one."""
+    import numpy as np
+    from PIL import Image
+
+    from castlerag.preprocess.media import is_static_window
+
+    frames = []
+    for i in range(5):
+        p = tmp_path / f"f{i}.jpg"
+        arr = np.full((32, 32), 128 + i, dtype=np.uint8)
+        Image.fromarray(arr, mode="L").save(p)
+        frames.append(p)
+    assert is_static_window(frames, diff_threshold=10.0) is True
+    assert is_static_window(frames, diff_threshold=0.5) is False
+
+
+def test_mark_placeholder_windows_detects_static_colorful_card(tmp_path: Path):
+    """is_static_window catches patterned test cards mark_placeholder_windows misses."""
+    import numpy as np
+    from PIL import Image
+
+    pattern = np.tile(np.arange(32, dtype=np.uint8), (32, 1))
+    clip_dir = tmp_path / "0"
+    clip_dir.mkdir()
+    for i in range(5):
+        Image.fromarray(pattern, mode="L").save(clip_dir / f"{i:04d}.jpg")
+
+    wins = [
+        VideoWindow(
+            camera_id="Allie",
+            day="day1",
+            hour=8,
+            clip_index=0,
+            start_seconds=0.0,
+            end_seconds=30.0,
+            source_video_path=Path("/fake/video.mp4"),
+        )
+    ]
+    result = mark_placeholder_windows(wins, tmp_path)
+    assert result[0].is_placeholder is True
+
+
+# ---------------------------------------------------------------------------
 # event_compress
 # ---------------------------------------------------------------------------
 

@@ -132,3 +132,39 @@ def is_placeholder_frame(frame_path: Path) -> bool:
     with Image.open(frame_path) as img:
         arr = np.array(img.convert("L"), dtype=np.float32)
     return float(arr.std()) < 8.0
+
+
+def is_static_window(frame_paths: List[Path], diff_threshold: float = 2.0) -> bool:
+    """Return True if frames across the window are nearly identical.
+
+    Computes the median mean-absolute-difference between consecutive grayscale
+    frames sampled evenly across the window.  A static test card produces a
+    value near zero regardless of its colour or pattern; real egocentric scenes
+    at 1 fps consistently exceed the threshold even when the participant is
+    sitting still (camera noise, subtle motion).
+
+    This catches colorful or patterned test cards that is_placeholder_frame
+    alone would miss.  Requires at least 2 frames; returns False for shorter
+    inputs.
+    """
+    if len(frame_paths) < 2:
+        return False
+
+    import numpy as np
+    from PIL import Image
+
+    step = max(1, len(frame_paths) // 8)
+    sample = frame_paths[::step][:8]
+
+    diffs: List[float] = []
+    prev: "np.ndarray | None" = None
+    for fp in sample:
+        with Image.open(fp) as img:
+            arr = np.array(img.convert("L"), dtype=np.float32)
+        if prev is not None:
+            diffs.append(float(np.mean(np.abs(arr - prev))))
+        prev = arr
+
+    if not diffs:
+        return False
+    return float(np.median(diffs)) < diff_threshold
