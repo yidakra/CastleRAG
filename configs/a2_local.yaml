@@ -1,0 +1,41 @@
+# CastleRAG local configuration for a dual NVIDIA A2 (16 GB) host.
+# Deep-merges on top of configs/base.yaml — only overrides what differs.
+
+dataset:
+  root: "/data/castle2024"
+  hf_repo: "CASTLE-Dataset/CASTLE2024"   # actual repo ID; base.yaml has the wrong slug
+  # Real camera names in the HF repo differ from base.yaml; override here.
+  ego_cameras:
+    - "Allie"
+    - "Bjorn"
+    - "Cathal"
+  exo_cameras:
+    - "Kitchen"
+    - "Living1"
+    - "Living2"
+    - "Meeting"
+    - "Reading"
+  # Partial-download slice: only hours 08-13 of day 1 land on disk.
+  hours: [8, 9, 10, 11, 12, 13]
+
+preprocessing:
+  frames_dir: "/data/castle_derived/frames_1fps"
+  clips_dir: "/data/castle_derived/clips"
+  manifests_dir: "/data/castle_derived/manifests"
+  chunks_dir: "/data/castle_derived/chunks"
+
+embedding:
+  cache_dir: "/data/castle_derived/embeddings"
+  vllm_tensor_parallel: 2
+  vllm_gpu_memory_utilization: 0.88
+
+qdrant:
+  host: "localhost"
+  port: 6333
+
+outputs:
+  dir: "/data/castle_outputs"
+  predictions: "/data/castle_outputs/predictions.json"
+  evidence_traces: "/data/castle_outputs/evidence_traces.jsonl"
+  submissions: "/data/castle_outputs/submissions.json"
+  metrics: "/data/castle_outputs/metrics.json"
