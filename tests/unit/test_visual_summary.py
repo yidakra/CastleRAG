@@ -25,17 +25,7 @@ def test_empty_frame_paths_returns_empty_string():
 
 
 def test_missing_vllm_base_url_raises_value_error():
-    with pytest.raises(ValueError, match="vllm_base_url"):
-        generate_visual_summary(
-            frame_paths=[],
-            transcript_text=None,
-            model_name="llava",
-            vllm_base_url=None,
-        )
-
-
-def test_none_vllm_base_url_raises_before_empty_check():
-    """vllm_base_url validation must fire even when frame_paths is empty."""
+    """vllm_base_url validation fires even when frame_paths is empty."""
     with pytest.raises(ValueError, match="vllm_base_url"):
         generate_visual_summary(
             frame_paths=[],
