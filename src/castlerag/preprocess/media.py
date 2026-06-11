@@ -153,8 +153,9 @@ def is_static_window(frame_paths: List[Path], diff_threshold: float = 2.0) -> bo
     import numpy as np
     from PIL import Image
 
-    step = max(1, len(frame_paths) // 8)
-    sample = frame_paths[::step][:8]
+    sample_count = min(8, len(frame_paths))
+    idx = np.linspace(0, len(frame_paths) - 1, num=sample_count, dtype=int)
+    sample = [frame_paths[i] for i in sorted(set(idx.tolist()))]
 
     diffs: List[float] = []
     prev: "np.ndarray | None" = None

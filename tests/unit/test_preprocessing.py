@@ -419,9 +419,7 @@ def _save_noise(path: Path, seed: int) -> Path:
     from PIL import Image
 
     rng = np.random.default_rng(seed)
-    Image.fromarray(
-        rng.integers(0, 256, (32, 32), dtype=np.uint8), mode="L"
-    ).save(path)
+    Image.fromarray(rng.integers(0, 256, (32, 32), dtype=np.uint8), mode="L").save(path)
     return path
 
 
@@ -484,6 +482,34 @@ def test_is_static_window_respects_threshold(tmp_path: Path):
         frames.append(p)
     assert is_static_window(frames, diff_threshold=10.0) is True
     assert is_static_window(frames, diff_threshold=0.5) is False
+
+
+def test_is_static_window_tail_motion_detected(tmp_path: Path):
+    """Motion concentrated in the later portion of the window must be detected.
+
+    With linspace sampling the last frame is always included, so the sample
+    sees the transition into the noisy zone even when most early frames are static.
+    """
+    import numpy as np
+    from PIL import Image
+
+    from castlerag.preprocess.media import is_static_window
+
+    # 16 frames: first 6 are identical gray, last 10 are independent noise.
+    # linspace(0,15,8) → indices [0,2,4,6,8,10,12,15]; frame 15 included.
+    # 5 of 7 consecutive-pair diffs span the gray→noise boundary → median is large.
+    rng = np.random.default_rng(77)
+    frames = []
+    for i in range(16):
+        p = tmp_path / f"f{i:02d}.jpg"
+        arr = (
+            np.full((32, 32), 128, dtype=np.uint8)
+            if i < 6
+            else rng.integers(0, 256, (32, 32), dtype=np.uint8)
+        )
+        Image.fromarray(arr, mode="L").save(p)
+        frames.append(p)
+    assert is_static_window(frames) is False
 
 
 def test_mark_placeholder_windows_detects_static_colorful_card(tmp_path: Path):
