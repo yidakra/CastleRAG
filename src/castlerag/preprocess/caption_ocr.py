@@ -7,9 +7,34 @@ Outputs per clip: clip_caption, ocr_text, caption_confidence.
 from __future__ import annotations
 
 import base64
+import io
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
+
+# Cap the longer edge of each frame before sending to the VLM.  Qwen-VL counts
+# image tokens proportionally to pixel area, so a 1080p source frame can cost
+# 8k+ tokens on its own — blowing past typical context budgets in a multi-frame
+# request.  448 px keeps captions readable while staying under ~700 tokens/img.
+_MAX_FRAME_EDGE = 448
+# Number of frames per multi-image caption request.  Lower = fewer tokens per
+# call.  Eight 1080p frames was ~65k tokens; four 448px frames is ~3k.
+_CAPTION_NUM_FRAMES = 4
+
+
+def _frame_to_b64(path: Path, max_edge: int = _MAX_FRAME_EDGE) -> str:
+    """Return a base64-encoded JPEG of the frame, downsized to max_edge."""
+    from PIL import Image
+
+    with Image.open(path) as im:
+        im = im.convert("RGB")
+        w, h = im.size
+        scale = min(1.0, max_edge / max(w, h))
+        if scale < 1.0:
+            im = im.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=85)
+        return base64.b64encode(buf.getvalue()).decode()
 
 
 @dataclass
@@ -66,13 +91,13 @@ def annotate_clip(
             clip_id=clip_id, clip_caption=None, ocr_text=None, caption_confidence=0.0
         )
 
-    # Sample up to 8 evenly-spaced frames
-    step = max(1, len(frame_paths) // 8)
-    sample = frame_paths[::step][:8]
+    # Sample up to _CAPTION_NUM_FRAMES evenly-spaced frames
+    step = max(1, len(frame_paths) // _CAPTION_NUM_FRAMES)
+    sample = frame_paths[::step][:_CAPTION_NUM_FRAMES]
 
     content: list = []
     for fp in sample:
-        img_b64 = base64.b64encode(fp.read_bytes()).decode()
+        img_b64 = _frame_to_b64(fp)
         content.append(
             {
                 "type": "image_url",
@@ -95,7 +120,7 @@ def annotate_clip(
     # OCR pass on the first frame
     ocr_text: Optional[str] = None
     first_frame = frame_paths[0]
-    img_b64 = base64.b64encode(first_frame.read_bytes()).decode()
+    img_b64 = _frame_to_b64(first_frame)
     ocr_response = _vllm_chat(
         vllm_base_url,
         model_name,
