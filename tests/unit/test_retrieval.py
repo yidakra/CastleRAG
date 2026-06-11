@@ -5,8 +5,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
-from castlerag.retrieval.search import reciprocal_rank_fusion, retrieve
+from castlerag.retrieval.filters import build_filter
+from castlerag.retrieval.search import _collapse_hits, reciprocal_rank_fusion, retrieve
 from castlerag.retrieval.transcript_lexical import score_windows
 from castlerag.routing.question_router import RouteEvidenceProfile, route_question
 from castlerag.schemas import (
@@ -340,3 +342,173 @@ def test_retrieve_consumes_router_budget_profile_without_reparsing():
     )
     assert sum(1 for hit in hits if hit.source_type == "transcript_window") == 1
     assert hits[0].source_type == "main_clip"
+
+
+# ---------------------------------------------------------------------------
+# filters.py — uncovered branches
+# ---------------------------------------------------------------------------
+
+
+def test_build_filter_camera_id():
+    f = build_filter(camera_id="Allie")
+    assert f is not None
+    keys = [c.key for c in f.must]
+    assert "camera_id" in keys
+
+
+def test_build_filter_participant_id():
+    f = build_filter(participant_id="Bjorn")
+    assert f is not None
+    keys = [c.key for c in f.must]
+    assert "participant_id" in keys
+
+
+def test_build_filter_room():
+    f = build_filter(room="Kitchen")
+    assert f is not None
+    keys = [c.key for c in f.must]
+    assert "room" in keys
+
+
+def test_build_filter_has_speech():
+    f = build_filter(has_speech=True)
+    assert f is not None
+    keys = [c.key for c in f.must]
+    assert "has_speech" in keys
+
+
+def test_build_filter_time_range_start_ms():
+    f = build_filter(time_range_start_ms=1000)
+    assert f is not None
+    keys = [c.key for c in f.must]
+    assert "absolute_end" in keys
+
+
+def test_build_filter_time_range_end_ms():
+    f = build_filter(time_range_end_ms=5000)
+    assert f is not None
+    keys = [c.key for c in f.must]
+    assert "absolute_start" in keys
+
+
+def test_build_filter_invalid_time_range_raises():
+    with pytest.raises(ValueError, match="time_range_start_ms"):
+        build_filter(time_range_start_ms=9000, time_range_end_ms=1000)
+
+
+def test_build_filter_source_type_and_modality():
+    f = build_filter(source_type="aux_photo", modality="image")
+    assert f is not None
+    keys = [c.key for c in f.must]
+    assert "source_type" in keys
+    assert "modality" in keys
+
+
+def test_build_filter_no_conditions_returns_none():
+    assert build_filter() is None
+
+
+# ---------------------------------------------------------------------------
+# search.py — uncovered branches
+# ---------------------------------------------------------------------------
+
+
+def test_retrieve_raises_on_non_2d_embedding():
+    """Line 72: ValueError when embed_texts returns 1D array."""
+
+    class FakeBM25:
+        def get_scores(self, tokens: list[str]) -> np.ndarray:
+            return np.asarray([1.0, 0.5], dtype=np.float32)
+
+    class FakeEmbedClient1D:
+        def embed_texts(self, texts: list[str]) -> np.ndarray:
+            # Return a 1D array instead of 2D
+            return np.asarray([1.0, 0.0], dtype=np.float32)
+
+    bm25_bundle = SimpleNamespace(bm25=FakeBM25(), windows=_windows())
+    retrieval_cfg = SimpleNamespace(
+        transcript_top_k=5,
+        event_summary_top_k=5,
+        video_top_k=5,
+        photo_top_k=5,
+        aux_video_top_k=5,
+        heartrate_top_k=5,
+        gaze_top_k=5,
+        thermal_top_k=5,
+        rrf_k=60,
+        max_candidate_videos=4,
+        frames_per_candidate=32,
+        max_aux_images=16,
+        max_evidence_rows=50,
+    )
+    hints = route_question(_question().query, _question().answers)
+    with pytest.raises(ValueError, match="2D"):
+        retrieve(
+            question=_question(),
+            hints=hints,
+            qdrant_client=None,
+            collection_name="test",
+            bm25_index=bm25_bundle,
+            embed_client=FakeEmbedClient1D(),
+            retrieval_cfg=retrieval_cfg,
+        )
+
+
+def _make_hit(
+    record_id: str, source_type: str = "transcript_window", rank: int = 1
+) -> RetrievalHit:
+    return RetrievalHit(
+        rank=rank,
+        score=0.9,
+        point_id=f"pt_{record_id}",
+        record_id=record_id,
+        source_type=source_type,
+        modality="text",
+    )
+
+
+def test_collapse_hits_stops_at_max_rows():
+    """Lines 233-234: early break when len(kept) >= max_rows."""
+    hits = [_make_hit(f"tx_{i}", rank=i + 1) for i in range(10)]
+    retrieval_cfg = SimpleNamespace(
+        transcript_top_k=10,
+        max_candidate_videos=10,
+        max_aux_images=10,
+        max_evidence_rows=3,
+    )
+    hints = route_question(_question().query, _question().answers)
+    hints.evidence_profile = RouteEvidenceProfile(
+        transcript_budget=10,
+        candidate_video_budget=10,
+        frames_per_candidate_video=32,
+        auxiliary_image_budget=10,
+        max_evidence_rows=3,
+        source_priority=("transcript_window",),
+    )
+    result = _collapse_hits(hits, hints, retrieval_cfg)
+    assert len(result) == 3
+
+
+def test_route_priority_fallback_for_unknown_source_type():
+    """_route_priority returns len(source_priority) for an unknown source_type."""
+    hit = _make_hit("unknown_1", source_type="aux_unknown")
+    retrieval_cfg = SimpleNamespace(
+        transcript_top_k=10,
+        max_candidate_videos=10,
+        max_aux_images=10,
+        max_evidence_rows=10,
+    )
+    hints = route_question(_question().query, _question().answers)
+    # source_priority does not include "aux_unknown"
+    hints.evidence_profile = RouteEvidenceProfile(
+        transcript_budget=10,
+        candidate_video_budget=10,
+        frames_per_candidate_video=32,
+        auxiliary_image_budget=10,
+        max_evidence_rows=10,
+        source_priority=("transcript_window", "main_clip"),
+    )
+    # Should not raise; unknown source type goes to end of priority
+    result = _collapse_hits([hit], hints, retrieval_cfg)
+    assert len(result) == 1
+    assert result[0].source_type == "aux_unknown"

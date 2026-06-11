@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from castlerag.generation.answer import (
+    _call_generation_llm,
+    _fallback_answer,
     _format_citation,
     _format_evidence_row,
+    _format_timestamp,
     build_messages,
     build_prompt,
     extract_answer,
@@ -250,3 +253,204 @@ def test_generate_answer_drops_confidence_on_low_confidence_language():
     )
     assert prediction.predicted_answer == "a"
     assert prediction.confidence == 0.35
+
+
+# ---------------------------------------------------------------------------
+# _format_timestamp — None input
+# ---------------------------------------------------------------------------
+
+
+def test_format_timestamp_none_returns_none():
+    assert _format_timestamp(None) is None
+
+
+# ---------------------------------------------------------------------------
+# _format_citation — aux source_type path, camera_id without day, fallback
+# ---------------------------------------------------------------------------
+
+
+def test_format_citation_aux_source_types():
+    for st in ("aux_heartrate", "aux_gaze", "aux_photo", "aux_thermal", "aux_video"):
+        hit = RetrievalHit(
+            rank=1,
+            score=0.5,
+            point_id="pt_aux",
+            record_id=f"rec_{st}",
+            source_type=st,
+            modality="text",
+        )
+        citation = _format_citation(hit)
+        assert citation.startswith(f"[aux={st} id=rec_{st}]")
+
+
+def test_format_citation_camera_id_without_day():
+    hit = RetrievalHit(
+        rank=1,
+        score=0.5,
+        point_id="pt_cam",
+        record_id="rec_cam",
+        source_type="main_clip",
+        modality="video",
+        camera_id="Allie",
+        day=None,
+        absolute_start=1_672_531_200_000,
+        absolute_end=1_672_531_230_000,
+    )
+    citation = _format_citation(hit)
+    assert citation == "[camera=Allie time=unknown]"
+
+
+def test_format_citation_fallback_no_camera_no_day():
+    hit = RetrievalHit(
+        rank=1,
+        score=0.5,
+        point_id="pt_fb",
+        record_id="rec_fb",
+        source_type="main_clip",
+        modality="video",
+        camera_id=None,
+        day=None,
+    )
+    citation = _format_citation(hit)
+    assert citation == "[aux=main_clip id=rec_fb]"
+
+
+# ---------------------------------------------------------------------------
+# extract_answer — conflicting FINAL_ANSWER lines, free-floating letter
+# ---------------------------------------------------------------------------
+
+
+def test_extract_answer_multiple_conflicting_final_answer_lines_uses_priors():
+    raw = "FINAL_ANSWER: a\nSome analysis.\nFINAL_ANSWER: b"
+    # Two different letters → fall back to priors
+    result = extract_answer(raw, {"a": 0.1, "b": 0.2, "c": 0.6, "d": 0.1})
+    assert result == "c"
+
+
+def test_extract_answer_free_floating_letter_falls_back_to_priors():
+    raw = "Looking at the evidence, option c seems most supported."
+    result = extract_answer(raw, {"a": 0.1, "b": 0.2, "c": 0.6, "d": 0.1})
+    assert result == "c"
+
+
+# ---------------------------------------------------------------------------
+# _fallback_answer — empty support_priors returns "a"
+# ---------------------------------------------------------------------------
+
+
+def test_fallback_answer_empty_priors_returns_a():
+    assert _fallback_answer({}) == "a"
+
+
+# ---------------------------------------------------------------------------
+# _call_generation_llm — various client interface variants
+# ---------------------------------------------------------------------------
+
+
+def test_call_generation_llm_chat_returns_string():
+    class _StringChatClient:
+        def chat(self, messages):
+            return "FINAL_ANSWER: b"
+
+    result = _call_generation_llm(_StringChatClient(), [])
+    assert result == "FINAL_ANSWER: b"
+
+
+def test_call_generation_llm_chat_returns_dict_with_content():
+    class _DictContentChatClient:
+        def chat(self, messages):
+            return {"content": "FINAL_ANSWER: c"}
+
+    result = _call_generation_llm(_DictContentChatClient(), [])
+    assert result == "FINAL_ANSWER: c"
+
+
+def test_call_generation_llm_chat_returns_dict_with_choices():
+    class _DictChoicesChatClient:
+        def chat(self, messages):
+            return {"choices": [{"message": {"content": "FINAL_ANSWER: d"}}]}
+
+    result = _call_generation_llm(_DictChoicesChatClient(), [])
+    assert result == "FINAL_ANSWER: d"
+
+
+def test_call_generation_llm_generate_returns_string():
+    class _GenerateStringClient:
+        def generate(self, messages):
+            return "FINAL_ANSWER: a"
+
+    result = _call_generation_llm(_GenerateStringClient(), [])
+    assert result == "FINAL_ANSWER: a"
+
+
+def test_call_generation_llm_generate_returns_dict_with_outputs():
+    class _GenerateOutputsClient:
+        def generate(self, messages):
+            return {"outputs": [{"text": "FINAL_ANSWER: b"}]}
+
+    result = _call_generation_llm(_GenerateOutputsClient(), [])
+    assert result == "FINAL_ANSWER: b"
+
+
+def test_call_generation_llm_generate_returns_dict_with_text():
+    class _GenerateTextClient:
+        def generate(self, messages):
+            return {"text": "FINAL_ANSWER: c"}
+
+    result = _call_generation_llm(_GenerateTextClient(), [])
+    assert result == "FINAL_ANSWER: c"
+
+
+def test_call_generation_llm_callable_client():
+    result = _call_generation_llm(lambda messages: "FINAL_ANSWER: d", [])
+    assert result == "FINAL_ANSWER: d"
+
+
+def test_call_generation_llm_raises_on_incompatible_client():
+    class _BadClient:
+        pass
+
+    import pytest
+
+    with pytest.raises(TypeError, match="llm_client must expose"):
+        _call_generation_llm(_BadClient(), [])
+
+
+# ---------------------------------------------------------------------------
+# _call_generation_llm_with_model — fallback to _call_generation_llm
+# ---------------------------------------------------------------------------
+
+
+def test_generate_answer_with_model_fallback_via_generate():
+    """_call_generation_llm_with_model falls back to _call_generation_llm."""
+
+    class _GenerateClient:
+        def generate(self, messages):
+            return "FINAL_ANSWER: a"
+
+    prediction = generate_answer(
+        question=_make_question(),
+        hints=RouteHints(route="speech_text"),
+        evidence_rows=[_make_hit()],
+        support_priors={"a": 0.8, "b": 0.1, "c": 0.05, "d": 0.05},
+        llm_client=_GenerateClient(),
+        model="test-model",
+    )
+    assert prediction.predicted_answer == "a"
+
+
+def test_generate_answer_with_model_fallback_via_callable():
+    """_call_generation_llm_with_model falls back for callable clients."""
+
+    def _fake_llm(messages):
+        return "FINAL_ANSWER: b"
+
+    prediction = generate_answer(
+        question=_make_question(),
+        hints=RouteHints(route="mixed"),
+        evidence_rows=[_make_hit()],
+        support_priors={"a": 0.1, "b": 0.8, "c": 0.05, "d": 0.05},
+        llm_client=_fake_llm,
+        model="test-model",
+    )
+    assert prediction.predicted_answer == "b"

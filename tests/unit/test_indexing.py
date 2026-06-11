@@ -24,7 +24,18 @@ from castlerag.index.pipeline import (
     filter_records,
     load_chunk_records,
 )
-from castlerag.index.qdrant import build_point_batches, record_to_qdrant_point
+from castlerag.index.qdrant import (
+    _BOOL_INDEX_FIELDS,
+    _INTEGER_INDEX_FIELDS,
+    _KEYWORD_INDEX_FIELDS,
+    bootstrap_collection,
+    build_point_batches,
+    create_collection,
+    create_payload_indexes,
+    get_client,
+    record_to_qdrant_point,
+    upsert_batch,
+)
 from castlerag.index.transcript_lexical import build_bm25_index, load_bm25_index
 from castlerag.schemas import (
     AuxRecord,
@@ -539,3 +550,131 @@ def test_embed_images_delegates_to_client_method():
     client._client = FakeClient()
     vectors = client.embed_images(["a.jpg", "b.jpg"])
     assert vectors.shape == (2, 2)
+
+
+# ---------------------------------------------------------------------------
+# qdrant.py — collection management
+# ---------------------------------------------------------------------------
+
+
+def test_get_client_raises_import_error_when_qdrant_client_missing(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _block_qdrant(name, *args, **kwargs):
+        if name == "qdrant_client":
+            raise ImportError("no module named qdrant_client")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _block_qdrant)
+    try:
+        get_client()
+    except ImportError as exc:
+        assert "qdrant-client not installed" in str(exc)
+    else:
+        raise AssertionError("Expected ImportError")
+
+
+def test_create_collection_calls_create_on_client():
+    from unittest.mock import MagicMock
+
+    mock_client = MagicMock()
+    create_collection(mock_client, "test_col", vector_size=128, recreate=False)
+    mock_client.create_collection.assert_called_once()
+    call_kwargs = mock_client.create_collection.call_args.kwargs
+    assert call_kwargs["collection_name"] == "test_col"
+
+
+def test_create_collection_recreate_deletes_first():
+    from unittest.mock import MagicMock
+
+    mock_client = MagicMock()
+    create_collection(mock_client, "test_col", vector_size=64, recreate=True)
+    mock_client.delete_collection.assert_called_once_with("test_col")
+    mock_client.create_collection.assert_called_once()
+
+
+def test_create_collection_recreate_swallows_not_found():
+    from unittest.mock import MagicMock
+
+    mock_client = MagicMock()
+    mock_client.delete_collection.side_effect = Exception("collection not found")
+    create_collection(mock_client, "test_col", vector_size=64, recreate=True)
+    mock_client.create_collection.assert_called_once()
+
+
+def test_create_collection_recreate_reraises_other_errors():
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    mock_client = MagicMock()
+    mock_client.delete_collection.side_effect = Exception("disk full")
+    with pytest.raises(Exception, match="disk full"):
+        create_collection(mock_client, "test_col", vector_size=64, recreate=True)
+
+
+def test_create_payload_indexes_calls_all_fields():
+    from unittest.mock import MagicMock
+
+    mock_client = MagicMock()
+    create_payload_indexes(mock_client, "test_col")
+    total_expected = (
+        len(_KEYWORD_INDEX_FIELDS)
+        + len(_INTEGER_INDEX_FIELDS)
+        + len(_BOOL_INDEX_FIELDS)
+    )
+    assert mock_client.create_payload_index.call_count == total_expected
+
+
+def test_upsert_batch_calls_client_upsert():
+    from unittest.mock import MagicMock
+
+    mock_client = MagicMock()
+    upsert_batch(
+        mock_client,
+        "test_col",
+        point_ids=["id1", "id2"],
+        vectors=[[0.1, 0.2], [0.3, 0.4]],
+        payloads=[{"k": "v1"}, {"k": "v2"}],
+    )
+    mock_client.upsert.assert_called_once()
+    assert mock_client.upsert.call_args.kwargs["collection_name"] == "test_col"
+
+
+def test_upsert_batch_raises_on_length_mismatch():
+    from unittest.mock import MagicMock
+
+    import pytest
+
+    mock_client = MagicMock()
+    with pytest.raises(ValueError, match="equal-length"):
+        upsert_batch(
+            mock_client,
+            "test_col",
+            point_ids=["id1"],
+            vectors=[[0.1, 0.2], [0.3, 0.4]],
+            payloads=[{"k": "v1"}],
+        )
+
+
+def test_bootstrap_collection_returns_client():
+    from unittest.mock import MagicMock, patch
+
+    mock_client = MagicMock()
+    with patch("castlerag.index.qdrant.get_client", return_value=mock_client):
+        result = bootstrap_collection(
+            host="localhost",
+            port=6333,
+            collection_name="castle",
+            vector_size=128,
+        )
+    assert result is mock_client
+    mock_client.create_collection.assert_called_once()
+    total_expected = (
+        len(_KEYWORD_INDEX_FIELDS)
+        + len(_INTEGER_INDEX_FIELDS)
+        + len(_BOOL_INDEX_FIELDS)
+    )
+    assert mock_client.create_payload_index.call_count == total_expected
