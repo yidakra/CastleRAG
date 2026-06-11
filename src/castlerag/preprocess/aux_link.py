@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 
 def _load_clip_records(path: Path) -> List[ClipRecord]:
+    """Read ClipRecord objects from a JSONL file and return them as a list."""
     records: List[ClipRecord] = []
     with path.open() as fh:
         for line in fh:
@@ -30,6 +31,7 @@ def _load_clip_records(path: Path) -> List[ClipRecord]:
 
 
 def _load_event_summary_records(path: Path) -> List[EventSummaryRecord]:
+    """Read EventSummaryRecord objects from a JSONL file and return them as a list."""
     records: List[EventSummaryRecord] = []
     with path.open() as fh:
         for line in fh:

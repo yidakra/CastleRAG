@@ -126,6 +126,7 @@ def retrieve(
 
 
 def _query_variants(question: EvalQuestion) -> List[str]:
+    """Return the bare query and an expanded query with answer choices appended."""
     return [
         question.query,
         (
@@ -205,6 +206,7 @@ def _collapse_hits(
     hints: RouteHints,
     retrieval_cfg: Any,
 ) -> List[RetrievalHit]:
+    """Apply per-source budgets and re-rank hits according to route priority."""
     transcript_budget = min(
         retrieval_cfg.transcript_top_k,
         hints.evidence_profile.transcript_budget,
@@ -251,6 +253,7 @@ def _collapse_hits(
         hit.model_copy(update={"rank": rank}) for rank, hit in enumerate(kept, start=1)
     ]
 def _route_priority(hints: RouteHints, hit: RetrievalHit) -> int:
+    """Return a hit's sort priority from its position in the route's source list."""
     try:
         return hints.evidence_profile.source_priority.index(hit.source_type)
     except ValueError:

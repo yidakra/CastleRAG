@@ -67,6 +67,7 @@ def merge_into_windows(
     bucket_chars: int = 0
 
     def _flush() -> None:
+        """Emit the current accumulator bucket as a TranscriptWindow and reset state."""
         nonlocal bucket_segs, bucket_start, bucket_end, bucket_chars
         if not bucket_segs:
             return

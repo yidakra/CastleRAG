@@ -117,6 +117,7 @@ def build_prompt(
     support_priors: Dict[str, float],
     max_evidence_rows: int = 50,
 ) -> str:
+    """Return the formatted user prompt string for the generation LLM."""
     rows = evidence_rows[:max_evidence_rows]
     evidence_text = "\n\n".join(_enumerate_evidence_rows(rows))
     support_summary = "  ".join(
@@ -142,6 +143,7 @@ def build_messages(
     support_priors: Dict[str, float],
     max_evidence_rows: int = 50,
 ) -> List[Dict[str, str]]:
+    """Return the system+user message list for the generation LLM."""
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {
@@ -158,6 +160,7 @@ def build_messages(
 
 
 def _enumerate_evidence_rows(evidence_rows: Sequence[RetrievalHit]) -> List[str]:
+    """Return evidence rows as numbered strings prefixed with their 1-based index."""
     return [
         f"[{i + 1}] {_format_evidence_row(hit)}"
         for i, hit in enumerate(evidence_rows)
@@ -165,12 +168,14 @@ def _enumerate_evidence_rows(evidence_rows: Sequence[RetrievalHit]) -> List[str]
 
 
 def _format_timestamp(ms: int | None) -> str | None:
+    """Return a UTC HH:MM:SS string for the given millisecond epoch value, or None."""
     if ms is None:
         return None
     return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%H:%M:%S")
 
 
 def _format_citation(hit: RetrievalHit) -> str:
+    """Return the bracketed citation string for a retrieval hit."""
     if hit.source_type in _AUX_CITATION_PREFIXES:
         return f"[aux={hit.source_type} id={hit.record_id}]"
     if (
@@ -189,6 +194,7 @@ def _format_citation(hit: RetrievalHit) -> str:
 
 
 def _format_evidence_row(hit: RetrievalHit) -> str:
+    """Return a header-plus-body string representing a single evidence hit."""
     parts = [f"source={hit.source_type}"]
     if hit.camera_id:
         parts.append(f"camera={hit.camera_id}")
@@ -227,6 +233,7 @@ def extract_answer(raw_text: str, support_priors: Dict[str, float]) -> AnswerCho
 
 
 def _fallback_answer(support_priors: Dict[str, float]) -> AnswerChoice:
+    """Return the answer choice with the highest support prior, defaulting to 'a'."""
     ordered = sorted(
         support_priors.items(),
         key=lambda item: (-item[1], item[0]),
@@ -242,6 +249,7 @@ def _estimate_confidence(
     evidence_rows: Sequence[RetrievalHit],
     raw_text: str,
 ) -> float:
+    """Return a confidence score in [0, 1] from evidence count and support priors."""
     if not evidence_rows:
         return 0.0
     best_prior = max(support_priors.values()) if support_priors else 0.0
@@ -254,6 +262,7 @@ def _estimate_confidence(
 
 
 def _call_generation_llm(llm_client: Any, messages: List[Dict[str, str]]) -> str:
+    """Dispatch a chat-completion request via the LLM client's available interface."""
     if hasattr(llm_client, "generate_from_messages"):
         return str(llm_client.generate_from_messages(messages))
     if hasattr(llm_client, "chat") and hasattr(llm_client.chat, "completions"):
@@ -344,6 +353,7 @@ def _call_generation_llm_with_model(
     *,
     model: str,
 ) -> str:
+    """Dispatch a chat-completion for a specific model, falling back as needed."""
     if hasattr(llm_client, "generate_from_messages"):
         return str(llm_client.generate_from_messages(messages))
     if hasattr(llm_client, "chat") and hasattr(llm_client.chat, "completions"):

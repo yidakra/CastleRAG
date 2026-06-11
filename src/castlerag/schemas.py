@@ -74,6 +74,7 @@ class TranscriptWindow(BaseModel):
     @field_validator("absolute_end")
     @classmethod
     def _end_after_start(cls, v: int, info: Any) -> int:
+        """Raise ValueError if absolute_end is not greater than absolute_start."""
         start = (info.data or {}).get("absolute_start")
         if start is not None and v <= start:
             raise ValueError("absolute_end must be > absolute_start")
@@ -117,6 +118,7 @@ class ClipRecord(BaseModel):
     @field_validator("absolute_end")
     @classmethod
     def _end_after_start(cls, v: int, info: Any) -> int:
+        """Raise ValueError if absolute_end is not greater than absolute_start."""
         start = (info.data or {}).get("absolute_start")
         if start is not None and v <= start:
             raise ValueError("absolute_end must be > absolute_start")
@@ -149,6 +151,7 @@ class EventSummaryRecord(BaseModel):
     @field_validator("absolute_end")
     @classmethod
     def _end_after_start(cls, v: int, info: Any) -> int:
+        """Raise ValueError if absolute_end is not greater than absolute_start."""
         start = (info.data or {}).get("absolute_start")
         if start is not None and v <= start:
             raise ValueError("absolute_end must be > absolute_start")
@@ -180,6 +183,7 @@ class AuxRecord(BaseModel):
     @field_validator("absolute_end")
     @classmethod
     def _end_after_start(cls, v: int, info: Any) -> int:
+        """Raise ValueError if absolute_end is not greater than absolute_start."""
         start = (info.data or {}).get("absolute_start")
         if start is not None and v <= start:
             raise ValueError("absolute_end must be > absolute_start")
@@ -276,6 +280,7 @@ class RerankerOutput(BaseModel):
     @field_validator("support")
     @classmethod
     def _validate_support(cls, v: Dict[str, int]) -> Dict[str, int]:
+        """Raise ValueError if support has missing keys or out-of-range scores."""
         for key in ("a", "b", "c", "d"):
             if key not in v:
                 raise ValueError(f"support must contain key '{key}'")
@@ -321,6 +326,7 @@ class EvalQuestion(BaseModel):
     @field_validator("answers")
     @classmethod
     def _validate_answers(cls, v: Dict[str, str]) -> Dict[str, str]:
+        """Raise ValueError if answers is missing any of the required choice keys."""
         for key in ("a", "b", "c", "d"):
             if key not in v:
                 raise ValueError(f"answers must contain key '{key}'")

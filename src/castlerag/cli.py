@@ -50,6 +50,7 @@ def _default_snellius_path() -> Path:
 
 
 def _resolve_config(config: Optional[Path], snellius: bool) -> CastleRAGConfig:
+    """Load and return the runtime config, applying any CLI override path."""
     override: Optional[Path] = None
     if snellius:
         override = _default_snellius_path()
@@ -59,6 +60,7 @@ def _resolve_config(config: Optional[Path], snellius: bool) -> CastleRAGConfig:
 
 
 def _count_records(records: object) -> int:
+    """Return the total number of records across all record-list fields."""
     return sum(
         len(getattr(records, field))
         for field in ("transcripts", "clips", "events", "aux")
@@ -66,6 +68,7 @@ def _count_records(records: object) -> int:
 
 
 def _vllm_base_url() -> Optional[str]:
+    """Return the VLLM_BASE_URL environment variable, or None if unset."""
     return os.getenv("VLLM_BASE_URL")
 
 

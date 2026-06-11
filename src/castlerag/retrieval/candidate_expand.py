@@ -81,6 +81,7 @@ def expand_candidates(
 
 
 def _bundle_rows(primary: RetrievalHit, hits: List[RetrievalHit]) -> List[RetrievalHit]:
+    """Return hits that share context with or temporally overlap the primary hit."""
     rows: "OrderedDict[str, RetrievalHit]" = OrderedDict()
     rows[primary.record_id] = primary
     for hit in hits:
@@ -92,6 +93,7 @@ def _bundle_rows(primary: RetrievalHit, hits: List[RetrievalHit]) -> List[Retrie
 
 
 def _same_context(left: RetrievalHit, right: RetrievalHit) -> bool:
+    """Return True if both hits share the same day, camera, and participant."""
     return (
         left.day == right.day
         and left.camera_id == right.camera_id
@@ -100,6 +102,7 @@ def _same_context(left: RetrievalHit, right: RetrievalHit) -> bool:
 
 
 def _overlaps(left: RetrievalHit, right: RetrievalHit, slack_ms: int = 30_000) -> bool:
+    """Return True if the two hits' time spans overlap within the given slack window."""
     if left.absolute_start is None or left.absolute_end is None:
         return False
     if right.absolute_start is None or right.absolute_end is None:
@@ -111,18 +114,22 @@ def _overlaps(left: RetrievalHit, right: RetrievalHit, slack_ms: int = 30_000) -
 
 
 def _collect_transcripts(rows: List[RetrievalHit]) -> List[str]:
+    """Return deduplicated transcript texts from the given hits."""
     return _unique_values([row.transcript_text for row in rows if row.transcript_text])
 
 
 def _collect_event_summaries(rows: List[RetrievalHit]) -> List[str]:
+    """Return deduplicated event summary strings from the given hits."""
     return _unique_values([row.event_summary for row in rows if row.event_summary])
 
 
 def _collect_ocr(rows: List[RetrievalHit]) -> List[str]:
+    """Return deduplicated OCR text strings from the given hits."""
     return _unique_values([row.ocr_text for row in rows if row.ocr_text])
 
 
 def _collect_frame_descriptions(rows: List[RetrievalHit]) -> List[str]:
+    """Return deduplicated clip asset path strings from main_clip hits."""
     values = []
     for row in rows:
         if row.source_type == "main_clip" and row.asset_path:
@@ -131,6 +138,7 @@ def _collect_frame_descriptions(rows: List[RetrievalHit]) -> List[str]:
 
 
 def _collect_aux_notes(rows: List[RetrievalHit]) -> List[str]:
+    """Return deduplicated auxiliary-source notes prefixed with their source type."""
     values = []
     for row in rows:
         if not row.source_type.startswith("aux_"):
@@ -147,4 +155,5 @@ def _collect_aux_notes(rows: List[RetrievalHit]) -> List[str]:
 
 
 def _unique_values(values: List[str]) -> List[str]:
+    """Return values with duplicates removed while preserving insertion order."""
     return list(OrderedDict((value, None) for value in values).keys())

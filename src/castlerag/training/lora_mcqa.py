@@ -57,6 +57,7 @@ class LoRATrainingExample:
 
 
 def _format_question_block(question: EvalQuestion) -> str:
+    """Return the multiple-choice question formatted as a prompt block."""
     return (
         f"Question: {question.query}\n"
         f"A. {question.answers['a']}\n"
@@ -73,6 +74,7 @@ def _validate_answer_key(
     *,
     split_name: str,
 ) -> Dict[str, AnswerChoice]:
+    """Validate and normalise answer keys; raise LoRABlockedError on missing labels."""
     normalized: Dict[str, AnswerChoice] = {}
     missing_labels = [qid for qid in questions if qid not in answers]
     if missing_labels:

@@ -227,6 +227,7 @@ def _resolve_output_paths(
     out_dir: Optional[Path],
     predictions_path: Optional[Path],
 ) -> EvalOutputPaths:
+    """Resolve output file paths from config, applying any caller-supplied overrides."""
     default_dir = Path(cfg.outputs.dir)
     if out_dir is not None:
         target_dir = out_dir
@@ -244,6 +245,7 @@ def _resolve_output_paths(
 
 
 def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
+    """Construct the default EvalPipeline wired to BM25, Qdrant, and vLLM clients."""
     bm25_index, qdrant_client, artifact_report = _prepare_default_runtime(cfg)
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
@@ -255,6 +257,7 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
     generation_client = _build_vllm_chat_client()
 
     def _retrieve(question: EvalQuestion, hints: RouteHints) -> List[RetrievalHit]:
+        """Retrieve evidence hits for a question using dense and BM25 search."""
         try:
             return retrieve_evidence(
                 question=question,
@@ -285,6 +288,7 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
         hints: RouteHints,
         candidate_packs: List[dict],
     ) -> RerankResult:
+        """Rerank candidate evidence packs using the LLM reranker."""
         return rerank_candidates(
             question=question,
             hints=hints,
@@ -301,6 +305,7 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
         evidence_rows: List[RetrievalHit],
         support_priors: Dict[str, float],
     ) -> Prediction:
+        """Generate a final answer prediction from evidence rows and support priors."""
         return generate_answer(
             question=question,
             hints=hints,
@@ -325,6 +330,7 @@ def _flatten_reranked_evidence(
     fallback_hits: List[RetrievalHit],
     max_rows: int,
 ) -> List[RetrievalHit]:
+    """Return deduplicated evidence hits from kept rerank packs, up to max_rows."""
     if not reranked.kept_packs:
         return fallback_hits[:max_rows]
 
@@ -343,6 +349,7 @@ def _flatten_reranked_evidence(
 
 
 def _aggregate_support_priors(reranked: RerankResult) -> Dict[str, float]:
+    """Return a plain dict copy of the support priors from a RerankResult."""
     return dict(reranked.support_priors)
 
 
@@ -350,6 +357,7 @@ def _coerce_rerank_result(
     reranked: RerankResult | List[dict],
     route: str,
 ) -> RerankResult:
+    """Coerce a raw list-of-dicts rerank output into a canonical RerankResult."""
     if isinstance(reranked, RerankResult):
         return reranked
 
@@ -379,6 +387,7 @@ def _stage_error(
     question_id: str,
     exc: Exception,
 ) -> PipelineDependencyError:
+    """Return a PipelineDependencyError for a stage that raised NotImplementedError."""
     return PipelineDependencyError(
         f"{stage} is not implemented for question {question_id}: {exc}"
     )
@@ -389,6 +398,7 @@ def _stage_dependency_error(
     question_id: str,
     exc: PipelineDependencyError,
 ) -> PipelineDependencyError:
+    """Wrap a dependency failure in a named stage as a PipelineDependencyError."""
     return PipelineDependencyError(
         f"{stage} dependency failed for question {question_id}: {exc}"
     )
@@ -399,18 +409,21 @@ def _stage_failure_error(
     question_id: str,
     exc: Exception,
 ) -> PipelineDependencyError:
+    """Return a PipelineDependencyError for an unexpected exception in a named stage."""
     return PipelineDependencyError(
         f"{stage} failed for question {question_id}: {exc}"
     )
 
 
 def _vllm_base_url() -> Optional[str]:
+    """Return the VLLM_BASE_URL environment variable value, or None if unset."""
     return os.getenv("VLLM_BASE_URL")
 
 
 def _prepare_default_runtime(
     cfg: CastleRAGConfig,
 ) -> tuple[Any, Any, IndexArtifactReport]:
+    """Load and validate index artifacts; return BM25, Qdrant client, and report."""
     artifact_report = _discover_index_artifacts(cfg)
     bm25_path = artifact_report.bm25_path
     if not bm25_path.exists():
@@ -455,6 +468,7 @@ def _prepare_default_runtime(
 
 
 def _discover_index_artifacts(cfg: CastleRAGConfig) -> IndexArtifactReport:
+    """Scan cache and chunks directories and return a report of found artifact paths."""
     cache_dir = Path(cfg.embedding.cache_dir)
     chunks_dir = Path(cfg.preprocessing.chunks_dir)
     return IndexArtifactReport(
@@ -497,6 +511,7 @@ def _discover_index_artifacts(cfg: CastleRAGConfig) -> IndexArtifactReport:
 
 
 def _ensure_qdrant_collection_ready(client: Any, cfg: CastleRAGConfig) -> None:
+    """Raise PipelineDependencyError if the Qdrant collection is missing or empty."""
     collection_name = cfg.qdrant.collection
     host = cfg.qdrant.host
     port = cfg.qdrant.port
@@ -530,6 +545,7 @@ def _ensure_qdrant_collection_ready(client: Any, cfg: CastleRAGConfig) -> None:
 
 
 def _qdrant_collection_exists(client: Any, collection_name: str) -> bool:
+    """Return True if the named collection exists in the Qdrant client."""
     if hasattr(client, "collection_exists"):
         return bool(client.collection_exists(collection_name))
     if hasattr(client, "get_collection"):
@@ -545,6 +561,7 @@ def _qdrant_collection_exists(client: Any, collection_name: str) -> bool:
 
 
 def _qdrant_collection_count(client: Any, collection_name: str) -> Optional[int]:
+    """Return the approximate point count for a Qdrant collection, or None on error."""
     if not hasattr(client, "count"):
         return None
     response = client.count(collection_name=collection_name, exact=False)
@@ -557,6 +574,7 @@ def _qdrant_collection_count(client: Any, collection_name: str) -> Optional[int]
 
 
 def _ensure_vllm_runtime_ready(cfg: CastleRAGConfig) -> None:
+    """Raise PipelineDependencyError if VLLM_BASE_URL is unset or openai is missing."""
     needed_stages: List[str] = ["reranking", "generation"]
     if cfg.embedding.backend == "vllm":
         needed_stages.insert(0, "retrieval")
@@ -582,6 +600,7 @@ def _dependency_failure_message(
     detail: str,
     artifact_report: IndexArtifactReport,
 ) -> str:
+    """Build a diagnostic error message with artifact counts for a failing stage."""
     chunk_counts = ", ".join(
         f"{name}={len(paths)}" for name, paths in artifact_report.chunk_files.items()
     )
@@ -599,6 +618,7 @@ def _dependency_failure_message(
 
 
 def _build_vllm_chat_client() -> Any:
+    """Instantiate and return an OpenAI client pointed at the local vLLM endpoint."""
     base_url = _vllm_base_url()
     if not base_url:
         raise PipelineDependencyError(

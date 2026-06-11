@@ -77,6 +77,7 @@ def discover_chunk_artifacts(chunks_dir: Path) -> ChunkArtifacts:
     """Recursively discover preprocessed chunk JSONL artifacts."""
 
     def _glob(names: Sequence[str]) -> List[Path]:
+        """Glob chunks_dir for each filename pattern and return sorted unique paths."""
         matches: List[Path] = []
         for name in names:
             matches.extend(sorted(chunks_dir.rglob(name)))
@@ -113,6 +114,7 @@ def filter_records(
     day_label = f"day{day}" if day is not None else None
 
     def _camera_allowed(camera_id: Optional[str], camera_type: Optional[str]) -> bool:
+        """Return True if the camera is within the configured scope."""
         if cfg.dataset.camera_scope == "all":
             return True
         if camera_type == "fixed":
@@ -393,6 +395,7 @@ def _batched_embed(
 
 
 def _record_index(records: LoadedArtifacts) -> dict[str, Record]:
+    """Build a record-id-to-Record mapping from all artifact lists."""
     index: dict[str, Record] = {}
     for row in records.transcripts:
         index[row.transcript_window_id] = row
@@ -406,6 +409,7 @@ def _record_index(records: LoadedArtifacts) -> dict[str, Record]:
 
 
 def _discover_vector_size(cache_artifacts: Iterable[CacheArtifact]) -> int:
+    """Return the embedding dimension from the first non-empty cache artifact."""
     for artifact in cache_artifacts:
         if artifact.vectors.size and artifact.vectors.ndim == 2:
             return int(artifact.vectors.shape[1])
@@ -413,6 +417,7 @@ def _discover_vector_size(cache_artifacts: Iterable[CacheArtifact]) -> int:
 
 
 def _aux_video_frames(record: Record) -> List[str]:
+    """Return sampled frame paths from an AuxRecord's raw_features, or an empty list."""
     if not isinstance(record, AuxRecord):
         return []
     if not isinstance(record.raw_features, dict):
@@ -424,4 +429,5 @@ def _aux_video_frames(record: Record) -> List[str]:
 
 
 def _cache_suffix(day: Optional[int]) -> str:
+    """Return a day-qualified cache filename suffix, or an empty string."""
     return f"_day{day}" if day is not None else ""

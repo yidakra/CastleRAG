@@ -244,6 +244,7 @@ class RouteHints:
     evidence_profile: Optional[RouteEvidenceProfile] = None
 
     def __post_init__(self) -> None:
+        """Fill evidence_profile from the route default when not provided."""
         if self.evidence_profile is None:
             self.evidence_profile = _profile_for_route(self.route)
 
@@ -324,6 +325,7 @@ def route_question(
 
 
 def _profile_for_route(route: QuestionRoute) -> RouteEvidenceProfile:
+    """Return a fresh RouteEvidenceProfile copy for the given route."""
     profile = _ROUTE_PROFILES[route]
     return RouteEvidenceProfile(
         transcript_budget=profile.transcript_budget,
@@ -336,6 +338,7 @@ def _profile_for_route(route: QuestionRoute) -> RouteEvidenceProfile:
 
 
 def _extract_day(text: str) -> Optional[str]:
+    """Return a normalised day tag (e.g. 'day1') extracted from text, or None."""
     for pattern, kind in _DAY_PATTERNS:
         match = pattern.search(text)
         if match is None:
@@ -354,6 +357,7 @@ def _cue_score(
     keywords: Iterable[str],
     phrases: Iterable[str],
 ) -> tuple[int, List[str]]:
+    """Return a cue score and the list of matched keywords and phrases."""
     hits: List[str] = []
     score = 0
     token_set = set(tokens)
@@ -375,6 +379,7 @@ def _choose_route(
     visual_score: int,
     question: str,
 ) -> QuestionRoute:
+    """Return the best-matching route from temporal, speech, and visual cue scores."""
     if _has_temporal_anchor(question) or temporal_score >= 3:
         return "temporal"
     if speech_score > 0 and visual_score > 0:
@@ -391,4 +396,5 @@ def _choose_route(
 
 
 def _has_temporal_anchor(question: str) -> bool:
+    """Return True if the question contains any dominant temporal ordering marker."""
     return any(marker in question for marker in _TEMPORAL_DOMINANT_MARKERS)

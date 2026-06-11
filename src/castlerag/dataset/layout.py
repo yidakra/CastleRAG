@@ -60,14 +60,17 @@ def build_camera_registry(
 
 
 def hour_video_path(root: Path, day: str, camera_id: str, hour: int) -> Path:
+    """Return the expected MP4 path for one camera-hour recording."""
     return root / "main" / day / camera_id / "video" / f"{hour:02d}.mp4"
 
 
 def hour_transcript_path(root: Path, day: str, camera_id: str, hour: int) -> Path:
+    """Return the expected JSON transcript path for one camera-hour recording."""
     return root / "main" / day / camera_id / "transcript" / f"{hour:02d}.json"
 
 
 def hour_metadata_paths(root: Path, day: str, camera_id: str, hour: int) -> List[Path]:
+    """Return sorted paths of all metadata CSV files for one camera-hour."""
     meta_dir = root / "main" / day / camera_id / "metadata"
     if not meta_dir.exists():
         return []

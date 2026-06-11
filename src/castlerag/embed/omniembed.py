@@ -50,6 +50,7 @@ class OmniEmbedClient:
         vllm_tensor_parallel: int = 1,
         vllm_gpu_memory_utilization: float = 0.90,
     ) -> None:
+        """Initialise the embedder with model name, backend, and vLLM options."""
         self.model = model
         self.backend = backend
         self.vllm_base_url = vllm_base_url
@@ -59,6 +60,7 @@ class OmniEmbedClient:
         self._client: Any = None
 
     def _ensure_client(self) -> None:
+        """Lazily initialise the embedding client on first use."""
         if self._client is not None:
             return
         if self.backend == "vllm":
@@ -69,6 +71,7 @@ class OmniEmbedClient:
             raise ValueError(f"Unknown backend: {self.backend!r}")
 
     def _init_vllm(self) -> Any:
+        """Return an OpenAI-compatible client for the vLLM embeddings endpoint."""
         if not self.vllm_base_url:
             raise ValueError("vllm_base_url is required when backend='vllm'")
         try:
@@ -81,6 +84,7 @@ class OmniEmbedClient:
         return OpenAI(base_url=self.vllm_base_url, api_key="not-needed")
 
     def _init_transformers(self) -> Any:
+        """Return a transformers-based embedding client (stub for local inference)."""
         return object()
 
     def embed_texts(self, texts: List[str]) -> np.ndarray:

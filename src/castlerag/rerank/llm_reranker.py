@@ -254,6 +254,7 @@ def _coerce_pack(
     raw_pack: EvidencePack | Mapping[str, Any],
     hints: RouteHints,
 ) -> EvidencePack:
+    """Return an EvidencePack, constructing one from a plain mapping if necessary."""
     if isinstance(raw_pack, EvidencePack):
         return raw_pack
 
@@ -298,6 +299,7 @@ def _invoke_reranker(
 
 
 def _normalize_content(content: Any) -> str:
+    """Coerce LLM response content to a stripped string."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -318,6 +320,7 @@ def _normalize_content(content: Any) -> str:
 def _aggregate_support_priors(
     kept_packs: Sequence[RerankedEvidencePack],
 ) -> dict[str, float]:
+    """Sum per-choice support scores across all kept packs into a prior dict."""
     priors = {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}
     for item in kept_packs:
         for choice, score in item.reranker_output.support.items():
@@ -330,6 +333,7 @@ def _flatten_evidence_rows(
     *,
     max_rows: int,
 ) -> list[RetrievalHit]:
+    """Deduplicate and collect evidence rows from kept packs up to max_rows."""
     rows: list[RetrievalHit] = []
     seen: set[str] = set()
     for item in kept_packs:
@@ -344,6 +348,7 @@ def _flatten_evidence_rows(
 
 
 def _format_section(title: str, values: Sequence[str]) -> str:
+    """Format a titled bullet-list section for prompt assembly."""
     if not values:
         return f"{title}:\n[none]"
     lines = "\n".join(f"- {value}" for value in values)
@@ -351,6 +356,7 @@ def _format_section(title: str, values: Sequence[str]) -> str:
 
 
 def _format_time_range(hit: RetrievalHit) -> str:
+    """Return a human-readable time range string for a retrieval hit, or 'N/A'."""
     if hit.absolute_start is None or hit.absolute_end is None:
         return "N/A"
     return f"{hit.absolute_start} to {hit.absolute_end}"

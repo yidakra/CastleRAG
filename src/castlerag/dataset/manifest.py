@@ -182,6 +182,7 @@ def discover_aux_manifest(
     rows: List[AuxAssetRow] = []
 
     def _add(source_type: AuxSourceType, participant: Optional[str], f: Path) -> None:
+        """Append an AuxAssetRow for the given file to the accumulator."""
         rows.append(
             AuxAssetRow(
                 source_type=source_type,

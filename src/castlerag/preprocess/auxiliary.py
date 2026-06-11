@@ -25,6 +25,7 @@ def _aux_record(
     has_reliable_timestamp: bool = True,
     version: str = "0.1.0",
 ) -> AuxRecord:
+    """Build and return an AuxRecord with a stable content-hash clip_id."""
     id_material = "|".join(
         [
             source_type,
@@ -56,6 +57,7 @@ def _aux_record(
 
 
 def _modality_for(source_type: str) -> str:
+    """Return the modality string ('image', 'video', or 'text') for a source type."""
     if source_type in ("aux_photo", "aux_thermal"):
         return "image"
     if source_type == "aux_video":

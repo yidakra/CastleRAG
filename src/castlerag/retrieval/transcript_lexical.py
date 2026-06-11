@@ -120,4 +120,5 @@ def score_windows(
 
 
 def _tokenize(text: str) -> List[str]:
+    """Lowercase and split text into word tokens using the module regex."""
     return _TOKEN_RE.findall(text.lower())
