@@ -13,15 +13,19 @@ Anti-confabulation rules (SPEC §6.1.1 — mandatory, not optional style):
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import AnswerChoice, EvalQuestion, Prediction, RetrievalHit
 
 _FINAL_ANSWER_RE = re.compile(
     r"(?mi)^\s*FINAL_ANSWER:\s*([abcd])\s*$",
+)
+_ABSTAIN_RE = re.compile(
+    r"(?mi)^\s*FINAL_ANSWER:\s*(?:abstain|none|insufficient|n/?a)\b",
 )
 _ANSWER_LETTER_RE = re.compile(r"(?i)\b([abcd])\b")
 _AUX_CITATION_PREFIXES = frozenset(
@@ -70,13 +74,18 @@ or [aux={{source_type}} id={{record_id}}].
   - no_echo: do not quote the question, answer options, route hints,
     or prompt instructions as evidence.
   - abstain: when no clip supports a claim, explicitly say the evidence
-    is insufficient instead of guessing; still select the
-    least-unsupported answer and mark the rationale low-confidence.
+    is insufficient and mark the rationale low-confidence — but you must
+    still commit to a letter; never write FINAL_ANSWER: abstain.
   - localise: every count, object-location, or spatial claim must cite
     a specific camera and timestamp.
   - ground: confidence must come from cited evidence,
     not from option plausibility or outside knowledge.
-- End with exactly one line: FINAL_ANSWER: a|b|c|d
+- You MUST end with exactly one line, and the value MUST be a single letter:
+    FINAL_ANSWER: a
+    FINAL_ANSWER: b
+    FINAL_ANSWER: c
+    FINAL_ANSWER: d
+  Never substitute "abstain", "none", "insufficient", or any other token.
 """
 
 _USER_PROMPT_TEMPLATE = """\
@@ -215,8 +224,20 @@ def _format_evidence_row(hit: RetrievalHit) -> str:
     return f"{header}\n{body}"
 
 
-def extract_answer(raw_text: str, support_priors: Dict[str, float]) -> AnswerChoice:
-    """Parse a strict FINAL_ANSWER line; fall back to highest support prior."""
+def extract_answer(
+    raw_text: str,
+    support_priors: Dict[str, float],
+    question_id: Optional[str] = None,
+) -> AnswerChoice:
+    """Parse a strict FINAL_ANSWER line; fall back when the model abstains.
+
+    When the model writes ``FINAL_ANSWER: abstain`` (or a similar non-letter
+    sentinel) and the support priors are all zero, picking the alphabetic
+    fallback ("a") is a strong bias: the indexed slice is partial, so this
+    pathway covers most questions on Codabench.  Deriving the fallback from a
+    SHA1 of ``question_id`` instead yields a deterministic uniform distribution
+    across a/b/c/d while preserving reproducibility.
+    """
     matches = [match.group(1).lower() for match in _FINAL_ANSWER_RE.finditer(raw_text)]
     if len(matches) == 1:
         return matches[0]  # type: ignore[return-value]
@@ -224,22 +245,40 @@ def extract_answer(raw_text: str, support_priors: Dict[str, float]) -> AnswerCho
         unique = set(matches)
         if len(unique) == 1:
             return matches[0]  # type: ignore[return-value]
+    if _ABSTAIN_RE.search(raw_text):
+        return _fallback_answer(support_priors, question_id=question_id)
     # Reject free-floating choice letters; generation must use FINAL_ANSWER.
     if _ANSWER_LETTER_RE.search(raw_text):
-        return _fallback_answer(support_priors)
+        return _fallback_answer(support_priors, question_id=question_id)
     if support_priors:
-        return _fallback_answer(support_priors)
+        return _fallback_answer(support_priors, question_id=question_id)
     return "a"
 
 
-def _fallback_answer(support_priors: Dict[str, float]) -> AnswerChoice:
-    """Return the answer choice with the highest support prior, defaulting to 'a'."""
-    ordered = sorted(
-        support_priors.items(),
-        key=lambda item: (-item[1], item[0]),
-    )
-    if ordered:
-        return ordered[0][0]  # type: ignore[return-value]
+def _fallback_answer(
+    support_priors: Dict[str, float],
+    question_id: Optional[str] = None,
+) -> AnswerChoice:
+    """Return the best fallback answer choice.
+
+    Order of preference:
+      1. The choice with the strictly-highest support prior.
+      2. If priors are tied or empty and ``question_id`` is supplied,
+         a deterministic uniform pick derived from sha1(question_id).
+      3. Alphabetic fallback ('a') — kept for legacy callers.
+    """
+    if support_priors:
+        ordered = sorted(
+            support_priors.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+        best_choice, best_score = ordered[0]
+        runner_score = ordered[1][1] if len(ordered) > 1 else None
+        if runner_score is None or best_score > runner_score:
+            return best_choice  # type: ignore[return-value]
+    if question_id is not None:
+        digest = hashlib.sha1(question_id.encode("utf-8")).digest()
+        return "abcd"[digest[0] % 4]  # type: ignore[return-value]
     return "a"
 
 
@@ -330,7 +369,9 @@ def generate_answer(
         max_evidence_rows=max_evidence_rows,
     )
     raw_answer_text = _call_generation_llm_with_model(llm_client, messages, model=model)
-    predicted_answer = extract_answer(raw_answer_text, support_priors)
+    predicted_answer = extract_answer(
+        raw_answer_text, support_priors, question_id=question.question_id
+    )
     return Prediction(
         question_id=question.question_id,
         predicted_answer=predicted_answer,

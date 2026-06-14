@@ -125,6 +125,21 @@ def test_extract_answer_fallback_no_priors():
     assert extract_answer("no answer", {}) == "a"
 
 
+def test_extract_answer_abstain_uses_qid_hash_fallback():
+    raw = "Evidence is insufficient.\nFINAL_ANSWER: abstain"
+    # Deterministic uniform pick across a/b/c/d via sha1(question_id).
+    seen = {extract_answer(raw, {}, question_id=f"q{i:04d}") for i in range(64)}
+    assert seen == {"a", "b", "c", "d"}
+
+
+def test_extract_answer_abstain_prefers_strict_top_prior():
+    raw = "Confidence is low.\nFINAL_ANSWER: insufficient"
+    assert (
+        extract_answer(raw, {"a": 0.1, "b": 0.6, "c": 0.0, "d": 0.0}, question_id="q1")
+        == "b"
+    )
+
+
 def test_format_main_video_citation():
     citation = _format_citation(_make_hit())
     assert citation == "[camera=Allie time=day1 00:00:00-00:00:30]"
