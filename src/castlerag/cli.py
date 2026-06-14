@@ -442,16 +442,19 @@ def index(
     if _count_records(scoped) == 0:
         console.print("[red]No chunk records found — run preprocess first.[/red]")
         raise typer.Exit(1)
-    cache_dir = Path(cfg.embedding.cache_dir)
-    if not any(cache_dir.glob("*.npz")):
-        embed_client = OmniEmbedClient(
-            model=cfg.embedding.model,
-            backend=cfg.embedding.backend,
-            vllm_base_url=_vllm_base_url(),
-            vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
-            vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
-        )
-        cache_dense_embeddings(records, cfg, embed_client)
+    # Always invoke cache_dense_embeddings — _cache_records already short-
+    # circuits per cache file when it already exists, so existing artifacts
+    # are not re-embedded.  The previous "skip if cache dir has any *.npz"
+    # gate silently skipped freshly-added days when day-1 caches were on
+    # disk, breaking incremental ingest.
+    embed_client = OmniEmbedClient(
+        model=cfg.embedding.model,
+        backend=cfg.embedding.backend,
+        vllm_base_url=_vllm_base_url(),
+        vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
+        vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
+    )
+    cache_dense_embeddings(records, cfg, embed_client)
     bm25_path = build_bm25_artifact(scoped, Path(cfg.embedding.cache_dir))
     vector_size, cache_paths = build_qdrant_index(
         cfg,

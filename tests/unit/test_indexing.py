@@ -443,6 +443,68 @@ def test_cache_dense_embeddings_uses_day_scoped_filenames(tmp_path: Path):
     assert loaded_ids == ["tx_0001"]
 
 
+def test_cache_dense_embeddings_per_day_calls_are_incremental(tmp_path: Path):
+    """Per-day re-runs must skip existing days and embed only the new one."""
+
+    class CountingEmbedClient:
+        def __init__(self) -> None:
+            self.dim = 2
+            self.text_calls: list[list[str]] = []
+
+        def embed_texts(self, payloads: list[str]) -> np.ndarray:
+            self.text_calls.append(list(payloads))
+            return np.asarray(
+                [[1.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32
+            )
+
+        def embed_images(self, payloads: list[str]) -> np.ndarray:
+            return np.asarray(
+                [[2.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32
+            )
+
+        def embed_videos(self, payloads: list[list[str]]) -> np.ndarray:
+            return np.asarray(
+                [[3.0, float(len(frames))] for frames in payloads], dtype=np.float32
+            )
+
+    cfg = _config(tmp_path)
+    records = load_chunk_records(tmp_path / "missing")
+    records.transcripts = [
+        _transcript_window(),
+        _transcript_window().model_copy(
+            update={"transcript_window_id": "tx_0002", "day": "day2"}
+        ),
+    ]
+    records.clips = []
+    records.events = []
+    records.aux = []
+
+    client = CountingEmbedClient()
+    cache_dense_embeddings(
+        records, cfg, client, modality="transcript", day=1
+    )
+    assert len(client.text_calls) == 1
+    assert client.text_calls[0] == [records.transcripts[0].transcript_text]
+
+    # A second invocation for the same day must be a complete no-op — the
+    # cache file already exists and _cache_records short-circuits.
+    cache_dense_embeddings(
+        records, cfg, client, modality="transcript", day=1
+    )
+    assert len(client.text_calls) == 1
+
+    # Embedding day 2 should re-invoke the embedder for the day-2 record only,
+    # writing a distinct day2-suffixed NPZ.
+    paths = cache_dense_embeddings(
+        records, cfg, client, modality="transcript", day=2
+    )
+    assert len(client.text_calls) == 2
+    assert client.text_calls[1] == [records.transcripts[1].transcript_text]
+    assert [path.name for path in paths] == ["transcripts_day2.npz"]
+    assert (Path(cfg.embedding.cache_dir) / "transcripts_day1.npz").exists()
+    assert (Path(cfg.embedding.cache_dir) / "transcripts_day2.npz").exists()
+
+
 def test_build_qdrant_index_upserts_all_cached_artifacts(tmp_path: Path, monkeypatch):
     class FakeEmbedClient:
         def __init__(self) -> None:
