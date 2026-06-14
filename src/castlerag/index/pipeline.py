@@ -302,11 +302,21 @@ def cache_dense_embeddings(
     return [path for path in cache_paths if path.exists()]
 
 
-def load_dense_caches(cache_dir: Path, records: LoadedArtifacts) -> List[CacheArtifact]:
-    """Load available dense embedding caches and join them back to typed records."""
+def load_dense_caches(
+    cache_dir: Path,
+    records: LoadedArtifacts,
+    *,
+    pattern: str = "*.npz",
+) -> List[CacheArtifact]:
+    """Load available dense embedding caches and join them back to typed records.
+
+    ``pattern`` restricts which cache files are read; the default loads every
+    ``*.npz`` under ``cache_dir``.  Pass ``*_day{N}.npz`` when only the
+    day-N subset should be upserted.
+    """
     index = _record_index(records)
     artifacts: List[CacheArtifact] = []
-    cache_paths = sorted(cache_dir.glob("*.npz"))
+    cache_paths = sorted(cache_dir.glob(pattern))
     for path in cache_paths:
         record_ids, vectors = load_embedding_cache(path)
         typed_records = [
@@ -331,11 +341,19 @@ def build_qdrant_index(
     cfg: CastleRAGConfig,
     records: LoadedArtifacts,
     recreate: bool = False,
+    day: Optional[int] = None,
 ) -> tuple[int, List[Path]]:
-    """Bootstrap Qdrant and upsert all available dense caches."""
+    """Bootstrap Qdrant and upsert dense caches.
+
+    When ``day`` is set, ``records`` is filtered to that day and only the
+    matching ``*_day{N}.npz`` cache files are upserted, so incremental
+    re-runs (e.g. after adding a new day's chunks) do not re-upsert the
+    days already in the collection.
+    """
     cache_dir = Path(cfg.embedding.cache_dir)
-    scoped = filter_records(records, cfg)
-    cache_artifacts = load_dense_caches(cache_dir, scoped)
+    scoped = filter_records(records, cfg, day=day)
+    pattern = f"*_day{day}.npz" if day is not None else "*.npz"
+    cache_artifacts = load_dense_caches(cache_dir, scoped, pattern=pattern)
     if not cache_artifacts:
         raise FileNotFoundError(f"No embedding caches found under {cache_dir}")
 

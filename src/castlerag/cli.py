@@ -428,25 +428,51 @@ def index(
     create_collection: bool = typer.Option(
         False, "--create-collection", help="(Re)create the Qdrant collection"
     ),
+    day: Optional[int] = typer.Option(
+        None,
+        "--day",
+        min=1,
+        max=4,
+        help="Embed and upsert only the day-N records.  Existing days in the "
+        "Qdrant collection are left untouched; BM25 is still rebuilt from all "
+        "available transcripts.",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    """Create Qdrant collection + payload indexes and upsert all evidence points."""
+    """Create Qdrant collection + payload indexes and upsert evidence points.
+
+    With ``--day N`` the embed + upsert paths are scoped to that day, so the
+    canonical incremental flow is::
+
+        castlerag preprocess --day 2 --caption --events --aux
+        castlerag index      --day 2
+
+    BM25 is always rebuilt from the full transcript scope so retrieval keeps
+    matching previously-ingested days.
+    """
     cfg = _resolve_config(config, snellius)
-    console.print(f"[bold]castlerag index[/bold]  collection={cfg.qdrant.collection}")
+    scope = f"day{day}" if day is not None else "all-days"
+    console.print(
+        f"[bold]castlerag index[/bold]  collection={cfg.qdrant.collection}  "
+        f"scope={scope}"
+    )
     console.print(f"  Qdrant : {cfg.qdrant.host}:{cfg.qdrant.port}")
     if dry_run:
         console.print("[yellow]dry-run: no Qdrant writes[/yellow]")
         return
     records = load_chunk_records(Path(cfg.preprocessing.chunks_dir))
-    scoped = filter_records(records, cfg)
-    if _count_records(scoped) == 0:
+    scoped_all = filter_records(records, cfg)
+    if _count_records(scoped_all) == 0:
         console.print("[red]No chunk records found — run preprocess first.[/red]")
         raise typer.Exit(1)
-    # Always invoke cache_dense_embeddings — _cache_records already short-
-    # circuits per cache file when it already exists, so existing artifacts
-    # are not re-embedded.  The previous "skip if cache dir has any *.npz"
-    # gate silently skipped freshly-added days when day-1 caches were on
-    # disk, breaking incremental ingest.
+    if day is not None and _count_records(filter_records(records, cfg, day=day)) == 0:
+        console.print(
+            f"[red]No chunk records found for day {day} — "
+            f"run `castlerag preprocess --day {day}` first.[/red]"
+        )
+        raise typer.Exit(1)
+    # Always invoke cache_dense_embeddings — _cache_records short-circuits
+    # per cache file, so existing artifacts are not re-embedded.
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
@@ -454,12 +480,15 @@ def index(
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
-    cache_dense_embeddings(records, cfg, embed_client)
-    bm25_path = build_bm25_artifact(scoped, Path(cfg.embedding.cache_dir))
+    cache_dense_embeddings(records, cfg, embed_client, day=day)
+    # BM25 rebuilds from the full record scope so day-1 retrieval keeps
+    # working after a day-2 incremental ingest.
+    bm25_path = build_bm25_artifact(scoped_all, Path(cfg.embedding.cache_dir))
     vector_size, cache_paths = build_qdrant_index(
         cfg,
-        scoped,
+        records,
         recreate=create_collection,
+        day=day,
     )
     console.print(f"  BM25    : {bm25_path}")
     console.print(f"  dense   : {len(cache_paths)} cache bundles upserted")

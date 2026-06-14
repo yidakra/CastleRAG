@@ -569,6 +569,73 @@ def test_build_qdrant_index_upserts_all_cached_artifacts(tmp_path: Path, monkeyp
     assert len(payload_batches) == 4
 
 
+def test_build_qdrant_index_day_filter_only_upserts_matching_day(
+    tmp_path: Path, monkeypatch
+):
+    """`build_qdrant_index(day=N)` reads only the day-N caches and upserts only
+    the day-N records, leaving existing days in the collection untouched."""
+
+    class FakeEmbedClient:
+        def __init__(self) -> None:
+            self.dim = 2
+
+        def embed_texts(self, payloads: list[str]) -> np.ndarray:
+            return np.asarray(
+                [[1.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32
+            )
+
+        def embed_images(self, payloads: list[str]) -> np.ndarray:
+            return np.asarray(
+                [[2.0, float(idx)] for idx, _ in enumerate(payloads)], dtype=np.float32
+            )
+
+        def embed_videos(self, payloads: list[list[str]]) -> np.ndarray:
+            return np.asarray(
+                [[3.0, float(len(frames))] for frames in payloads], dtype=np.float32
+            )
+
+    cfg = _config(tmp_path)
+    records = load_chunk_records(tmp_path / "missing")
+    records.transcripts = [
+        _transcript_window(),
+        _transcript_window().model_copy(
+            update={"transcript_window_id": "tx_0002", "day": "day2"}
+        ),
+    ]
+    records.clips = []
+    records.events = []
+    records.aux = []
+
+    client = FakeEmbedClient()
+    cache_dense_embeddings(records, cfg, client, modality="transcript", day=1)
+    cache_dense_embeddings(records, cfg, client, modality="transcript", day=2)
+    cache_dir = Path(cfg.embedding.cache_dir)
+    assert (cache_dir / "transcripts_day1.npz").exists()
+    assert (cache_dir / "transcripts_day2.npz").exists()
+
+    captured_upserts: list[dict] = []
+
+    class FakeQdrantClient:
+        pass
+
+    monkeypatch.setattr(
+        "castlerag.index.pipeline.bootstrap_collection",
+        lambda **kwargs: FakeQdrantClient(),
+    )
+    monkeypatch.setattr(
+        "castlerag.index.pipeline.upsert_batch",
+        lambda **kwargs: captured_upserts.append(kwargs),
+    )
+
+    build_qdrant_index(cfg, records, recreate=True, day=2)
+
+    # Exactly one upsert batch, scoped to the day-2 transcript record only.
+    assert len(captured_upserts) == 1
+    ids = captured_upserts[0]["payloads"]
+    assert len(ids) == 1
+    assert ids[0]["record_id"] == "tx_0002"
+
+
 def test_format_query_text():
     assert format_query_text("What happened?") == "Query: What happened?"
 
