@@ -449,6 +449,15 @@ def index(
 
     BM25 is always rebuilt from the full transcript scope so retrieval keeps
     matching previously-ingested days.
+
+    **Always pass ``--day N`` after the initial bootstrap run.**  A bootstrap
+    run without ``--day`` writes suffix-less cache files (``transcripts.npz``,
+    ``clips.npz``, ...).  When new days are later added to ``chunks_dir``,
+    re-running plain ``castlerag index`` would skip embedding entirely (the
+    suffix-less cache files already exist) and the new day would never reach
+    Qdrant.  The ``--day N`` flag side-steps this by writing distinct
+    ``*_dayN.npz`` artifacts and upserting only those.  See issue #43 for the
+    longer-term per-record-id skip refactor.
     """
     cfg = _resolve_config(config, snellius)
     scope = f"day{day}" if day is not None else "all-days"

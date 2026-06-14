@@ -237,7 +237,16 @@ no sudo required.)
 
 The `--day N` flag is symmetric across `preprocess`, `embed`, and `index`,
 so adding a new day to an existing collection is a three-step incremental
-run rather than a full rebuild:
+run rather than a full rebuild.
+
+> **Always pass `--day N` after the initial bootstrap.**  A bootstrap
+> run without `--day` writes suffix-less cache files (`transcripts.npz`,
+> `clips.npz`, …) and a later plain `castlerag index` will see them, decide
+> embedding is already done, and silently miss the new day.  Stick with
+> per-day commands once data is in the collection — `castlerag embed --day N`
+> and `castlerag index --day N` always write distinct `*_dayN.npz` artifacts
+> and upsert only those records.  Tracking issue: #43.
+
 
 ```bash
 sbatch --array=5 --account=$ACCOUNT scripts/slurm/preprocess_main.slurm
