@@ -35,12 +35,27 @@ echo "[index_qdrant]  host=$(hostname)  start=$(date -Iseconds)"
 
 module purge
 module load 2024
-module load Python/3.11.3-GCCcore-12.3.0
+# 3.12.3/GCCcore-13.3.0 matches the venv AND provides the GLIBCXX_3.4.30 that the
+# Qdrant binary needs on this RHEL9 node (the 3.11.3/GCCcore-12.3.0 libstdc++ is
+# not placed on LD_LIBRARY_PATH and Qdrant fails to start under it).
+module load Python/3.12.3-GCCcore-13.3.0
 
 source "${VENV}/bin/activate"
 
+# Start Qdrant for the lifetime of this job, with storage on shared scratch so
+# the collection survives the job and is reachable from the eval node.  No `cd`
+# (keeps the relative --config path valid); storage path set via env override.
+export QDRANT__STORAGE__STORAGE_PATH="/scratch-shared/${USER}/qdrant_storage/storage"
+"${HOME}/qdrant/qdrant" &
+QDRANT_PID=$!
+sleep 5
+trap 'kill $QDRANT_PID 2>/dev/null' EXIT
+
+# --day "${CASTLE_DAY}" matches the day-suffixed embed caches (*_dayN.npz) so the
+# cache short-circuit skips re-embedding — no vLLM embed server needed here.
 castlerag index \
     --config "${CONFIG}" \
+    ${CASTLE_DAY:+--day "${CASTLE_DAY}"} \
     ${CREATE_COLLECTION:+--create-collection}
 
 echo "[index_qdrant]  done=$(date -Iseconds)"
