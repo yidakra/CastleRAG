@@ -113,6 +113,10 @@ VLLM_BASE_URL=http://localhost:11434/v1 python scripts/smoke_local.py --real
 
 ## Running on Snellius
 
+See [docs/snellius.md](docs/snellius.md) for the full end-to-end setup
+guide (account, venv, dataset download, vLLM servers, SLURM chain, and
+incremental ingest with `--day N`).  The TL;DR for the SLURM chain:
+
 Edit `configs/snellius.yaml` to set your account and scratch paths, then:
 
 ```bash
