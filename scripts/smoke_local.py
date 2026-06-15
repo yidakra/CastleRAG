@@ -35,7 +35,7 @@ _QUESTIONS = {
         "answers": {"a": "Blue", "b": "Red", "c": "White", "d": "Black"},
     },
     "q002": {
-        "query": "What did Bjorn say to Celine before lunch on day 2?",
+        "query": "What did Bjorn say to Cathal before lunch on day 2?",
         "answers": {
             "a": "See you later",
             "b": "Good morning",
@@ -44,11 +44,14 @@ _QUESTIONS = {
         },
     },
     "q003": {
-        "query": "In what order did Deon visit the office and the kitchen on day 3?",
+        "query": (
+            "In what order did Florian visit the meeting room and the kitchen "
+            "on day 3?"
+        ),
         "answers": {
-            "a": "Office then kitchen",
-            "b": "Kitchen then office",
-            "c": "Only the office",
+            "a": "Meeting room then kitchen",
+            "b": "Kitchen then meeting room",
+            "c": "Only the meeting room",
             "d": "Only the kitchen",
         },
     },
@@ -57,21 +60,21 @@ _QUESTIONS = {
         "answers": {"a": "One", "b": "Two", "c": "Three", "d": "Four"},
     },
     "q005": {
-        "query": "What brand logo was visible on the screen Estella was looking at?",
+        "query": "What brand logo was visible on the screen Klaus was looking at?",
         "answers": {"a": "Apple", "b": "Google", "c": "Microsoft", "d": "Samsung"},
     },
 }
 
 _TRANSCRIPT_TEXTS = [
     "Allie is wearing a blue shirt while preparing breakfast in the kitchen.",
-    "Bjorn said to Celine: please pass the salt, before sitting down.",
-    "Deon walked from the kitchen to the office and sat at his desk.",
+    "Bjorn said to Cathal: please pass the salt, before sitting down.",
+    "Florian walked from the kitchen to the meeting room and sat at his desk.",
     "Three people were gathered in the living room at two in the afternoon.",
-    "Estella was looking at a screen with a large Apple logo on it.",
-    "Finn and Greta discussed the schedule for the afternoon.",
-    "Harvey washed his hands and returned to the living room.",
-    "Isla took notes while sitting in the office.",
-    "Jian opened the refrigerator and took out a bottle of water.",
+    "Klaus was looking at a screen with a large Apple logo on it.",
+    "Luca and Onanong discussed the schedule for the afternoon.",
+    "Stevan washed his hands and returned to the living room.",
+    "Tien took notes while sitting in the meeting room.",
+    "Werner opened the refrigerator and took out a bottle of water.",
     "The kitchen was empty after everyone went to the living room.",
 ]
 
@@ -217,10 +220,10 @@ def _build_inmemory_index(
     # --- Transcript windows ---
     windows: List[TranscriptWindow] = []
     base_ms = 1_700_000_000_000
-    rooms = ["Kitchen", "Living1", "Office", "Hallway", "Living2"]
+    rooms = ["Kitchen", "Living1", "Meeting", "Reading", "Living2"]
     for i, text in enumerate(_TRANSCRIPT_TEXTS):
         day = f"day{(i % 4) + 1}"
-        cam = ["Allie", "Bjorn", "Celine", "Deon", "Estella"][i % 5]
+        cam = ["Allie", "Bjorn", "Cathal", "Florian", "Klaus"][i % 5]
         windows.append(
             TranscriptWindow(
                 transcript_window_id=f"tw_{i:04d}",
@@ -243,7 +246,7 @@ def _build_inmemory_index(
     clips: List[ClipRecord] = []
     for i in range(5):
         day = f"day{(i % 4) + 1}"
-        cam = ["Allie", "Bjorn", "Celine", "Deon", "Estella"][i]
+        cam = ["Allie", "Bjorn", "Cathal", "Florian", "Klaus"][i]
         clips.append(
             ClipRecord(
                 clip_id=f"clip_{i:04d}",
@@ -268,7 +271,7 @@ def _build_inmemory_index(
     events: List[EventSummaryRecord] = []
     for i in range(3):
         day = f"day{i + 1}"
-        cam = ["Allie", "Bjorn", "Celine"][i]
+        cam = ["Allie", "Bjorn", "Cathal"][i]
         events.append(
             EventSummaryRecord(
                 event_summary_id=f"ev_{i:04d}",

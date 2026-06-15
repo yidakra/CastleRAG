@@ -12,21 +12,22 @@ from pydantic import BaseModel, Field
 
 class DatasetConfig(BaseModel):
     root: str = "/data/castle2024"
-    hf_repo: str = "castle-challenge/castle2024"
+    hf_repo: str = "CASTLE-Dataset/CASTLE2024"
     days: List[int] = Field(default=[1, 2, 3, 4])
-    # 10 egocentric participant cameras (TAHAKOM-validated baseline scope)
+    # 11 egocentric participant cameras (real CASTLE stream names)
     ego_cameras: List[str] = Field(
         default=[
             "Allie",
+            "Bao",
             "Bjorn",
-            "Celine",
-            "Deon",
-            "Estella",
-            "Finn",
-            "Greta",
-            "Harvey",
-            "Isla",
-            "Jian",
+            "Cathal",
+            "Florian",
+            "Klaus",
+            "Luca",
+            "Onanong",
+            "Stevan",
+            "Tien",
+            "Werner",
         ]
     )
     # 5 fixed room cameras — extension only, not in baseline
@@ -35,8 +36,8 @@ class DatasetConfig(BaseModel):
             "Kitchen",
             "Living1",
             "Living2",
-            "Office",
-            "Hallway",
+            "Meeting",
+            "Reading",
         ]
     )
     camera_scope: Literal["ego", "all"] = "ego"

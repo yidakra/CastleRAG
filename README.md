@@ -40,7 +40,7 @@ pip install -e ".[inference]"
 
 ## Dataset
 
-The CASTLE 2024 dataset is available on Hugging Face (`castle-challenge/castle2024`).
+The CASTLE 2024 dataset is available on Hugging Face (`CASTLE-Dataset/CASTLE2024`).
 Download it to `/data/castle2024` (or set `dataset.root` in `configs/base.yaml`).
 
 Expected layout:

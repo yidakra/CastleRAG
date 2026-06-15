@@ -3,27 +3,28 @@
 
 dataset:
   root: "/data/castle2024"
-  hf_repo: "castle-challenge/castle2024"
+  hf_repo: "CASTLE-Dataset/CASTLE2024"
   days: [1, 2, 3, 4]
-  # 10 egocentric participant cameras — TAHAKOM-validated baseline scope
+  # 11 egocentric participant cameras — real CASTLE stream names
   ego_cameras:
     - "Allie"
+    - "Bao"
     - "Bjorn"
-    - "Celine"
-    - "Deon"
-    - "Estella"
-    - "Finn"
-    - "Greta"
-    - "Harvey"
-    - "Isla"
-    - "Jian"
+    - "Cathal"
+    - "Florian"
+    - "Klaus"
+    - "Luca"
+    - "Onanong"
+    - "Stevan"
+    - "Tien"
+    - "Werner"
   # 5 fixed room cameras — extension only, excluded from baseline indexing
   exo_cameras:
     - "Kitchen"
     - "Living1"
     - "Living2"
-    - "Office"
-    - "Hallway"
+    - "Meeting"
+    - "Reading"
   camera_scope: "ego"   # ego | all
   hours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
