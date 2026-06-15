@@ -27,6 +27,8 @@ castlerag = "castlerag.cli:app"
 
 [project.optional-dependencies]
 dev = [
+    # include the UI extra so CI exercises the Dash app + Plotly figure tests
+    "castlerag[ui]",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "mypy>=1.10",
