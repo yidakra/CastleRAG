@@ -30,7 +30,7 @@ MAX_BATCH = int(os.getenv("OMNIEMBED_MAX_BATCH", "16"))
 
 _device = "cuda" if torch.cuda.is_available() else "cpu"
 print(
-    f"[omniembed] loading processor={PROCESSOR} base={BASE} adapter={ADAPTER} on {_device}",
+    f"[omniembed] loading proc={PROCESSOR} base={BASE} adapter={ADAPTER} dev={_device}",
     flush=True,
 )
 _processor = AutoProcessor.from_pretrained(PROCESSOR)
