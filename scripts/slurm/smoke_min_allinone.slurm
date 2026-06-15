@@ -35,12 +35,16 @@ module load Python/3.12.3-GCCcore-13.3.0
 module load CUDA/12.6.0
 module load FFmpeg/7.0.2-GCCcore-13.3.0
 source "${HOME}/castlerag_venv/bin/activate"
-cd /gpfs/home2/scur0225/CastleRAG
+cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 mkdir -p logs
 
-wait_ready() { # port label logfile
+wait_ready() { # url label logfile [pid]
+  local pid="${4:-}"
   for i in $(seq 1 120); do
-    curl -sf "http://localhost:$1/v1/models" >/dev/null 2>&1 && { echo "[smoke-min] $2 ready ($((i*10))s)"; return 0; }
+    curl -sf "$1" >/dev/null 2>&1 && { echo "[smoke-min] $2 ready ($((i*10))s)"; return 0; }
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+      echo "[smoke-min] ERROR: $2 server process died"; tail -30 "$3" 2>/dev/null; return 1
+    fi
     sleep 10
   done
   echo "[smoke-min] ERROR: $2 not ready after 1200s"; tail -30 "$3" 2>/dev/null; return 1
@@ -62,7 +66,7 @@ CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-VL-8B-Instruct \
     > "${GEN_LOG}" 2>&1 &
 GEN_PID=$!
 trap 'kill $EMB_PID $GEN_PID 2>/dev/null' EXIT
-wait_ready 8200 embed "${EMB_LOG}"
+wait_ready "http://localhost:8200/v1/models" embed "${EMB_LOG}" $EMB_PID
 trap 'kill $EMB_PID $GEN_PID 2>/dev/null' EXIT
 
 # --- Qdrant (storage on shared scratch) ---
@@ -71,8 +75,8 @@ export QDRANT__STORAGE__STORAGE_PATH="${SC}/qdrant_storage/storage"
 QPID=$!
 trap 'kill $EMB_PID $GEN_PID $QPID 2>/dev/null' EXIT
 
-sleep 6; curl -sf http://localhost:6333/readyz >/dev/null && echo "[smoke-min] qdrant ready"
-wait_ready 8201 gen "${GEN_LOG}"
+wait_ready "http://localhost:6333/readyz" qdrant "logs/qdrant_${SLURM_JOB_ID}.log" $QPID
+wait_ready "http://localhost:8201/v1/models" gen "${GEN_LOG}" $GEN_PID
 
 # --- offline build ---
 echo "[smoke-min] === preprocess (caption+events) ==="

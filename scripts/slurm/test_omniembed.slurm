@@ -22,7 +22,7 @@ module load 2024
 module load Python/3.12.3-GCCcore-13.3.0
 module load CUDA/12.6.0
 source "${HOME}/castlerag_venv/bin/activate"
-cd /gpfs/home2/scur0225/CastleRAG
+cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 mkdir -p logs
 
 python scripts/omniembed_server.py --port 8200 > "logs/omni_test_server_${SLURM_JOB_ID}.log" 2>&1 &
@@ -35,6 +35,8 @@ for i in $(seq 1 90); do
   if ! kill -0 $SPID 2>/dev/null; then echo "[test-omni] SERVER DIED"; tail -40 "logs/omni_test_server_${SLURM_JOB_ID}.log"; exit 1; fi
   sleep 10
 done
+curl -sf http://localhost:8200/v1/models >/dev/null 2>&1 \
+  || { echo "[test-omni] ERROR: server not ready after 900s"; tail -40 "logs/omni_test_server_${SLURM_JOB_ID}.log"; exit 1; }
 
 python - <<'PY'
 import requests, numpy as np
