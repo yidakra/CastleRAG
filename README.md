@@ -158,8 +158,8 @@ castlerag ui              # http://127.0.0.1:8050
 
 The real pipeline drops in later behind the `ChatEngine` protocol. The YouTube
 mirror mapping lives in `src/castlerag/ui/youtube_mirror.csv`
-(`day,camera,hour,video_id`), seeded with a placeholder video until the team's
-mirror uploads are wired in. See [`src/castlerag/ui/README.md`](src/castlerag/ui/README.md).
+(`day,camera,hour,video_id`, 666 rows generated from the official CASTLE
+viewer's `videos.json`). See [`src/castlerag/ui/README.md`](src/castlerag/ui/README.md).
 
 ## Tests
 

@@ -95,7 +95,7 @@ def _video_panel(initial_src: str) -> html.Div:
 
 def build_layout(mirror: YouTubeMirror) -> html.Div:
     """Build the full dashboard layout, seeding the embed with a default clip."""
-    initial_src = mirror.embed_url("day1", "Allie", 8, 0)
+    initial_src = mirror.default_embed_url()
     return html.Div(
         className="app-root",
         children=[

@@ -12,10 +12,12 @@ from castlerag.ui.youtube import PLACEHOLDER_VIDEO_ID, YouTubeMirror
 # ---------------------------------------------------------------------------
 
 
-def test_mirror_from_csv_loads_seed_rows():
+def test_mirror_from_csv_loads_real_mapping():
     mirror = YouTubeMirror.from_csv()
-    assert mirror.mapping  # seed CSV ships with rows
-    assert mirror.video_id("day1", "Allie", 8) == PLACEHOLDER_VIDEO_ID
+    assert len(mirror.mapping) == 666  # full CASTLE mirror
+    # Real id from the CASTLE viewer's videos.json.
+    assert mirror.video_id("day1", "Allie", 8) == "XYkq1PPZu9A"
+    assert mirror.is_placeholder("day1", "Allie", 8) is False
 
 
 def test_mirror_embed_url_includes_start_offset_and_video_id():
@@ -23,6 +25,14 @@ def test_mirror_embed_url_includes_start_offset_and_video_id():
     url = mirror.embed_url("day1", "Allie", 8, start_seconds=42.7)
     assert "/embed/ABCDEFGHIJK?" in url
     assert "start=42" in url
+    assert url.startswith("https://www.youtube-nocookie.com")
+
+
+def test_mirror_default_and_watch_urls():
+    mirror = YouTubeMirror.from_csv()
+    assert "/embed/" in mirror.default_embed_url()
+    watch = mirror.watch_url("day1", "Allie", 8, 90)
+    assert watch == "https://www.youtube.com/watch?v=XYkq1PPZu9A&t=90s"
 
 
 def test_mirror_unknown_key_falls_back_to_placeholder():

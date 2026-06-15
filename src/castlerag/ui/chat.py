@@ -25,10 +25,10 @@ from castlerag.routing.question_router import route_question
 _CHOICES = ("a", "b", "c", "d")
 
 # Fallback roster used when no mirror keys are supplied: day1 egocentric cameras
-# over the morning hours that the local partial-download slices ship.
+# (real CASTLE stream names) over the morning hours.
 _DEFAULT_ROSTER: Tuple[Tuple[str, str, int], ...] = tuple(
     ("day1", camera, hour)
-    for camera in ("Allie", "Bjorn", "Celine")
+    for camera in ("Allie", "Bjorn", "Cathal")
     for hour in (8, 9, 10)
 )
 

@@ -30,12 +30,20 @@ changes. `EvidenceRef` mirrors `schemas.RetrievalHit` (plus `hour` /
 
 ## YouTube mirror mapping
 
-No public YouTube mirror of CASTLE exists; the dataset ships as multi-TB UHD
-video on HuggingFace. `youtube_mirror.csv` maps each `day,camera,hour` to a
-YouTube `video_id`, seeded with an openly licensed placeholder
-(`aqz-KE-bpKQ`, Big Buck Bunny) so embeds render immediately.
+The official CASTLE project mirrors every stream on YouTube (one video per
+`day / camera / hour`), which the [CASTLE viewer](https://castle-dataset.github.io/castle-viewer/)
+embeds. `youtube_mirror.csv` (666 rows: `day,camera,hour,video_id`) is generated
+from that viewer's `videos.json`
+([CASTLE-Dataset/CASTLE-Dataset.github.io](https://github.com/CASTLE-Dataset/CASTLE-Dataset.github.io)).
 
-To wire the real mirror, edit `youtube_mirror.csv` and replace each `video_id`
-with the team's upload — no code change. Unmapped triples fall back to the
-placeholder and are flagged in the evidence caption. The embed seeks to the
-clip offset via `?start=<seconds>`.
+Streams: 11 ego (`Allie, Bao, Bjorn, Cathal, Florian, Klaus, Luca, Onanong,
+Stevan, Tien, Werner`) + 5 fixed (`Kitchen, Living1, Living2, Meeting,
+Reading`); days 1–4, hours 08–20 (with gaps where a stream didn't record).
+
+The embed uses `youtube-nocookie.com/embed/<id>?start=<seconds>`, matching the
+viewer. Edit the CSV to add or correct rows — no code change. An unmapped triple
+falls back to a placeholder video and is flagged in the evidence caption.
+
+> Note: the real stream names above differ from the placeholder roster in
+> `configs/base.yaml` / `routing/question_router.py` (`Celine, Deon, …`); those
+> belong to the RAG side and are out of scope for this UI backbone.

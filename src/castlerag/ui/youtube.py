@@ -1,14 +1,16 @@
 """YouTube embed pipeline for the CASTLE dataset mirror.
 
-The CASTLE 2024 dataset ships as multi-terabyte UHD video on HuggingFace; there
-is no public streaming mirror.  To avoid hosting HLS ourselves, the UI embeds a
-YouTube mirror of the egocentric streams (one video per ``day / camera / hour``)
-and seeks to the relevant offset with the ``?start=`` query parameter.
+The CASTLE 2024 dataset ships as multi-terabyte UHD video on HuggingFace, but the
+official project also mirrors every stream on YouTube (one video per
+``day / camera / hour``), which the CASTLE viewer embeds.  We reuse that mirror so
+we never have to host HLS ourselves, seeking to the relevant offset with the
+``?start=`` query parameter.
 
-The mapping from ``(day, camera, hour)`` to a YouTube video id lives in a small
-editable CSV (``youtube_mirror.csv``).  Rows are seeded with a placeholder video
-so the embed renders end-to-end; replace each ``video_id`` with the team's own
-mirror upload as those become available — no code change required.
+``youtube_mirror.csv`` holds the ``day,camera,hour,video_id`` mapping (666 rows),
+generated from the CASTLE viewer's ``videos.json``
+(github.com/CASTLE-Dataset/CASTLE-Dataset.github.io).  Edit the CSV to add or
+correct rows — no code change required.  An unmapped triple (e.g. a camera/hour
+the mirror skipped) falls back to ``placeholder_video_id``.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from typing import Dict, Optional, Tuple
 _DEFAULT_MAPPING_PATH = Path(__file__).parent / "youtube_mirror.csv"
 
 # Big Buck Bunny (Blender Foundation, CC-BY 3.0) — an openly licensed, reliably
-# embeddable stand-in used until the real CASTLE mirror uploads are wired in.
+# embeddable fallback shown for triples the mirror doesn't cover.
 PLACEHOLDER_VIDEO_ID = "aqz-KE-bpKQ"
 
 # (day, camera, hour) — normalized: day lower-cased, camera verbatim, hour int.
@@ -44,7 +46,9 @@ class YouTubeMirror:
 
     mapping: Dict[MirrorKey, str] = field(default_factory=dict)
     placeholder_video_id: str = PLACEHOLDER_VIDEO_ID
-    embed_host: str = "https://www.youtube.com"
+    # Privacy-enhanced host, matching the CASTLE viewer's embeds.
+    embed_host: str = "https://www.youtube-nocookie.com"
+    watch_host: str = "https://www.youtube.com"
 
     @classmethod
     def from_csv(cls, path: Optional[Path] = None, **kwargs: object) -> "YouTubeMirror":
@@ -104,6 +108,15 @@ class YouTubeMirror:
     ) -> str:
         """Return a public ``watch?v=`` URL seeked to ``start_seconds``."""
         start = max(0, int(start_seconds))
-        return (
-            f"{self.embed_host}/watch?v={self.video_id(day, camera, hour)}&t={start}s"
-        )
+        vid = self.video_id(day, camera, hour)
+        return f"{self.watch_host}/watch?v={vid}&t={start}s"
+
+    def default_embed_url(self, start_seconds: float = 0.0) -> str:
+        """Return an embed URL for the first mapped clip (UI initial state).
+
+        Falls back to a placeholder embed when the mapping is empty.
+        """
+        if not self.mapping:
+            return f"{self.embed_host}/embed/{self.placeholder_video_id}?rel=0"
+        day, camera, hour = sorted(self.mapping)[0]
+        return self.embed_url(day, camera, hour, start_seconds)
