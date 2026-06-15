@@ -146,6 +146,21 @@ sbatch --dependency=afterok:${JOB3} scripts/slurm/index_qdrant.slurm
 Estimated cost: ~EUR 115–204 for the full ego-only evidence build
 (60–106 GPU-hours × 128 SBU/h × EUR 15/1000 SBU; see `SPEC.md §3.5`).
 
+## UI (dashboard)
+
+A Dash dashboard — chat + YouTube evidence embeds + Plotly analytics — runs end
+to end on an offline placeholder engine, with no RAG, models, Qdrant, or vLLM:
+
+```bash
+pip install -e ".[ui]"
+castlerag ui              # http://127.0.0.1:8050
+```
+
+The real pipeline drops in later behind the `ChatEngine` protocol. The YouTube
+mirror mapping lives in `src/castlerag/ui/youtube_mirror.csv`
+(`day,camera,hour,video_id`), seeded with a placeholder video until the team's
+mirror uploads are wired in. See [`src/castlerag/ui/README.md`](src/castlerag/ui/README.md).
+
 ## Tests
 
 ```bash

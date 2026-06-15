@@ -39,9 +39,19 @@ inference = [
     "vllm>=0.5",
     "accelerate>=0.30",
 ]
+# Dash dashboard (chat + YouTube embeds + Plotly analytics)
+ui = [
+    "dash>=2.16",
+    "plotly>=5.20",
+    "pandas>=2.0",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/castlerag"]
+artifacts = [
+    "src/castlerag/ui/youtube_mirror.csv",
+    "src/castlerag/ui/assets/*",
+]
 
 [tool.hatch.build.targets.wheel.force-include]
 "configs" = "castlerag/configs"
