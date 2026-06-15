@@ -29,7 +29,10 @@ SERVED_NAME = os.getenv("OMNIEMBED_SERVED_NAME", "Tevatron/OmniEmbed-v0.1-multiv
 MAX_BATCH = int(os.getenv("OMNIEMBED_MAX_BATCH", "16"))
 
 _device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"[omniembed] loading processor={PROCESSOR} base={BASE} adapter={ADAPTER} on {_device}", flush=True)
+print(
+    f"[omniembed] loading processor={PROCESSOR} base={BASE} adapter={ADAPTER} on {_device}",
+    flush=True,
+)
 _processor = AutoProcessor.from_pretrained(PROCESSOR)
 _processor.tokenizer.padding_side = "left"
 _model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
@@ -48,11 +51,15 @@ def _embed(texts: List[str]) -> List[List[float]]:
         rendered = []
         for t in batch:
             msg = [{"role": "user", "content": [{"type": "text", "text": t}]}]
-            s = _processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
+            s = _processor.apply_chat_template(
+                msg, tokenize=False, add_generation_prompt=True
+            )
             if isinstance(s, list):
                 s = s[0]
             rendered.append(s + "<|endoftext|>")
-        inputs = _processor.tokenizer(rendered, return_tensors="pt", padding="longest").to(_device)
+        inputs = _processor.tokenizer(
+            rendered, return_tensors="pt", padding="longest"
+        ).to(_device)
         model_out = _model(**inputs, return_dict=True, output_hidden_states=True)
         reps = model_out.hidden_states[-1][:, -1]
         reps = torch.nn.functional.normalize(reps, p=2, dim=-1)
