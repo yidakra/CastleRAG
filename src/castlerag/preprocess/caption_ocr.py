@@ -99,9 +99,10 @@ def annotate_clip(
     step = max(1, len(frame_paths) // _CAPTION_NUM_FRAMES)
     sample = frame_paths[::step][:_CAPTION_NUM_FRAMES]
 
+    encoded_sample = [_frame_to_b64(fp) for fp in sample]
+
     content: list = []
-    for fp in sample:
-        img_b64 = _frame_to_b64(fp)
+    for img_b64 in encoded_sample:
         content.append(
             {
                 "type": "image_url",
@@ -155,8 +156,7 @@ def annotate_clip(
     # Scene graph pass: objects and spatial relationships for richer retrieval
     scene_graph_text: Optional[str] = None
     sg_content: list = []
-    for fp in sample:
-        img_b64 = _frame_to_b64(fp)
+    for img_b64 in encoded_sample:
         sg_content.append(
             {
                 "type": "image_url",

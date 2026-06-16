@@ -375,7 +375,9 @@ def _llm_route_hints(
         entities = [str(e) for e in data.get("key_entities", [])[:6]]
         modalities = [str(m) for m in data.get("focus_modalities", [])[:4]]
         return entities, modalities
-    except Exception:
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).debug("LLM route hints extraction failed: %s", exc)
         return [], []
 
 

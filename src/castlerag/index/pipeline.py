@@ -212,7 +212,10 @@ def cache_dense_embeddings(
         clip_records = [
             row
             for row in scoped.clips
-            if row.clip_caption or row.transcript_text or row.ocr_text
+            if row.clip_caption
+            or row.scene_graph_text
+            or row.transcript_text
+            or row.ocr_text
         ]
         cache_paths.append(
             _cache_records(
