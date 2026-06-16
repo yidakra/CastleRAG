@@ -54,7 +54,7 @@ def retrieve(
     retrieval_cfg: Any,
 ) -> List[RetrievalHit]:
     """Full dual-path retrieval for one question."""
-    query_variants = _query_variants(question)
+    query_variants = _query_variants(question, hints)
     transcript_bm25 = score_windows(
         bm25_index=bm25_index,
         windows=bm25_index.windows,
@@ -116,7 +116,11 @@ def retrieve(
                 room=hints.room,
             )
             if hits:
-                multimodal_lists.append(hits)
+                hits = _apply_score_thresholds(
+                    hits, retrieval_cfg.modality_score_thresholds
+                )
+                if hits:
+                    multimodal_lists.append(hits)
 
     multimodal_lane = reciprocal_rank_fusion(multimodal_lists, k=retrieval_cfg.rrf_k)
     merged = reciprocal_rank_fusion(
@@ -125,9 +129,9 @@ def retrieve(
     return _collapse_hits(merged, hints, retrieval_cfg)
 
 
-def _query_variants(question: EvalQuestion) -> List[str]:
-    """Return the bare query and an expanded query with answer choices appended."""
-    return [
+def _query_variants(question: EvalQuestion, hints: RouteHints) -> List[str]:
+    """Return query variants: bare, choices-expanded, and optionally entity-focused."""
+    variants = [
         question.query,
         (
             f"{question.query} Choices: "
@@ -137,6 +141,20 @@ def _query_variants(question: EvalQuestion) -> List[str]:
             f"D {question.answers['d']}."
         ),
     ]
+    if hints.llm_key_entities:
+        entity_str = " ".join(hints.llm_key_entities)
+        variants.append(f"{question.query} {entity_str}")
+    return variants
+
+
+def _apply_score_thresholds(
+    hits: List[RetrievalHit],
+    thresholds: Dict[str, float],
+) -> List[RetrievalHit]:
+    """Drop hits below per-modality minimum similarity scores."""
+    if not thresholds:
+        return hits
+    return [h for h in hits if h.score >= thresholds.get(h.modality, 0.0)]
 
 
 def _dense_search(

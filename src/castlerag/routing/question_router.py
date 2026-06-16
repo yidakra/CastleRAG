@@ -241,6 +241,8 @@ class RouteHints:
     has_speech_cue: bool = False
     has_temporal_cue: bool = False
     extracted_keywords: List[str] = field(default_factory=list)
+    llm_key_entities: List[str] = field(default_factory=list)
+    llm_focus_modalities: List[str] = field(default_factory=list)
     evidence_profile: Optional[RouteEvidenceProfile] = None
 
     def __post_init__(self) -> None:
@@ -252,6 +254,8 @@ class RouteHints:
 def route_question(
     question: str,
     choices: dict[str, str],
+    vllm_base_url: Optional[str] = None,
+    model_name: Optional[str] = None,
 ) -> RouteHints:
     """Assign one route and extract reusable retrieval hints."""
     question_lower = question.lower()
@@ -311,6 +315,12 @@ def route_question(
             *visual_hits,
         }
     )
+    llm_entities: List[str] = []
+    llm_modalities: List[str] = []
+    if vllm_base_url and model_name:
+        llm_entities, llm_modalities = _llm_route_hints(
+            question, choices, vllm_base_url, model_name
+        )
     return RouteHints(
         route=route,
         day=day,
@@ -320,8 +330,53 @@ def route_question(
         has_speech_cue=has_speech_cue,
         has_temporal_cue=has_temporal_cue,
         extracted_keywords=extracted_keywords,
+        llm_key_entities=llm_entities,
+        llm_focus_modalities=llm_modalities,
         evidence_profile=_profile_for_route(route),
     )
+
+
+def _llm_route_hints(
+    question: str,
+    choices: dict[str, str],
+    vllm_base_url: str,
+    model_name: str,
+) -> tuple[List[str], List[str]]:
+    """Call VLM to extract key entities and focus modalities for retrieval."""
+    import json
+
+    prompt = (
+        "You are helping a video retrieval system. Given this multiple-choice question "
+        "about a multi-camera home video dataset, extract:\n"
+        "1. key_entities: main objects, people, foods, or activities to search for "
+        "(3-6 short noun phrases)\n"
+        "2. focus_modalities: which evidence types to prioritise — choose from "
+        "[\"caption\", \"transcript\", \"ocr\", \"scene_graph\"]\n\n"
+        f"Question: {question}\n"
+        f"Choices: A {choices.get('a', '')}. B {choices.get('b', '')}. "
+        f"C {choices.get('c', '')}. D {choices.get('d', '')}.\n\n"
+        "Return JSON only: "
+        "{\"key_entities\": [...], \"focus_modalities\": [...]}"
+    )
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(base_url=vllm_base_url, api_key="not-needed", timeout=30.0)
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=128,
+            temperature=0.0,
+        )
+        text = (resp.choices[0].message.content or "").strip().strip("`").strip()
+        if text.startswith("json"):
+            text = text[4:].strip()
+        data = json.loads(text)
+        entities = [str(e) for e in data.get("key_entities", [])[:6]]
+        modalities = [str(m) for m in data.get("focus_modalities", [])[:4]]
+        return entities, modalities
+    except Exception:
+        return [], []
 
 
 def _profile_for_route(route: QuestionRoute) -> RouteEvidenceProfile:

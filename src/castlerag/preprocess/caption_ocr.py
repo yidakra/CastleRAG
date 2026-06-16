@@ -46,6 +46,7 @@ class ClipAnnotation:
     clip_caption: Optional[str]
     ocr_text: Optional[str]
     caption_confidence: float
+    scene_graph_text: Optional[str] = None
 
 
 def _vllm_chat(
@@ -151,9 +152,42 @@ def annotate_clip(
     if ocr_response and ocr_response.upper() != "NONE":
         ocr_text = ocr_response
 
+    # Scene graph pass: objects and spatial relationships for richer retrieval
+    scene_graph_text: Optional[str] = None
+    sg_content: list = []
+    for fp in sample:
+        img_b64 = _frame_to_b64(fp)
+        sg_content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+            }
+        )
+    sg_content.append(
+        {
+            "type": "text",
+            "text": (
+                "List the main objects and people visible in this clip with their "
+                "approximate positions (left, center, right, foreground, background). "
+                "Use short phrases separated by semicolons, e.g. "
+                "'person at counter (left); pan on stove (center)'. "
+                "Return only the list, or 'NONE' if the scene is empty or unclear."
+            ),
+        }
+    )
+    sg_response = _vllm_chat(
+        vllm_base_url,
+        model_name,
+        [{"role": "user", "content": sg_content}],
+        max_tokens=128,
+    )
+    if sg_response and sg_response.upper() != "NONE":
+        scene_graph_text = sg_response
+
     return ClipAnnotation(
         clip_id=clip_id,
         clip_caption=caption or None,
         ocr_text=ocr_text,
+        scene_graph_text=scene_graph_text,
         caption_confidence=1.0 if caption else 0.0,
     )

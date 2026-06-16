@@ -243,6 +243,7 @@ def record_to_qdrant_point(
             transcript_text=record.transcript_text,
             clip_caption=record.clip_caption,
             ocr_text=record.ocr_text,
+            scene_graph_text=record.scene_graph_text,
             asset_path=record.retrieval_clip_path or record.source_video_path,
             sampled_frame_paths=record.sampled_frame_paths,
             has_speech=record.has_speech,

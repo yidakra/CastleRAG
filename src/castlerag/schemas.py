@@ -109,6 +109,7 @@ class ClipRecord(BaseModel):
     transcript_text: Optional[str] = None
     ocr_text: Optional[str] = None
     clip_caption: Optional[str] = None
+    scene_graph_text: Optional[str] = None
     event_summary_id: Optional[str] = None
     has_speech: bool = False
     is_placeholder: bool = False
@@ -217,6 +218,7 @@ class QdrantPoint(BaseModel):
     transcript_text: Optional[str] = None
     event_summary: Optional[str] = None
     clip_caption: Optional[str] = None
+    scene_graph_text: Optional[str] = None
     ocr_text: Optional[str] = None
     asset_path: Optional[str] = None
     sampled_frame_paths: List[str] = Field(default_factory=list)
