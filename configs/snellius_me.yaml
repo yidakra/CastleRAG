@@ -1,0 +1,28 @@
+# CastleRAG — per-user Snellius config (deep-merges on configs/base.yaml).
+# Corrects the scratch path for this cluster (/scratch-shared/$USER) and the
+# Hugging Face dataset repo id.  $USER is expanded by config.py at load time.
+dataset:
+  root: "/scratch-shared/$USER/castle2024"
+  hf_repo: "CASTLE-Dataset/CASTLE2024"
+  # base.yaml's ego/exo camera names are placeholders that do NOT exist in the
+  # actual CASTLE2024 release.  Real roster (from the dataset README): 10 ego
+  # participant cams + 5 static room cams.  Without this override the camera
+  # filter silently drops 8 of 10 ego cameras.
+  ego_cameras: ["Allie", "Bjorn", "Cathal", "Florian", "Klaus", "Luca", "Onanong", "Stevan", "Tien", "Werner"]
+  exo_cameras: ["Kitchen", "Living1", "Living2", "Meeting", "Reading"]
+preprocessing:
+  frames_dir:    "/scratch-shared/$USER/castle_derived/frames_1fps"
+  clips_dir:     "/scratch-shared/$USER/castle_derived/clips"
+  manifests_dir: "/scratch-shared/$USER/castle_derived/manifests"
+  chunks_dir:    "/scratch-shared/$USER/castle_derived/chunks"
+embedding:
+  cache_dir: "/scratch-shared/$USER/castle_derived/embeddings"
+qdrant:
+  host: "localhost"
+  port: 6333
+outputs:
+  dir:             "/scratch-shared/$USER/castle_outputs"
+  predictions:     "/scratch-shared/$USER/castle_outputs/predictions.json"
+  evidence_traces: "/scratch-shared/$USER/castle_outputs/evidence_traces.jsonl"
+  submissions:     "/scratch-shared/$USER/castle_outputs/submissions.json"
+  metrics:         "/scratch-shared/$USER/castle_outputs/metrics.json"

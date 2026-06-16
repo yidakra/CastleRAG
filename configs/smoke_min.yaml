@@ -1,0 +1,26 @@
+# CastleRAG — Stage-1 minimal real-data smoke (deep-merges on configs/base.yaml).
+# 2 ego cameras, day 1, hour 08 only.  Validates the full pipeline + SLURM
+# mechanics on ~28 GB before the ~1.4 TB full day-1 build (configs/snellius_me.yaml).
+dataset:
+  root: "/scratch-shared/$USER/castle2024"
+  hf_repo: "CASTLE-Dataset/CASTLE2024"
+  days: [1]
+  hours: [8]
+  ego_cameras: ["Allie", "Bjorn"]
+  exo_cameras: ["Kitchen", "Living1", "Living2", "Meeting", "Reading"]
+preprocessing:
+  frames_dir:    "/scratch-shared/$USER/castle_derived/frames_1fps"
+  clips_dir:     "/scratch-shared/$USER/castle_derived/clips"
+  manifests_dir: "/scratch-shared/$USER/castle_derived/manifests"
+  chunks_dir:    "/scratch-shared/$USER/castle_derived/chunks"
+embedding:
+  cache_dir: "/scratch-shared/$USER/castle_derived/embeddings"
+qdrant:
+  host: "localhost"
+  port: 6333
+outputs:
+  dir:             "/scratch-shared/$USER/castle_outputs"
+  predictions:     "/scratch-shared/$USER/castle_outputs/predictions.json"
+  evidence_traces: "/scratch-shared/$USER/castle_outputs/evidence_traces.jsonl"
+  submissions:     "/scratch-shared/$USER/castle_outputs/submissions.json"
+  metrics:         "/scratch-shared/$USER/castle_outputs/metrics.json"

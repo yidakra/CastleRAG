@@ -45,3 +45,4 @@ logs/
 /report.blg
 /report.out
 /report.synctex.gz
+.qdrant-initialized
