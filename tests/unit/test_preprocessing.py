@@ -689,7 +689,7 @@ def test_annotate_clip_calls_vllm(tmp_path: Path):
 
     with patch(
         "castlerag.preprocess.caption_ocr._vllm_chat",
-        side_effect=["Caption text", "NONE"],
+        side_effect=["Caption text", "NONE", "person at counter (left)"],
     ):
         ann = annotate_clip(
             "clip_1", [p], "Hello world", "model", "http://localhost:8000/v1"
