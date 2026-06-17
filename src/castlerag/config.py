@@ -95,6 +95,7 @@ class RetrievalConfig(BaseModel):
     frames_per_candidate: int = 32
     max_aux_images: int = 16
     max_evidence_rows: int = 50
+    modality_score_thresholds: Dict[str, float] = Field(default_factory=dict)
 
 
 class GenerationConfig(BaseModel):
@@ -155,6 +156,11 @@ class SlurmConfig(BaseModel):
     mail_user: str = ""
 
 
+class RoutingConfig(BaseModel):
+    use_llm_hints: bool = False
+    model: str = "Qwen/Qwen3-VL-8B-Instruct"
+
+
 class CastleRAGConfig(BaseModel):
     dataset: DatasetConfig = Field(default_factory=DatasetConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
@@ -163,6 +169,7 @@ class CastleRAGConfig(BaseModel):
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     generation: GenerationConfig = Field(default_factory=GenerationConfig)
     reranking: RerankingConfig = Field(default_factory=RerankingConfig)
+    routing: RoutingConfig = Field(default_factory=RoutingConfig)
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
     lora: LoRAConfig = Field(default_factory=LoRAConfig)
     slurm: SlurmConfig = Field(default_factory=SlurmConfig)

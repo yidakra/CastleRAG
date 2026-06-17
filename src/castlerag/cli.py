@@ -308,6 +308,7 @@ def preprocess(
                             update={
                                 "clip_caption": ann.clip_caption,
                                 "ocr_text": ann.ocr_text,
+                                "scene_graph_text": ann.scene_graph_text,
                             }
                         )
                     )

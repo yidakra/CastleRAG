@@ -219,6 +219,7 @@ def test_retrieve_fuses_transcript_and_multimodal_hits():
         frames_per_candidate=32,
         max_aux_images=16,
         max_evidence_rows=50,
+        modality_score_thresholds={},
     )
     hints = route_question(_question().query, _question().answers)
     qdrant = FakeQdrantClient()
@@ -318,6 +319,7 @@ def test_retrieve_consumes_router_budget_profile_without_reparsing():
         frames_per_candidate=32,
         max_aux_images=16,
         max_evidence_rows=50,
+        modality_score_thresholds={},
     )
     hints = route_question(
         "What color shirt was Allie wearing in the kitchen?",
@@ -440,6 +442,7 @@ def test_retrieve_raises_on_non_2d_embedding():
         frames_per_candidate=32,
         max_aux_images=16,
         max_evidence_rows=50,
+        modality_score_thresholds={},
     )
     hints = route_question(_question().query, _question().answers)
     with pytest.raises(ValueError, match="2D"):
