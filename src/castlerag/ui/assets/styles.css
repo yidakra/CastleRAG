@@ -115,15 +115,22 @@ body {
     min-height: 560px;
 }
 
-/* dcc.Loading wrapper around the thread: keep it filling the column so the
-   inner .thread keeps its own scroll, and let the spinner overlay center. */
-.thread-loading,
-.thread-loading > div {
+/* dcc.Loading wrapper around the thread: stretch ONLY the content child (the
+   .thread scroll container) so it fills the column. Crucially we do NOT stretch
+   the sibling spinner container — flexing that left an empty box above the ask
+   bar that covered the thread when idle. */
+.thread-loading {
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
     position: relative;
+}
+.thread-loading > :first-child {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .thread {
