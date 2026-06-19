@@ -24,6 +24,7 @@ from castlerag.eval.run_eval import (
     _ensure_qdrant_collection_ready,
     _ensure_vllm_runtime_ready,
     _flatten_reranked_evidence,
+    _omniembed_base_url,
     _qdrant_collection_count,
     _qdrant_collection_exists,
     run_eval,
@@ -615,6 +616,28 @@ class TestEnsureVllmRuntimeReady:
         monkeypatch.setattr(builtins, "__import__", _mock_import)
         with pytest.raises(PipelineDependencyError, match="openai package is required"):
             _ensure_vllm_runtime_ready(self._cfg())
+
+
+# ---------------------------------------------------------------------------
+# _omniembed_base_url
+# ---------------------------------------------------------------------------
+
+
+class TestOmniEmbedBaseUrl:
+    def test_prefers_dedicated_env_when_set(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("OMNIEMBED_BASE_URL", "http://localhost:8200/v1")
+        monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8201/v1")
+        assert _omniembed_base_url() == "http://localhost:8200/v1"
+
+    def test_falls_back_to_vllm_base_url(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("OMNIEMBED_BASE_URL", raising=False)
+        monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8201/v1")
+        assert _omniembed_base_url() == "http://localhost:8201/v1"
+
+    def test_none_when_neither_set(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("OMNIEMBED_BASE_URL", raising=False)
+        monkeypatch.delenv("VLLM_BASE_URL", raising=False)
+        assert _omniembed_base_url() is None
 
 
 # ---------------------------------------------------------------------------

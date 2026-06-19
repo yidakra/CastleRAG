@@ -293,7 +293,7 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
-        vllm_base_url=_vllm_base_url(),
+        vllm_base_url=_omniembed_base_url(),
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
@@ -462,6 +462,17 @@ def _stage_failure_error(
 def _vllm_base_url() -> Optional[str]:
     """Return the VLLM_BASE_URL environment variable value, or None if unset."""
     return os.getenv("VLLM_BASE_URL")
+
+
+def _omniembed_base_url() -> Optional[str]:
+    """Return the base URL the OmniEmbed embeddings client should connect to.
+
+    Falls back to ``VLLM_BASE_URL`` so existing single-endpoint / query-cache
+    setups keep working unchanged.  Set ``OMNIEMBED_BASE_URL`` when embeddings and
+    generation are served by *separate* endpoints — e.g. the live UI, where
+    OmniEmbed runs on ``:8200`` and the Qwen3-VL chat model on ``:8201``.
+    """
+    return os.getenv("OMNIEMBED_BASE_URL") or _vllm_base_url()
 
 
 def _prepare_default_runtime(

@@ -61,10 +61,17 @@ class RagEngine:
         Raises ``PipelineDependencyError`` (or other exceptions) when the backend
         infra is unavailable; the engine factory catches these and falls back.
         """
+        import os
+
         from castlerag.config import load_config
         from castlerag.eval.run_eval import _build_default_pipeline
 
-        cfg = cfg or load_config()
+        # When no cfg is injected, honor CASTLERAG_CONFIG as the override path so the
+        # UI picks up host-specific paths (e.g. configs/snellius_me.yaml: scratch
+        # cache_dir + the right Qdrant collection). load_config silently skips a
+        # missing/unset path, falling back to base.yaml defaults.
+        if cfg is None:
+            cfg = load_config(override_path=os.getenv("CASTLERAG_CONFIG"))
         pipeline = _build_default_pipeline(cfg)
         ego = tuple(getattr(cfg.dataset, "ego_cameras", ()) or ())
         return cls(cfg=cfg, pipeline=pipeline, ego_cameras=ego)

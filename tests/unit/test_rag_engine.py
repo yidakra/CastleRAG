@@ -364,6 +364,29 @@ def test_build_engine_falls_back_on_pipeline_error(monkeypatch):
     assert isinstance(engine, PlaceholderEngine)
 
 
+def test_from_config_honors_castlerag_config_env(monkeypatch):
+    """With no cfg injected, from_config loads the CASTLERAG_CONFIG override."""
+    import importlib
+
+    # ``castlerag.eval.run_eval`` is shadowed by a re-exported function at the
+    # package level, so reach the real modules through importlib to patch them.
+    config_mod = importlib.import_module("castlerag.config")
+    run_eval_mod = importlib.import_module("castlerag.eval.run_eval")
+
+    seen = {}
+
+    def _fake_load_config(override_path=None):
+        seen["override_path"] = override_path
+        return type("Cfg", (), {"dataset": type("D", (), {"ego_cameras": ()})()})()
+
+    monkeypatch.setattr(config_mod, "load_config", _fake_load_config)
+    monkeypatch.setattr(run_eval_mod, "_build_default_pipeline", lambda cfg: object())
+    monkeypatch.setenv("CASTLERAG_CONFIG", "configs/snellius_me.yaml")
+
+    RagEngine.from_config()
+    assert seen["override_path"] == "configs/snellius_me.yaml"
+
+
 def test_build_engine_falls_back_when_vllm_unreachable(monkeypatch):
     """VLLM_BASE_URL is set but no server answers -> offline, without building."""
     from castlerag.ui import engine_factory
