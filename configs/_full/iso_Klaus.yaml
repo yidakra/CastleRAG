@@ -1,0 +1,19 @@
+dataset:
+  root: "/scratch-shared/$USER/castle2024"
+  days: [1]
+  ego_cameras: ["Klaus"]
+  exo_cameras: ["Kitchen","Living1","Living2","Meeting","Reading"]
+preprocessing:
+  frames_dir:    "/scratch-shared/$USER/castle_derived/frames_1fps"
+  clips_dir:     "/scratch-shared/$USER/castle_derived/clips"
+  manifests_dir: "/scratch-shared/$USER/castle_derived/manifests"
+  chunks_dir:    "/scratch-shared/$USER/castle_derived/chunks_iso/Klaus"
+embedding:
+  cache_dir: "/scratch-shared/$USER/castle_derived/embeddings"
+qdrant: {host: "localhost", port: 6333}
+outputs:
+  dir: "/scratch-shared/$USER/castle_outputs"
+  predictions: "/scratch-shared/$USER/castle_outputs/predictions.json"
+  evidence_traces: "/scratch-shared/$USER/castle_outputs/evidence_traces.jsonl"
+  submissions: "/scratch-shared/$USER/castle_outputs/submissions.json"
+  metrics: "/scratch-shared/$USER/castle_outputs/metrics.json"
