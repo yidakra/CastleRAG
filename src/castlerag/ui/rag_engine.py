@@ -234,12 +234,20 @@ class RagEngine:
                     is_best=False,
                 )
             )
-        # Fallback if the roster was empty/too small: duplicate the first camera.
-        while cameras and len(cameras) < _FIXED_CAMERA_COUNT:
-            base = cameras[0]
+        # Last resort: roster empty/too small AND too few real cameras. Pad with
+        # DISTINCT synthetic placeholders (never a duplicate camera_id) so the UI
+        # never renders the same camera twice. These won't resolve a mirror embed,
+        # but neither would a duplicate — and distinct ids keep the tiles sane.
+        slot = 0
+        while len(cameras) < _FIXED_CAMERA_COUNT:
+            slot += 1
+            name = f"Camera {slot}"
+            if name in present:
+                continue
+            present.add(name)
             cameras.append(
                 CameraAngle(
-                    camera_id=base.camera_id,
+                    camera_id=name,
                     day=day,
                     hour=hour,
                     start_seconds=start,

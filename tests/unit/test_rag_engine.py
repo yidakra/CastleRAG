@@ -353,6 +353,8 @@ def test_build_engine_falls_back_on_pipeline_error(monkeypatch):
     from castlerag.ui.youtube import YouTubeMirror
 
     monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:1/v1")
+    # Server is up (probe passes); the pipeline build itself is what fails here.
+    monkeypatch.setattr(engine_factory, "_vllm_reachable", lambda *_a, **_k: True)
 
     def _boom(cls, **_kwargs):
         raise RuntimeError("qdrant unreachable")
@@ -360,3 +362,30 @@ def test_build_engine_falls_back_on_pipeline_error(monkeypatch):
     monkeypatch.setattr(RagEngine, "from_config", classmethod(_boom))
     engine = engine_factory.build_engine(YouTubeMirror.from_csv())
     assert isinstance(engine, PlaceholderEngine)
+
+
+def test_build_engine_falls_back_when_vllm_unreachable(monkeypatch):
+    """VLLM_BASE_URL is set but no server answers -> offline, without building."""
+    from castlerag.ui import engine_factory
+    from castlerag.ui.youtube import YouTubeMirror
+
+    monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:1/v1")
+    monkeypatch.setattr(engine_factory, "_vllm_reachable", lambda *_a, **_k: False)
+
+    def _should_not_run(cls, **_kwargs):
+        raise AssertionError("from_config must not be called when the probe fails")
+
+    monkeypatch.setattr(RagEngine, "from_config", classmethod(_should_not_run))
+    engine = engine_factory.build_engine(YouTubeMirror.from_csv())
+    assert isinstance(engine, PlaceholderEngine)
+    assert engine_factory.engine_mode(engine) == "offline"
+
+
+def test_pad_cameras_emits_distinct_ids_with_empty_roster():
+    """With no roster to pad from, fallback cameras must not duplicate an id."""
+    engine = RagEngine(cfg=None, pipeline=None, ego_cameras=())
+    moments = engine._hits_to_moments([_clip_hit("Bjorn", 0.7)], SupportLevel.PARTIAL)
+    cams = moments[0].cameras
+    assert len(cams) == 3
+    assert len({c.camera_id for c in cams}) == 3  # all distinct, no duplicate "Bjorn"
+    assert cams[0].camera_id == "Bjorn"
