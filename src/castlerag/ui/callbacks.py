@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+import dash_mantine_components as dmc
 from dash import ALL, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
@@ -31,11 +32,19 @@ _SUPPORT_LABEL = {
     "partial": "Partial support",
     "supported": "Supported",
 }
+# Mantine theme colors for each support level (badges, etc.).
+_SUPPORT_COLOR = {
+    "unsupported": "red",
+    "partial": "yellow",
+    "supported": "green",
+}
 _REVIEW_ACTION_STATE = {
     "confirm": "confirmed",
     "refine": "flagged",
     "reject": "rejected",
 }
+# Mantine color per review action button.
+_REVIEW_ACTION_COLOR = {"confirm": "green", "refine": "yellow", "reject": "red"}
 
 
 # ---------------------------------------------------------------------------
@@ -151,35 +160,47 @@ def _focused_claim_text(
 def _render_moment(
     group_id: str, moment: Dict[str, object], focused: bool
 ) -> html.Button:
-    """Render one ranked evidence moment as a clickable thread row."""
+    """Render one ranked evidence moment as a clickable thread row.
+
+    The clickable shell stays an ``html.Button`` (so the pattern-matching
+    ``n_clicks`` callback keeps working); its content is DMC.
+    """
     meta = f"{moment['camera_count']} cameras · {moment['score_caption']}"
     return html.Button(
         id={"type": "moment", "gid": group_id, "mid": moment["moment_id"]},
         n_clicks=0,
         className="moment focused" if focused else "moment",
-        children=[
-            html.Div(className="moment-thumb"),
-            html.Div(
-                className="moment-body",
-                children=[
-                    html.Span(
-                        f"{moment['clock_label']} · {moment['place_label']}",
-                        className="moment-title",
-                    ),
-                    html.Span(meta, className="moment-meta"),
-                ],
-            ),
-            html.Span(
-                className="moment-dot",
-                style={"background": moment["dot_color"]},
-            ),
-        ],
+        children=dmc.Group(
+            justify="space-between",
+            wrap="nowrap",
+            w="100%",
+            children=[
+                dmc.Stack(
+                    gap=2,
+                    children=[
+                        dmc.Text(
+                            f"{moment['clock_label']} · {moment['place_label']}",
+                            fw=600,
+                            size="sm",
+                        ),
+                        dmc.Text(meta, size="xs", c="dimmed"),
+                    ],
+                ),
+                dmc.Box(
+                    w=9,
+                    h=9,
+                    style={
+                        "background": moment["dot_color"],
+                        "borderRadius": "50%",
+                        "flex": "none",
+                    },
+                ),
+            ],
+        ),
     )
 
 
-def _render_group(
-    group: Dict[str, object], focus: Dict[str, object]
-) -> html.Div:
+def _render_group(group: Dict[str, object], focus: Dict[str, object]) -> dmc.Card:
     """Render one query group (question, answer, claim, ranked moments)."""
     claim = group["claim"]  # type: ignore[index]
     support = str(claim["support"])
@@ -189,9 +210,11 @@ def _render_group(
     header: List[object] = []
     if group["is_refinement"]:
         header.append(
-            html.Div(
+            dmc.Badge(
                 f"↻ Refined · {group['iteration']} / {_MAX_ITERATIONS}",
-                className="iteration-badge",
+                variant="light",
+                color="indigo",
+                mb="xs",
             )
         )
 
@@ -205,35 +228,42 @@ def _render_group(
         for moment in group["moments"]  # type: ignore[index]
     ]
 
-    return html.Div(
+    return dmc.Card(
         className="group-card",
-        children=header
-        + [
-            html.Div(
-                className="question-row",
+        withBorder=True,
+        shadow="sm",
+        radius="md",
+        p="md",
+        children=[
+            *header,
+            dmc.Group(
+                gap="xs",
+                wrap="nowrap",
                 children=[
                     html.Span(className="question-icon"),
-                    html.Span(str(group["question"]), className="question-text"),
+                    dmc.Text(str(group["question"]), fw=600),
                 ],
             ),
-            html.Div("Answer", className="answer-label"),
+            dmc.Text("Answer", size="xs", c="dimmed", mt="sm"),
             dcc.Markdown(str(group["answer_text"]), className="answer-text"),
-            html.Div(
+            dmc.Paper(
                 className="claim-block",
+                withBorder=True,
+                radius="sm",
+                p="sm",
+                mt="sm",
                 children=[
-                    html.Div("Claim under review", className="claim-label"),
-                    html.Div(str(claim["text"]), className="claim-text"),
-                    html.Span(
-                        className=f"support-badge support-{support}",
-                        children=[
-                            html.Span(className="support-dot"),
-                            _SUPPORT_LABEL.get(support, support),
-                        ],
+                    dmc.Text("Claim under review", size="xs", c="dimmed"),
+                    dmc.Text(str(claim["text"]), mb="xs"),
+                    dmc.Badge(
+                        _SUPPORT_LABEL.get(support, support),
+                        variant="dot",
+                        color=_SUPPORT_COLOR.get(support, "gray"),
                     ),
                 ],
             ),
-            html.Div("Top evidence moments", className="moments-label"),
-            html.Div(moments, className="moment-list"),
+            dmc.Text("Top evidence moments", size="xs", fw=600, mt="sm", mb="xs"),
+            dmc.Stack(moments, gap="xs", className="moment-list"),
         ],
     )
 
@@ -244,50 +274,65 @@ def _render_thread(
     """Render the full thread; a hint when empty."""
     if not thread:
         return [
-            html.Div(
+            dmc.Text(
                 "Ask a question about the CASTLE recordings to begin an "
                 "investigation.",
                 className="thread-hint",
+                c="dimmed",
+                size="sm",
             )
         ]
     return [_render_group(group, focus) for group in thread]
 
 
-def _render_camera_grid(moment: Dict[str, object]) -> List[html.Div]:
-    """Render the three synchronized camera tiles (live embeds)."""
-    tiles: List[html.Div] = []
+def _render_camera_grid(moment: Dict[str, object]) -> List[dmc.Card]:
+    """Render the synchronized camera tiles (live embeds or a no-footage tile)."""
+    tiles: List[dmc.Card] = []
     for cam in moment["cameras"]:  # type: ignore[index]
         is_best = bool(cam["is_best"])
         embed_url = cam.get("embed_url")  # type: ignore[union-attr]
         if embed_url:
-            media: object = html.Iframe(
+            inner: object = html.Iframe(
                 src=str(embed_url),
                 className="camera-frame",
                 allow="encrypted-media; picture-in-picture",
             )
         else:
-            media = html.Div(
-                "No mirror footage for this angle",
-                className="camera-missing",
+            inner = dmc.Center(
+                dmc.Text(
+                    "No mirror footage for this angle",
+                    className="camera-missing",
+                    size="xs",
+                    c="dimmed",
+                    ta="center",
+                )
             )
         media_children: List[object] = [
-            media,
+            dmc.AspectRatio(inner, ratio=16 / 10),
             html.Span(str(moment["clock_label"]), className="cam-time"),
         ]
         if is_best:
-            media_children.append(html.Span("best", className="best-badge"))
+            media_children.append(
+                dmc.Badge("best", color="indigo", size="xs", className="best-badge")
+            )
         tiles.append(
-            html.Div(
+            dmc.Card(
                 className="camera-tile best" if is_best else "camera-tile",
+                withBorder=True,
+                radius="md",
+                p=6,
                 children=[
-                    html.Div(media_children, className="camera-media"),
-                    html.Div(
-                        className="cam-foot",
+                    dmc.Box(media_children, className="camera-media"),
+                    dmc.Group(
+                        justify="space-between",
+                        mt=6,
                         children=[
-                            html.Span(str(cam["camera_id"]), className="cam-name"),
-                            html.Span(
+                            dmc.Text(str(cam["camera_id"]), size="sm", fw=600),
+                            dmc.Text(
                                 f"{float(cam['match_score']):.2f}",
-                                className="cam-score",
+                                size="sm",
+                                c="dimmed",
+                                ff="monospace",
                             ),
                         ],
                     ),
@@ -297,34 +342,41 @@ def _render_camera_grid(moment: Dict[str, object]) -> List[html.Div]:
     return tiles
 
 
-def _review_column(camera_id: str, info: Dict[str, str]) -> html.Div:
-    """Render one per-camera review column with confirm/refine/reject controls."""
+def _review_column(camera_id: str, info: Dict[str, str]) -> dmc.Paper:
+    """Render one per-camera review column with confirm/refine/reject controls.
+
+    The verdict buttons are ``dmc.Button``s carrying the same pattern-matching
+    ids/``n_clicks`` the review callback listens on; the active verdict is shown
+    as a filled button, the others light.
+    """
     state = info.get("state", "pending")
     justification = info.get("justification", "")
     actions = (("confirm", "✓ Confirm"), ("refine", "↻ Refine"), ("reject", "✕"))
     buttons = [
-        html.Button(
+        dmc.Button(
             label,
             id={"type": "review-btn", "cam": camera_id, "action": action},
             n_clicks=0,
-            className=(
-                f"rv-btn rv-{action}"
-                + (" active" if _REVIEW_ACTION_STATE[action] == state else "")
-            ),
+            size="xs",
+            color=_REVIEW_ACTION_COLOR[action],
+            variant="filled" if _REVIEW_ACTION_STATE[action] == state else "light",
         )
         for action, label in actions
     ]
-    return html.Div(
+    return dmc.Paper(
         className=f"review review-{state}",
+        withBorder=True,
+        radius="sm",
+        p="xs",
         children=[
-            html.Div(camera_id, className="review-cam"),
+            dmc.Text(camera_id, size="sm", fw=600, mb=4),
             dcc.Textarea(
                 id={"type": "review-just", "cam": camera_id},
                 value=justification,
                 placeholder="Justify, then pick a verdict…",
                 className="review-just",
             ),
-            html.Div(buttons, className="review-controls"),
+            dmc.Group(buttons, gap=4, mt=6, className="review-controls"),
         ],
     )
 
@@ -361,11 +413,13 @@ def _viewer_outputs(
     converged = support == "supported"
     if converged:
         banner = [
-            html.Span("✓", className="banner-check"),
-            html.Span(
-                f"Search converged. Claim supported after {iteration} of "
-                f"{_MAX_ITERATIONS} max iterations — no further refinement needed.",
-            ),
+            dmc.Alert(
+                f"Claim supported after {iteration} of {_MAX_ITERATIONS} max "
+                f"iterations — no further refinement needed.",
+                title="✓ Search converged",
+                color="green",
+                variant="light",
+            )
         ]
     else:
         banner = []

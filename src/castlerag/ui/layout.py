@@ -1,46 +1,58 @@
 """Dash layout for the CastleRAG claim-verification dashboard.
 
-A two-column workspace that persists across the whole task:
+Built with Dash Mantine Components (DMC): every visual surface — the top bar,
+cards, badges, buttons, inputs — is a themed DMC component (see
+:data:`castlerag.ui.app.THEME`).  A thin layer of structural CSS in
+``assets/styles.css`` still owns the two-column flex skeleton, the scrollable
+thread, and the camera/review grids.
 
-* **Left** — a scrollable thread of *query groups*.  Each group shows the
-  question, a short answer, the single claim under review with a support badge,
-  and a ranked list of evidence moments.  Refinements append new groups; an
-  "Ask a new question" bar starts a fresh thread.
-* **Right** — a pinned evidence viewer for the focused moment: three
-  synchronized camera embeds, a per-camera confirm/refine/reject review row, and
-  a compose box for sending a refined query.
+* **Left** — a scrollable thread of *query groups*: question, answer, the claim
+  under review with a support badge, and a ranked list of evidence moments.
+* **Right** — a pinned evidence viewer for the focused moment: synchronized
+  camera embeds, a Plotly match-score chart, a per-camera review row, and a
+  compose box for refining the query.
 
 The thread, viewer, camera grid, and review row are rendered by callbacks; their
-state lives in ``dcc.Store`` components so the callbacks stay pure.
+state lives in ``dcc.Store`` components so the callbacks stay pure.  Value- and
+``n_submit``-bound text inputs stay as ``dcc`` controls for their stable Dash
+contracts; everything else is DMC.
 """
 
 from __future__ import annotations
 
+import dash_mantine_components as dmc
 from dash import dcc, html
 
 from castlerag.ui.figures import empty_figure
 from castlerag.ui.youtube import YouTubeMirror
 
 
-def _top_bar(mode: str) -> html.Header:
-    """Return the static top bar with the CastleRAG mark and status chips.
+def _top_bar(mode: str) -> dmc.Group:
+    """Return the static top bar with the CastleRAG mark and status badges.
 
     ``mode`` is ``"live"`` (real RAG backend) or ``"offline"`` (placeholder).
     """
     live = mode == "live"
-    return html.Header(
+    return dmc.Group(
         className="top-bar",
+        justify="space-between",
         children=[
-            html.Span(className="brand-mark"),
-            html.Span("CastleRAG", className="brand-name"),
-            html.Div(
-                className="top-chips",
+            dmc.Group(
+                gap="xs",
                 children=[
-                    html.Span("Day 1", className="chip"),
-                    html.Span("15 cams", className="chip"),
-                    html.Span(
+                    html.Span(className="brand-mark"),
+                    dmc.Text("CastleRAG", fw=700, size="lg"),
+                ],
+            ),
+            dmc.Group(
+                gap="xs",
+                children=[
+                    dmc.Badge("Day 1", variant="light", color="gray"),
+                    dmc.Badge("15 cams", variant="light", color="gray"),
+                    dmc.Badge(
                         "live RAG" if live else "offline",
-                        className="chip mode-live" if live else "chip mode-offline",
+                        variant="light" if live else "outline",
+                        color="teal" if live else "gray",
                     ),
                 ],
             ),
@@ -48,34 +60,31 @@ def _top_bar(mode: str) -> html.Header:
     )
 
 
-def _thread_column() -> html.Div:
+def _thread_column() -> dmc.Stack:
     """Return the left column: the scrollable thread and the ask-new bar."""
-    return html.Div(
+    return dmc.Stack(
         className="thread-col",
+        gap=0,
         children=[
             # Spinner overlays the thread while a (slow) retrieval callback runs.
             # delay_show avoids a flicker on fast re-renders (e.g. moment clicks).
             dcc.Loading(
-                type="circle",
-                color="#4f46e5",
+                custom_spinner=dmc.Loader(color="indigo", size="md"),
                 delay_show=250,
                 parent_className="thread-loading",
                 children=html.Div(
                     id="thread",
                     className="thread",
-                    children=[
-                        html.Div(
-                            "Ask a question about the CASTLE recordings to begin "
-                            "an investigation.",
-                            className="thread-hint",
-                        )
-                    ],
+                    children=[_thread_hint()],
                 ),
             ),
-            html.Div(
+            dmc.Group(
                 className="ask-new",
+                gap="sm",
+                align="flex-end",
+                wrap="nowrap",
                 children=[
-                    # dcc.Input (not Textarea) so pressing Enter fires n_submit.
+                    # dcc.Input (not a DMC input) so pressing Enter fires n_submit.
                     dcc.Input(
                         id="new-question-input",
                         type="text",
@@ -84,11 +93,11 @@ def _thread_column() -> html.Div:
                         debounce=False,
                         n_submit=0,
                     ),
-                    html.Button(
+                    dmc.Button(
                         "New query",
                         id="ask-new-button",
                         n_clicks=0,
-                        className="ask-new-button",
+                        variant="filled",
                     ),
                 ],
             ),
@@ -96,35 +105,48 @@ def _thread_column() -> html.Div:
     )
 
 
-def _viewer_column() -> html.Div:
+def _thread_hint() -> dmc.Text:
+    """Return the empty-thread hint shown before any question is asked."""
+    return dmc.Text(
+        "Ask a question about the CASTLE recordings to begin an investigation.",
+        className="thread-hint",
+        c="dimmed",
+        size="sm",
+    )
+
+
+def _viewer_column() -> dmc.Stack:
     """Return the right column: the pinned evidence viewer for the focus moment."""
-    return html.Div(
+    return dmc.Stack(
         className="viewer-col",
+        gap="sm",
         children=[
-            html.Div(
+            dmc.Group(
                 className="viewer-head",
+                justify="space-between",
                 children=[
-                    html.Span(
-                        "Selected moment", id="viewer-title", className="viewer-title"
-                    ),
-                    html.Span("", id="viewer-subtitle", className="viewer-subtitle"),
+                    dmc.Text("Selected moment", id="viewer-title", fw=600),
+                    dmc.Text("", id="viewer-subtitle", c="dimmed", size="sm"),
                 ],
             ),
             html.Div(
                 id="camera-grid",
                 className="camera-grid",
                 children=[
-                    html.Div(
+                    dmc.Text(
                         "Select an evidence moment to see its synchronized cameras.",
                         className="viewer-hint",
+                        c="dimmed",
+                        size="sm",
                     )
                 ],
             ),
-            html.Div(
-                id="evidence-figure-wrap",
+            dmc.Paper(
                 className="evidence-figure-wrap",
+                withBorder=True,
+                p="sm",
                 children=[
-                    html.Div("Camera match scores", className="figure-label"),
+                    dmc.Text("Camera match scores", size="sm", fw=600, mb=4),
                     dcc.Graph(
                         id="evidence-figure",
                         className="evidence-figure",
@@ -134,29 +156,41 @@ def _viewer_column() -> html.Div:
                 ],
             ),
             html.Div(id="review-row", className="review-row"),
+            # html.Div (not DMC) so the callback can toggle the `hidden` attribute.
             html.Div(
                 id="compose-wrap",
-                className="compose-box",
                 hidden=True,
                 children=[
-                    html.Div(
-                        "Refine the query · re-run retrieval for this claim",
-                        className="compose-label",
-                    ),
-                    dcc.Textarea(
-                        id="refined-query-input",
-                        placeholder="Describe a sharper angle for the same claim…",
-                        className="compose-input",
-                    ),
-                    html.Button(
-                        "↑ Send refined query",
-                        id="send-refined-button",
-                        n_clicks=0,
-                        className="compose-button",
-                    ),
+                    dmc.Paper(
+                        className="compose-box",
+                        withBorder=True,
+                        p="sm",
+                        children=[
+                            dmc.Text(
+                                "Refine the query · re-run retrieval for this claim",
+                                size="sm",
+                                fw=600,
+                                mb=6,
+                            ),
+                            dcc.Textarea(
+                                id="refined-query-input",
+                                placeholder=(
+                                    "Describe a sharper angle for the same claim…"
+                                ),
+                                className="compose-input",
+                            ),
+                            dmc.Button(
+                                "↑ Send refined query",
+                                id="send-refined-button",
+                                n_clicks=0,
+                                variant="filled",
+                                mt="sm",
+                            ),
+                        ],
+                    )
                 ],
             ),
-            html.Div(id="converged-banner", className="converged-banner", hidden=True),
+            html.Div(id="converged-banner", hidden=True),
         ],
     )
 

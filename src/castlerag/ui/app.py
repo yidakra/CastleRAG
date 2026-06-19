@@ -4,6 +4,10 @@
 defaulting to the offline :class:`~castlerag.ui.chat.PlaceholderEngine` so the
 dashboard runs with no models, Qdrant, or vLLM.  A future ``RagEngine`` is
 injected via the ``engine`` argument without touching the layout or callbacks.
+
+The whole layout is wrapped in a :class:`dmc.MantineProvider`; every visual
+surface is a Dash Mantine Component themed from :data:`THEME` (Dash Mantine
+Components ships its CSS in its JS bundle, so no external stylesheet is needed).
 """
 
 from __future__ import annotations
@@ -18,12 +22,23 @@ from castlerag.ui.youtube import YouTubeMirror
 if TYPE_CHECKING:
     from dash import Dash
 
+# Single source of truth for the Mantine theme (indigo accent, soft radius),
+# matching the dashboard's original light/indigo look.
+THEME = {
+    "primaryColor": "indigo",
+    "primaryShade": 6,
+    "defaultRadius": "md",
+    "fontFamily": "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",
+    "fontFamilyMonospace": "ui-monospace, SFMono-Regular, Menlo, monospace",
+}
+
 
 def build_app(
     engine: Optional[ChatEngine] = None,
     mirror: Optional[YouTubeMirror] = None,
 ) -> "Dash":
     """Build and return the configured Dash app (callbacks registered)."""
+    import dash_mantine_components as dmc
     from dash import Dash
 
     from castlerag.ui.engine_factory import build_engine, engine_mode
@@ -32,7 +47,11 @@ def build_app(
     engine = engine or build_engine(mirror)
 
     app = Dash(__name__, title="CastleRAG")
-    app.layout = build_layout(mirror, mode=engine_mode(engine))
+    app.layout = dmc.MantineProvider(
+        build_layout(mirror, mode=engine_mode(engine)),
+        theme=THEME,
+        forceColorScheme="light",
+    )
     register_callbacks(app, engine, mirror)
     return app
 
