@@ -247,6 +247,10 @@ class RetrievalHit(BaseModel):
     day: Optional[str] = None
     camera_id: Optional[str] = None
     participant_id: Optional[str] = None
+    room: Optional[str] = None
+    hour: Optional[int] = None
+    start_seconds: Optional[float] = None
+    end_seconds: Optional[float] = None
     absolute_start: Optional[int] = None
     absolute_end: Optional[int] = None
     transcript_text: Optional[str] = None

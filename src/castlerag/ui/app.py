@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 from castlerag.ui.callbacks import register_callbacks
-from castlerag.ui.chat import ChatEngine, PlaceholderEngine
+from castlerag.ui.chat import ChatEngine
 from castlerag.ui.layout import build_layout
 from castlerag.ui.youtube import YouTubeMirror
 
@@ -26,11 +26,13 @@ def build_app(
     """Build and return the configured Dash app (callbacks registered)."""
     from dash import Dash
 
+    from castlerag.ui.engine_factory import build_engine, engine_mode
+
     mirror = mirror or YouTubeMirror.from_csv()
-    engine = engine or PlaceholderEngine.from_mirror(mirror)
+    engine = engine or build_engine(mirror)
 
     app = Dash(__name__, title="CastleRAG")
-    app.layout = build_layout(mirror)
+    app.layout = build_layout(mirror, mode=engine_mode(engine))
     register_callbacks(app, engine, mirror)
     return app
 

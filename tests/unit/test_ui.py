@@ -1,10 +1,20 @@
-"""Tests for the UI backbone: YouTube mirror, placeholder engine, figures, app."""
+"""Tests for the UI backbone: YouTube mirror, placeholder engine, app factory."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import pytest
 
-from castlerag.ui.chat import ChatTurnResult, EvidenceRef, PlaceholderEngine
+from castlerag.ui.chat import (
+    CameraAngle,
+    ChatTurnResult,
+    Claim,
+    EvidenceMoment,
+    PlaceholderEngine,
+    QueryGroup,
+    SupportLevel,
+)
 from castlerag.ui.youtube import PLACEHOLDER_VIDEO_ID, YouTubeMirror
 
 # ---------------------------------------------------------------------------
@@ -53,72 +63,105 @@ def test_mirror_from_csv_missing_file_is_empty(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Placeholder engine
+# Placeholder engine — answer()
 # ---------------------------------------------------------------------------
 
 
-def test_placeholder_engine_returns_valid_structure():
-    engine = PlaceholderEngine()
-    result = engine.answer("What did Allie say before entering the kitchen?")
+def test_answer_populates_claim_and_moments():
+    result = PlaceholderEngine().answer("Who pranks Bjorn when he returns?")
     assert isinstance(result, ChatTurnResult)
+    assert result.is_placeholder is True
+    assert isinstance(result.claim, Claim)
+    assert result.claim.support is SupportLevel.PARTIAL
+    assert result.moments
+    for moment in result.moments:
+        assert isinstance(moment, EvidenceMoment)
+        # Exactly three synchronized cameras, all at the same (day, hour, start).
+        assert len(moment.cameras) == 3
+        sync = {(c.day, c.hour, c.start_seconds) for c in moment.cameras}
+        assert len(sync) == 1  # all three cameras share day/hour/start
+        # Exactly one camera flagged best.
+        assert sum(1 for c in moment.cameras if c.is_best) == 1
+
+
+def test_answer_keeps_legacy_contract():
+    result = PlaceholderEngine().answer("How many cups are on the table?")
     assert result.predicted_choice in {"a", "b", "c", "d"}
     assert result.route in {"static_visual", "speech_text", "temporal", "mixed"}
-    assert result.is_placeholder is True
-    assert result.evidence
-    assert all(isinstance(item, EvidenceRef) for item in result.evidence)
-
-
-def test_placeholder_engine_support_priors_normalized():
-    result = PlaceholderEngine().answer("How many cups are on the table?")
     assert set(result.support_priors) == {"a", "b", "c", "d"}
     assert abs(sum(result.support_priors.values()) - 1.0) < 1e-6
-    best = max(result.support_priors, key=result.support_priors.get)
-    assert result.predicted_choice == best
+    assert result.evidence  # legacy EvidenceRef rows still populated
 
 
-def test_placeholder_engine_is_deterministic():
+def test_answer_is_deterministic():
     engine = PlaceholderEngine()
     first = engine.answer("Where did Bjorn go after lunch?")
     second = engine.answer("Where did Bjorn go after lunch?")
-    assert first.predicted_choice == second.predicted_choice
-    assert first.support_priors == second.support_priors
-    assert [e.record_id for e in first.evidence] == [
-        e.record_id for e in second.evidence
-    ]
+    assert first.claim.text == second.claim.text
+    assert [m.moment_id for m in first.moments] == [m.moment_id for m in second.moments]
+    assert [
+        c.match_score for m in first.moments for c in m.cameras
+    ] == [c.match_score for m in second.moments for c in m.cameras]
 
 
-def test_placeholder_engine_evidence_maps_to_mirror_embeds():
+def test_moments_resolve_to_real_embeds():
     mirror = YouTubeMirror.from_csv()
     engine = PlaceholderEngine.from_mirror(mirror)
     result = engine.answer("What was happening when the timer went off?")
-    for item in result.evidence:
-        url = mirror.embed_url(item.day, item.camera_id, item.hour, item.start_seconds)
-        assert "/embed/" in url
+    for moment in result.moments:
+        for cam in moment.cameras:
+            url = mirror.embed_url(cam.day, cam.camera_id, cam.hour, cam.start_seconds)
+            assert "/embed/" in url
+            assert mirror.is_placeholder(cam.day, cam.camera_id, cam.hour) is False
 
 
 # ---------------------------------------------------------------------------
-# Figures (require plotly)
+# Placeholder engine — refine()
 # ---------------------------------------------------------------------------
 
 
-def test_figures_build_from_engine_output():
-    go = pytest.importorskip("plotly.graph_objects")
-    from castlerag.ui.figures import (
-        empty_figure,
-        evidence_timeline,
-        modality_breakdown,
-        support_bar,
+def test_refine_strengthens_support_and_converges():
+    engine = PlaceholderEngine()
+    claim = "Luca is the one who sets up the prank."
+    early = engine.refine(claim, "Show the doorway more clearly.", 2)
+    late = engine.refine(claim, "Confirm Luca's hand on the frame.", 3)
+    assert early.claim.support is SupportLevel.PARTIAL
+    assert late.claim.support is SupportLevel.SUPPORTED
+    # The claim text is preserved across refinements.
+    assert early.claim.text == claim == late.claim.text
+
+
+def test_refine_is_deterministic():
+    engine = PlaceholderEngine()
+    a = engine.refine("c", "sharper angle", 2)
+    b = engine.refine("c", "sharper angle", 2)
+    assert [m.moment_id for m in a.moments] == [m.moment_id for m in b.moments]
+    assert a.moments[0].aggregate_score == b.moments[0].aggregate_score
+
+
+# ---------------------------------------------------------------------------
+# Serialization (str-Enum round-trips into a dcc.Store)
+# ---------------------------------------------------------------------------
+
+
+def test_query_group_json_round_trips():
+    import json
+
+    cam = CameraAngle("Klaus", "day1", 12, 749.0, 0.91, is_best=True)
+    moment = EvidenceMoment(
+        "m0", "12:29", "Doorway", 3, 0.74, "match 0.74", "#d97706", [cam]
     )
-
-    result = PlaceholderEngine().answer("What color was the mug Allie held?")
-    rows = [vars(item) for item in result.evidence]
-    assert isinstance(evidence_timeline(rows), go.Figure)
-    assert isinstance(modality_breakdown(rows), go.Figure)
-    assert isinstance(support_bar(result.support_priors), go.Figure)
-    assert isinstance(empty_figure(), go.Figure)
-    # Empty inputs degrade to a placeholder figure rather than raising.
-    assert isinstance(evidence_timeline([]), go.Figure)
-    assert isinstance(support_bar({}), go.Figure)
+    group = QueryGroup(
+        group_id="g1",
+        iteration=1,
+        question="q",
+        answer_text="a",
+        claim=Claim("c", SupportLevel.PARTIAL),
+        moments=[moment],
+    )
+    payload = json.loads(json.dumps(asdict(group)))
+    assert payload["claim"]["support"] == "partial"
+    assert payload["moments"][0]["cameras"][0]["is_best"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -111,6 +111,8 @@ def score_windows(
             day=window.day,
             camera_id=window.camera_id,
             participant_id=window.participant_id,
+            room=window.room,
+            hour=window.hour,
             absolute_start=window.absolute_start,
             absolute_end=window.absolute_end,
             transcript_text=window.transcript_text,

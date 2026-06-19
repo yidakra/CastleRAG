@@ -97,6 +97,80 @@ class EvalPipeline:
     ]
 
 
+@dataclass(frozen=True)
+class QuestionResult:
+    """All per-question pipeline outputs (used by run_eval and the dashboard)."""
+
+    prediction: Prediction
+    hints: RouteHints
+    retrieved: List[RetrievalHit]
+    evidence_rows: List[RetrievalHit]
+    support_priors: Dict[str, float]
+    rerank_result: RerankResult
+
+
+def run_question(
+    pipeline: EvalPipeline,
+    cfg: CastleRAGConfig,
+    question: EvalQuestion,
+) -> QuestionResult:
+    """Run one question through route -> retrieve -> rerank -> generate.
+
+    Returns the prediction together with the retrieval hits, reranked evidence,
+    and support priors so callers (the eval loop and the UI ``RagEngine``) can
+    both reuse the exact same per-question path.
+    """
+    hints = pipeline.route(question.query, question.answers)
+    try:
+        retrieved = pipeline.retrieve(question, hints)
+    except PipelineDependencyError as exc:
+        raise _stage_dependency_error("retrieval", question.question_id, exc) from exc
+    except NotImplementedError as exc:
+        raise _stage_error("retrieval", question.question_id, exc) from exc
+    except Exception as exc:
+        raise _stage_failure_error("retrieval", question.question_id, exc) from exc
+
+    candidate_packs = expand_candidates(
+        retrieved,
+        route=hints.route,
+        max_candidate_videos=cfg.retrieval.max_candidate_videos,
+        frames_per_candidate=cfg.retrieval.frames_per_candidate,
+    )
+    try:
+        reranked = pipeline.rerank(question, hints, candidate_packs)
+    except PipelineDependencyError as exc:
+        raise _stage_dependency_error("reranking", question.question_id, exc) from exc
+    except NotImplementedError as exc:
+        raise _stage_error("reranking", question.question_id, exc) from exc
+    except Exception as exc:
+        raise _stage_failure_error("reranking", question.question_id, exc) from exc
+
+    rerank_result = _coerce_rerank_result(reranked, hints.route)
+    evidence_rows = _flatten_reranked_evidence(
+        rerank_result,
+        fallback_hits=retrieved,
+        max_rows=cfg.retrieval.max_evidence_rows,
+    )
+    support_priors = _aggregate_support_priors(rerank_result)
+    try:
+        prediction = pipeline.generate(question, hints, evidence_rows, support_priors)
+    except PipelineDependencyError as exc:
+        raise _stage_dependency_error("generation", question.question_id, exc) from exc
+    except NotImplementedError as exc:
+        raise _stage_error("generation", question.question_id, exc) from exc
+    except Exception as exc:
+        raise _stage_failure_error("generation", question.question_id, exc) from exc
+
+    return QuestionResult(
+        prediction=prediction,
+        hints=hints,
+        retrieved=retrieved,
+        evidence_rows=evidence_rows,
+        support_priors=support_priors,
+        rerank_result=rerank_result,
+    )
+
+
 def run_eval(
     questions: Dict[str, EvalQuestion],
     config_path: Optional[Path] = None,
@@ -134,77 +208,26 @@ def run_eval(
     predictions: Dict[str, Prediction] = {}
     traces: List[dict] = []
     for question in selected.values():
-        hints = active_pipeline.route(question.query, question.answers)
-        try:
-            retrieved = active_pipeline.retrieve(question, hints)
-        except PipelineDependencyError as exc:
-            raise _stage_dependency_error(
-                "retrieval",
-                question.question_id,
-                exc,
-            ) from exc
-        except NotImplementedError as exc:
-            raise _stage_error("retrieval", question.question_id, exc) from exc
-        except Exception as exc:
-            raise _stage_failure_error("retrieval", question.question_id, exc) from exc
-
-        candidate_packs = expand_candidates(
-            retrieved,
-            route=hints.route,
-            max_candidate_videos=cfg.retrieval.max_candidate_videos,
-            frames_per_candidate=cfg.retrieval.frames_per_candidate,
-        )
-        try:
-            reranked = active_pipeline.rerank(question, hints, candidate_packs)
-        except PipelineDependencyError as exc:
-            raise _stage_dependency_error(
-                "reranking",
-                question.question_id,
-                exc,
-            ) from exc
-        except NotImplementedError as exc:
-            raise _stage_error("reranking", question.question_id, exc) from exc
-        except Exception as exc:
-            raise _stage_failure_error("reranking", question.question_id, exc) from exc
-
-        rerank_result = _coerce_rerank_result(reranked, hints.route)
-        evidence_rows = _flatten_reranked_evidence(
-            rerank_result,
-            fallback_hits=retrieved,
-            max_rows=cfg.retrieval.max_evidence_rows,
-        )
-        support_priors = _aggregate_support_priors(rerank_result)
-        try:
-            prediction = active_pipeline.generate(
-                question,
-                hints,
-                evidence_rows,
-                support_priors,
-            )
-        except PipelineDependencyError as exc:
-            raise _stage_dependency_error(
-                "generation",
-                question.question_id,
-                exc,
-            ) from exc
-        except NotImplementedError as exc:
-            raise _stage_error("generation", question.question_id, exc) from exc
-        except Exception as exc:
-            raise _stage_failure_error("generation", question.question_id, exc) from exc
-
-        predictions[question.question_id] = prediction
+        result = run_question(active_pipeline, cfg, question)
+        predictions[question.question_id] = result.prediction
         traces.append(
             {
                 "question_id": question.question_id,
-                "route": hints.route,
-                "retrieved_count": len(retrieved),
-                "reranked_count": len(rerank_result.kept_packs),
-                "top_evidence_ids": prediction.top_evidence_ids,
+                "route": result.hints.route,
+                "retrieved_count": len(result.retrieved),
+                "reranked_count": len(result.rerank_result.kept_packs),
+                "top_evidence_ids": result.prediction.top_evidence_ids,
                 "top_evidence_cameras": sorted(
-                    {h.camera_id for h in evidence_rows if h.camera_id is not None}
+                    {
+                        h.camera_id
+                        for h in result.evidence_rows
+                        if h.camera_id is not None
+                    }
                 ),
-                "support_priors": prediction.support_priors or support_priors,
-                "predicted_answer": prediction.predicted_answer,
+                "support_priors": (
+                    result.prediction.support_priors or result.support_priors
+                ),
+                "predicted_answer": result.prediction.predicted_answer,
             }
         )
 
