@@ -64,6 +64,7 @@ body {
 .thread-col {
     display: flex;
     flex-direction: column;
+    position: relative;
     background: #fcfcfd;
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -72,23 +73,9 @@ body {
     min-height: 560px;
 }
 
-/* dcc.Loading wrapper around the thread: stretch ONLY the content child (the
-   .thread scroll container) so it fills the column. We do NOT stretch the
-   sibling spinner container — flexing that left an empty box above the ask bar. */
-.thread-loading {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    position: relative;
-}
-.thread-loading > :first-child {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-}
-
+/* #thread is a direct flex child of the fixed-height column, so it owns the
+   scroll. The loader is a separate absolute overlay (target_components driven)
+   that never participates in the flex layout. */
 .thread {
     flex: 1;
     min-height: 0;
@@ -97,6 +84,14 @@ body {
     display: flex;
     flex-direction: column;
     gap: 11px;
+}
+.thread-loader {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* clickable evidence-moment row (DMC content inside an html.Button shell) */

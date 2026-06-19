@@ -70,17 +70,18 @@ def _thread_column() -> html.Div:
     return html.Div(
         className="thread-col",
         children=[
-            # Spinner overlays the thread while a (slow) retrieval callback runs.
-            # delay_show avoids a flicker on fast re-renders (e.g. moment clicks).
+            # #thread is a DIRECT flex child of the fixed-height column so it
+            # scrolls reliably — it is NOT nested inside dcc.Loading (whose
+            # internal DOM is fragile). The loader is decoupled: target_components
+            # makes it spin when thread.children updates, and it is positioned as
+            # an absolute overlay so it never sits in the scroll layout.
+            html.Div(id="thread", className="thread", children=[_thread_hint()]),
             dcc.Loading(
+                target_components={"thread": "children"},
                 custom_spinner=dmc.Loader(color="indigo", size="md"),
                 delay_show=250,
-                parent_className="thread-loading",
-                children=html.Div(
-                    id="thread",
-                    className="thread",
-                    children=[_thread_hint()],
-                ),
+                className="thread-loader",
+                children=html.Div(),
             ),
             dmc.Group(
                 className="ask-new",
