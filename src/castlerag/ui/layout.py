@@ -53,24 +53,36 @@ def _thread_column() -> html.Div:
     return html.Div(
         className="thread-col",
         children=[
-            html.Div(
-                id="thread",
-                className="thread",
-                children=[
-                    html.Div(
-                        "Ask a question about the CASTLE recordings to begin "
-                        "an investigation.",
-                        className="thread-hint",
-                    )
-                ],
+            # Spinner overlays the thread while a (slow) retrieval callback runs.
+            # delay_show avoids a flicker on fast re-renders (e.g. moment clicks).
+            dcc.Loading(
+                type="circle",
+                color="#4f46e5",
+                delay_show=250,
+                parent_className="thread-loading",
+                children=html.Div(
+                    id="thread",
+                    className="thread",
+                    children=[
+                        html.Div(
+                            "Ask a question about the CASTLE recordings to begin "
+                            "an investigation.",
+                            className="thread-hint",
+                        )
+                    ],
+                ),
             ),
             html.Div(
                 className="ask-new",
                 children=[
-                    dcc.Textarea(
+                    # dcc.Input (not Textarea) so pressing Enter fires n_submit.
+                    dcc.Input(
                         id="new-question-input",
-                        placeholder="Ask a new question…",
+                        type="text",
+                        placeholder="Ask a new question…  (press Enter)",
                         className="ask-new-input",
+                        debounce=False,
+                        n_submit=0,
                     ),
                     html.Button(
                         "New query",
@@ -108,13 +120,9 @@ def _viewer_column() -> html.Div:
                     )
                 ],
             ),
-            # Temporarily disabled. The Graph stays mounted (so the callbacks that
-            # output to ``evidence-figure.figure`` still resolve) but the wrapper is
-            # hidden; flip ``hidden`` back to ``False`` to re-enable the chart.
             html.Div(
                 id="evidence-figure-wrap",
                 className="evidence-figure-wrap",
-                hidden=True,
                 children=[
                     html.Div("Camera match scores", className="figure-label"),
                     dcc.Graph(

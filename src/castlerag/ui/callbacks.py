@@ -406,11 +406,14 @@ def register_callbacks(
     @app.callback(  # type: ignore[attr-defined,untyped-decorator]
         *_thread_outputs(),
         Input("ask-new-button", "n_clicks"),
+        Input("new-question-input", "n_submit"),
         State("new-question-input", "value"),
         prevent_initial_call=True,
     )
-    def on_ask_new(n_clicks: int, question: Optional[str]) -> tuple:
-        """Open a fresh investigation thread for a new question."""
+    def on_ask_new(
+        n_clicks: Optional[int], n_submit: Optional[int], question: Optional[str]
+    ) -> tuple:
+        """Open a fresh investigation thread (button click or Enter in the box)."""
         if not question or not question.strip():
             raise PreventUpdate
         question = question.strip()
