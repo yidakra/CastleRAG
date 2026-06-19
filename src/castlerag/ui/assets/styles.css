@@ -64,34 +64,22 @@ body {
 .thread-col {
     display: flex;
     flex-direction: column;
-    position: relative;
     background: #fcfcfd;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
-    height: calc(100vh - 90px);
-    min-height: 560px;
 }
 
-/* #thread is a direct flex child of the fixed-height column, so it owns the
-   scroll. The loader is a separate absolute overlay (target_components driven)
-   that never participates in the flex layout. */
+/* #thread owns its own scroll via an explicit max-height + overflow-y — this
+   does NOT depend on flex-height propagation through parents (which broke when
+   wrapped in dcc.Loading), so it scrolls reliably regardless of what wraps it. */
 .thread {
-    flex: 1;
-    min-height: 0;
+    max-height: calc(100vh - 180px);
     overflow-y: auto;
     padding: 14px;
     display: flex;
     flex-direction: column;
     gap: 11px;
-}
-.thread-loader {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
 }
 
 /* clickable evidence-moment row (DMC content inside an html.Button shell) */
