@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dash import dcc, html
 
+from castlerag.ui.figures import empty_figure
 from castlerag.ui.youtube import YouTubeMirror
 
 
@@ -105,6 +106,23 @@ def _viewer_column() -> html.Div:
                         "Select an evidence moment to see its synchronized cameras.",
                         className="viewer-hint",
                     )
+                ],
+            ),
+            # Temporarily disabled. The Graph stays mounted (so the callbacks that
+            # output to ``evidence-figure.figure`` still resolve) but the wrapper is
+            # hidden; flip ``hidden`` back to ``False`` to re-enable the chart.
+            html.Div(
+                id="evidence-figure-wrap",
+                className="evidence-figure-wrap",
+                hidden=True,
+                children=[
+                    html.Div("Camera match scores", className="figure-label"),
+                    dcc.Graph(
+                        id="evidence-figure",
+                        className="evidence-figure",
+                        figure=empty_figure(),
+                        config={"displayModeBar": False, "staticPlot": False},
+                    ),
                 ],
             ),
             html.Div(id="review-row", className="review-row"),

@@ -176,3 +176,34 @@ def test_build_app_assembles_layout_and_callbacks():
     app = build_app()
     assert app.layout is not None
     assert app.callback_map  # callbacks registered
+    # The Plotly evidence chart is wired as a callback output in the viewer.
+    assert any("evidence-figure" in key for key in app.callback_map)
+
+
+def test_viewer_outputs_match_their_output_specs():
+    """`_viewer_outputs` must return exactly one value per declared Output."""
+    import plotly.graph_objects as go
+
+    from castlerag.ui.callbacks import _viewer_output_specs, _viewer_outputs
+
+    moment = {
+        "moment_id": "m0",
+        "clock_label": "12:29",
+        "camera_count": 3,
+        "cameras": [
+            {
+                "camera_id": "Luca",
+                "match_score": 0.8,
+                "is_best": True,
+                "embed_url": "https://example.test/embed",
+            },
+        ],
+    }
+    group = {
+        "is_refinement": False,
+        "claim": {"support": "partial"},
+        "moments": [moment],
+    }
+    out = _viewer_outputs(group, moment, {"Luca": {"state": "pending"}}, 1)
+    assert len(out) == len(_viewer_output_specs())
+    assert isinstance(out[-1], go.Figure)  # last output is the evidence figure

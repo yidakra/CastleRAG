@@ -22,6 +22,7 @@ from dash import ALL, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
 from castlerag.ui.chat import ChatEngine, ChatTurnResult, compose_refined_query
+from castlerag.ui.figures import camera_match_figure
 from castlerag.ui.youtube import YouTubeMirror
 
 _MAX_ITERATIONS = 5
@@ -332,11 +333,11 @@ def _viewer_outputs(
     review: Dict[str, Dict[str, str]],
     iteration: int,
 ) -> tuple:
-    """Build the six viewer outputs for a focused (group, moment).
+    """Build the seven viewer outputs for a focused (group, moment).
 
     Returns: title, subtitle, camera-grid, review-row, banner children, banner
-    hidden. (The compose box and its prefilled query are managed separately, as
-    they appear only once all three cameras have a verdict.)
+    hidden, evidence figure. (The compose box and its prefilled query are managed
+    separately, as they appear only once all three cameras have a verdict.)
     """
     title = "Refined moment" if group["is_refinement"] else "Selected moment"
     subtitle = (
@@ -361,12 +362,27 @@ def _viewer_outputs(
         _render_review_row(review),
         banner,
         not converged,
+        camera_match_figure(moment),
     )
 
 
 # ---------------------------------------------------------------------------
 # Callback registration
 # ---------------------------------------------------------------------------
+
+# The viewer outputs that `_viewer_outputs` fills, in order. Shared by every
+# callback that re-renders the right column so positions stay in lockstep.
+def _viewer_output_specs() -> List[Output]:
+    return [
+        Output("viewer-title", "children", allow_duplicate=True),
+        Output("viewer-subtitle", "children", allow_duplicate=True),
+        Output("camera-grid", "children", allow_duplicate=True),
+        Output("review-row", "children", allow_duplicate=True),
+        Output("converged-banner", "children", allow_duplicate=True),
+        Output("converged-banner", "hidden", allow_duplicate=True),
+        Output("evidence-figure", "figure", allow_duplicate=True),
+    ]
+
 
 # Outputs shared by the investigation-opening callbacks (ask-new / send-refined).
 def _thread_outputs() -> List[Output]:
@@ -376,12 +392,7 @@ def _thread_outputs() -> List[Output]:
         Output("focus-store", "data", allow_duplicate=True),
         Output("review-store", "data", allow_duplicate=True),
         Output("thread", "children", allow_duplicate=True),
-        Output("viewer-title", "children", allow_duplicate=True),
-        Output("viewer-subtitle", "children", allow_duplicate=True),
-        Output("camera-grid", "children", allow_duplicate=True),
-        Output("review-row", "children", allow_duplicate=True),
-        Output("converged-banner", "children", allow_duplicate=True),
-        Output("converged-banner", "hidden", allow_duplicate=True),
+        *_viewer_output_specs(),
         Output("compose-wrap", "hidden", allow_duplicate=True),
         Output("refined-query-input", "value", allow_duplicate=True),
     ]
@@ -484,12 +495,7 @@ def register_callbacks(
         Output("focus-store", "data", allow_duplicate=True),
         Output("review-store", "data", allow_duplicate=True),
         Output("thread", "children", allow_duplicate=True),
-        Output("viewer-title", "children", allow_duplicate=True),
-        Output("viewer-subtitle", "children", allow_duplicate=True),
-        Output("camera-grid", "children", allow_duplicate=True),
-        Output("review-row", "children", allow_duplicate=True),
-        Output("converged-banner", "children", allow_duplicate=True),
-        Output("converged-banner", "hidden", allow_duplicate=True),
+        *_viewer_output_specs(),
         Output("compose-wrap", "hidden", allow_duplicate=True),
         Output("refined-query-input", "value", allow_duplicate=True),
         Input({"type": "moment", "gid": ALL, "mid": ALL}, "n_clicks"),

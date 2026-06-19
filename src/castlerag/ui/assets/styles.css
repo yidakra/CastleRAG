@@ -336,6 +336,22 @@ body {
 .cam-score { font-family: var(--mono); font-size: 9px; color: var(--faint); }
 
 /* ---- per-camera review ---- */
+.evidence-figure-wrap {
+    margin: 14px 0 4px;
+    padding: 10px 12px 4px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.figure-label {
+    margin: 0 0 2px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-soft);
+}
+.evidence-figure { width: 100%; }
+
 .review-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; }
 .review {
     display: flex;
