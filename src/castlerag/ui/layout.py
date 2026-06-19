@@ -60,11 +60,15 @@ def _top_bar(mode: str) -> dmc.Group:
     )
 
 
-def _thread_column() -> dmc.Stack:
-    """Return the left column: the scrollable thread and the ask-new bar."""
-    return dmc.Stack(
+def _thread_column() -> html.Div:
+    """Return the left column: the scrollable thread and the ask-new bar.
+
+    The outer container stays a plain ``html.Div`` (not ``dmc.Stack``) so the
+    flex/scroll skeleton in ``styles.css`` reliably constrains the thread's
+    height and lets it scroll.
+    """
+    return html.Div(
         className="thread-col",
-        gap=0,
         children=[
             # Spinner overlays the thread while a (slow) retrieval callback runs.
             # delay_show avoids a flicker on fast re-renders (e.g. moment clicks).
@@ -115,11 +119,10 @@ def _thread_hint() -> dmc.Text:
     )
 
 
-def _viewer_column() -> dmc.Stack:
+def _viewer_column() -> html.Div:
     """Return the right column: the pinned evidence viewer for the focus moment."""
-    return dmc.Stack(
+    return html.Div(
         className="viewer-col",
-        gap="sm",
         children=[
             dmc.Group(
                 className="viewer-head",

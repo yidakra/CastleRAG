@@ -62,6 +62,8 @@ body {
 
 /* ---- left: thread column ---- */
 .thread-col {
+    display: flex;
+    flex-direction: column;
     background: #fcfcfd;
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -134,6 +136,9 @@ body {
 
 /* ---- right: evidence viewer ---- */
 .viewer-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: var(--radius);
