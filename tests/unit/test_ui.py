@@ -169,6 +169,82 @@ def test_query_group_json_round_trips():
 # ---------------------------------------------------------------------------
 
 
+def _walk(node, acc):
+    """Collect (type_name, className) for every Dash component in a subtree."""
+    if hasattr(node, "_type") or hasattr(node, "children"):
+        acc.append((type(node).__name__, getattr(node, "className", None)))
+    children = getattr(node, "children", None)
+    if isinstance(children, (list, tuple)):
+        for child in children:
+            _walk(child, acc)
+    elif children is not None and hasattr(children, "children"):
+        _walk(children, acc)
+    return acc
+
+
+def test_serialize_group_marks_unmapped_cameras_as_no_embed():
+    from castlerag.ui.callbacks import _serialize_group
+
+    mirror = YouTubeMirror(mapping={})  # empty -> every triple is a placeholder
+    moment = EvidenceMoment(
+        moment_id="m0",
+        clock_label="12:29",
+        place_label="Kitchen",
+        camera_count=1,
+        aggregate_score=0.5,
+        score_caption="x",
+        dot_color="#000",
+        cameras=[
+            CameraAngle(
+                camera_id="Luca",
+                day="day1",
+                hour=12,
+                start_seconds=10.0,
+                match_score=0.5,
+                is_best=True,
+            )
+        ],
+    )
+    result = ChatTurnResult(
+        answer_text="a",
+        route="mixed",
+        support_priors={},
+        claim=Claim(text="c", support=SupportLevel.PARTIAL),
+        moments=[moment],
+    )
+    group = _serialize_group(
+        result,
+        group_id="g1",
+        iteration=1,
+        question="q",
+        mirror=mirror,
+        is_refinement=False,
+    )
+    cam = group["moments"][0]["cameras"][0]
+    assert cam["embed_url"] is None  # no placeholder video embedded
+
+
+def test_camera_grid_renders_missing_tile_without_iframe():
+    from castlerag.ui.callbacks import _render_camera_grid
+
+    moment = {
+        "clock_label": "12:29",
+        "cameras": [
+            {"camera_id": "Luca", "is_best": True, "match_score": 0.8,
+             "embed_url": "https://example.test/embed"},
+            {"camera_id": "Klaus", "is_best": False, "match_score": 0.0,
+             "embed_url": None},
+        ],
+    }
+    tiles = _render_camera_grid(moment)
+    nodes = [n for tile in tiles for n in _walk(tile, [])]
+    classnames = [cn for _, cn in nodes]
+    type_names = [t for t, _ in nodes]
+    # Exactly one real embed (the mapped camera), and a missing tile for the other.
+    assert type_names.count("Iframe") == 1
+    assert "camera-missing" in classnames
+
+
 def test_build_app_assembles_layout_and_callbacks():
     pytest.importorskip("dash")
     from castlerag.ui.app import build_app

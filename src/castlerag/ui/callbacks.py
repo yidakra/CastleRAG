@@ -68,8 +68,14 @@ def _serialize_group(
                 "start_seconds": cam.start_seconds,
                 "match_score": cam.match_score,
                 "is_best": cam.is_best,
-                "embed_url": mirror.embed_url(
-                    cam.day, cam.camera_id, cam.hour, cam.start_seconds
+                # None when the mirror has no real upload for this triple, so the
+                # viewer shows a "no footage" tile instead of a placeholder video.
+                "embed_url": (
+                    None
+                    if mirror.is_placeholder(cam.day, cam.camera_id, cam.hour)
+                    else mirror.embed_url(
+                        cam.day, cam.camera_id, cam.hour, cam.start_seconds
+                    )
                 ),
             }
             for cam in moment.cameras
@@ -252,12 +258,20 @@ def _render_camera_grid(moment: Dict[str, object]) -> List[html.Div]:
     tiles: List[html.Div] = []
     for cam in moment["cameras"]:  # type: ignore[index]
         is_best = bool(cam["is_best"])
-        media_children: List[object] = [
-            html.Iframe(
-                src=str(cam["embed_url"]),
+        embed_url = cam.get("embed_url")  # type: ignore[union-attr]
+        if embed_url:
+            media: object = html.Iframe(
+                src=str(embed_url),
                 className="camera-frame",
                 allow="encrypted-media; picture-in-picture",
-            ),
+            )
+        else:
+            media = html.Div(
+                "No mirror footage for this angle",
+                className="camera-missing",
+            )
+        media_children: List[object] = [
+            media,
             html.Span(str(moment["clock_label"]), className="cam-time"),
         ]
         if is_best:
