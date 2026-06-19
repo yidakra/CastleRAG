@@ -40,7 +40,7 @@ pip install -e ".[inference]"
 
 ## Dataset
 
-The CASTLE 2024 dataset is available on Hugging Face (`castle-challenge/castle2024`).
+The CASTLE 2024 dataset is available on Hugging Face (`CASTLE-Dataset/CASTLE2024`).
 Download it to `/data/castle2024` (or set `dataset.root` in `configs/base.yaml`).
 
 Expected layout:
@@ -145,6 +145,21 @@ sbatch --dependency=afterok:${JOB3} scripts/slurm/index_qdrant.slurm
 
 Estimated cost: ~EUR 115–204 for the full ego-only evidence build
 (60–106 GPU-hours × 128 SBU/h × EUR 15/1000 SBU; see `SPEC.md §3.5`).
+
+## UI (dashboard)
+
+A Dash dashboard — chat + YouTube evidence embeds + Plotly analytics — runs end
+to end on an offline placeholder engine, with no RAG, models, Qdrant, or vLLM:
+
+```bash
+pip install -e ".[ui]"
+castlerag ui              # http://127.0.0.1:8050
+```
+
+The real pipeline drops in later behind the `ChatEngine` protocol. The YouTube
+mirror mapping lives in `src/castlerag/ui/youtube_mirror.csv`
+(`day,camera,hour,video_id`, 666 rows generated from the official CASTLE
+viewer's `videos.json`). See [`src/castlerag/ui/README.md`](src/castlerag/ui/README.md).
 
 ## Tests
 

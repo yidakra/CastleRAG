@@ -22,7 +22,7 @@ def test_route_question_temporal_extracts_structured_hints():
 
 def test_route_question_speech_text_prefers_lexical_evidence():
     hints = route_question(
-        question="What did Bjorn say to Celine during the call?",
+        question="What did Bjorn say to Cathal during the call?",
         choices={
             "a": "He was leaving",
             "b": "He was hungry",
@@ -39,12 +39,12 @@ def test_route_question_speech_text_prefers_lexical_evidence():
 
 def test_route_question_static_visual_prefers_visual_sources():
     hints = route_question(
-        question="What color shirt was Greta wearing in the hallway photo?",
+        question="What color shirt was Florian wearing in the reading room photo?",
         choices={"a": "Blue", "b": "Black", "c": "White", "d": "Red"},
     )
     assert hints.route == "static_visual"
-    assert hints.participant == "Greta"
-    assert hints.room == "Hallway"
+    assert hints.participant == "Florian"
+    assert hints.room == "Reading"
     assert hints.has_visual_cue is True
     assert hints.has_speech_cue is False
     assert hints.evidence_profile.source_priority[0] == "main_clip"
@@ -54,17 +54,17 @@ def test_route_question_static_visual_prefers_visual_sources():
 def test_route_question_mixed_combines_visual_and_speech_cues():
     hints = route_question(
         question=(
-            "Which room was visible on screen when Jian said the password out loud?"
+            "Which room was visible on screen when Werner said the password out loud?"
         ),
         choices={
             "a": "Kitchen",
-            "b": "Office",
+            "b": "Meeting room",
             "c": "Living room",
-            "d": "Hallway",
+            "d": "Reading room",
         },
     )
     assert hints.route == "mixed"
-    assert hints.participant == "Jian"
+    assert hints.participant == "Werner"
     assert hints.has_visual_cue is True
     assert hints.has_speech_cue is True
     assert hints.has_temporal_cue is True
@@ -89,9 +89,9 @@ def test_route_question_does_not_leak_filter_hints_from_answer_options():
         question="What did the person say after breakfast?",
         choices={
             "a": "Allie said hello in the kitchen",
-            "b": "Bjorn waved from the office",
-            "c": "Celine entered the hallway",
-            "d": "Deon looked at the screen",
+            "b": "Bjorn waved from the meeting room",
+            "c": "Cathal entered the reading room",
+            "d": "Werner looked at the screen",
         },
     )
     assert hints.day is None

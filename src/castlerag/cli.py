@@ -666,5 +666,28 @@ def smoke_test(
     console.print(f"  output    : {result.output_paths.predictions}")
 
 
+@app.command()
+def ui(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind host"),
+    port: int = typer.Option(8050, "--port", help="Bind port"),
+    debug: bool = typer.Option(False, "--debug", help="Run Dash in debug mode"),
+) -> None:
+    """Launch the Dash dashboard (chat + YouTube embeds + Plotly analytics).
+
+    Runs on the offline placeholder engine — no RAG, models, Qdrant, or vLLM
+    required.  Install the UI extra first: ``pip install -e ".[ui]"``.
+    """
+    try:
+        from castlerag.ui.app import run as run_ui
+    except ImportError as exc:
+        console.print(
+            "[red]UI dependencies missing. Install them with:[/red] "
+            'pip install -e ".[ui]"'
+        )
+        raise typer.Exit(1) from exc
+    console.print(f"[bold]castlerag ui[/bold]  http://{host}:{port}")
+    run_ui(host=host, port=port, debug=debug)
+
+
 if __name__ == "__main__":
     app()

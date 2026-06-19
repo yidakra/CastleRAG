@@ -22,9 +22,11 @@ def test_default_config_is_valid():
 
 def test_default_ego_cameras():
     cfg = CastleRAGConfig()
-    assert len(cfg.dataset.ego_cameras) == 10
+    assert len(cfg.dataset.ego_cameras) == 11
     assert "Allie" in cfg.dataset.ego_cameras
+    assert "Cathal" in cfg.dataset.ego_cameras
     assert len(cfg.dataset.exo_cameras) == 5
+    assert "Meeting" in cfg.dataset.exo_cameras
 
 
 def test_evidence_budget_defaults():

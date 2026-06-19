@@ -10,23 +10,24 @@ from castlerag.schemas import QuestionRoute
 
 _PARTICIPANTS = (
     "Allie",
+    "Bao",
     "Bjorn",
-    "Celine",
-    "Deon",
-    "Estella",
-    "Finn",
-    "Greta",
-    "Harvey",
-    "Isla",
-    "Jian",
+    "Cathal",
+    "Florian",
+    "Klaus",
+    "Luca",
+    "Onanong",
+    "Stevan",
+    "Tien",
+    "Werner",
 )
 _ROOM_PATTERNS = {
     "kitchen": "Kitchen",
     "living room": "Living1",
-    "office": "Office",
-    "hallway": "Hallway",
     "living1": "Living1",
     "living2": "Living2",
+    "meeting room": "Meeting",
+    "reading room": "Reading",
 }
 _DAY_PATTERNS = (
     (re.compile(r"\bday\s*([1-4])\b"), "digit"),
