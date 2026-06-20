@@ -420,21 +420,27 @@ def _review_column(
         )
         for action, label in actions
     ]
+    children: List[object] = [
+        dmc.Text(camera_id, size="sm", fw=600, mb=4),
+        dmc.Group(buttons, gap=4, className="review-controls"),
+    ]
+    # The justification box only appears once a verdict is picked — it is then
+    # pre-filled with an editable AI draft.
+    if state != "pending":
+        children.append(
+            dcc.Textarea(
+                id={"type": "review-just", "cam": camera_id},
+                value=justification,
+                placeholder="Edit the AI-drafted justification…",
+                className="review-just",
+            )
+        )
     return dmc.Paper(
         className=f"review review-{state}",
         withBorder=True,
         radius="sm",
         p="xs",
-        children=[
-            dmc.Text(camera_id, size="sm", fw=600, mb=4),
-            dcc.Textarea(
-                id={"type": "review-just", "cam": camera_id},
-                value=justification,
-                placeholder="Justify, then pick a verdict…",
-                className="review-just",
-            ),
-            dmc.Group(buttons, gap=4, mt=6, className="review-controls"),
-        ],
+        children=children,
     )
 
 
@@ -495,17 +501,36 @@ def _is_live_group(thread: List[Dict[str, object]], group_id: str) -> bool:
     return bool(thread) and thread[-1]["group_id"] == group_id
 
 
-def _compose_for_review(
-    engine: ChatEngine,
-    thread: Optional[List[Dict[str, object]]],
+def _submit_hidden(review: Dict[str, Dict[str, str]], frozen: bool) -> bool:
+    """Submit-reviews button shows once every camera has a verdict (live only)."""
+    return frozen or not _all_verdicts_in(review)
+
+
+def _capture_justifications(
+    review: Dict[str, Dict[str, str]], states_list: object
+) -> Dict[str, Dict[str, str]]:
+    """Fold the live justification textarea values back into the review dict."""
+    just_states = states_list[0] if states_list else []  # type: ignore[index]
+    for item in just_states:
+        cam = item["id"]["cam"]
+        if cam in review:
+            review[cam] = {**review[cam], "justification": item.get("value") or ""}
+    return review
+
+
+def _persist_review(
+    thread: List[Dict[str, object]],
     focus: Optional[Dict[str, object]],
     review: Dict[str, Dict[str, str]],
-) -> tuple:
-    """Return ``(compose_hidden, prefilled_query)`` for a live review state."""
-    if _all_verdicts_in(review) and _needs_refinement(review):
-        claim_text = _focused_claim_text(thread, focus)
-        return False, engine.suggest_refined_query(claim_text, review)
-    return True, ""
+) -> None:
+    """Persist the in-progress verdicts onto the live group (mutates ``thread``)."""
+    moment_id = (focus or {}).get("moment_id")
+    if moment_id and thread:
+        current = dict(thread[-1])
+        reviews = dict(current.get("reviews") or {})
+        reviews[str(moment_id)] = review
+        current["reviews"] = reviews
+        thread[-1] = current
 
 
 def _converged_banner() -> List[dmc.Alert]:
@@ -542,19 +567,20 @@ def _viewer_outputs(
     subtitle = (
         f"{moment['clock_label']} · {moment['camera_count']} synchronized cameras"
     )
-    # Convergence is human-in-the-loop: it is reached only once the reviewer has
-    # confirmed every camera, never auto-declared from the engine's claim support.
-    converged = _all_confirmed(review)
-    banner = _converged_banner() if converged else []
+    # Convergence and the refined-query suggestion are gated behind the explicit
+    # "Submit reviews" button (see ``on_submit_reviews``); opening/focusing a
+    # moment never auto-declares them. The submit button itself appears once all
+    # three live cameras have a verdict.
     sent_query = str(group.get("sent_refined_query") or "") if frozen else ""
     return (
         title,
         subtitle,
         _render_camera_grid(moment),
         _render_review_row(review, frozen, sent_query),
-        banner,
-        not converged,
+        [],  # converged banner: managed by on_submit_reviews
+        True,  # converged banner hidden
         camera_match_figure(moment),
+        _submit_hidden(review, frozen),
     )
 
 
@@ -573,6 +599,7 @@ def _viewer_output_specs() -> List[Output]:
         Output("converged-banner", "children", allow_duplicate=True),
         Output("converged-banner", "hidden", allow_duplicate=True),
         Output("evidence-figure", "figure", allow_duplicate=True),
+        Output("submit-wrap", "hidden", allow_duplicate=True),
     ]
 
 
@@ -790,22 +817,21 @@ def register_callbacks(
         saved = (group.get("reviews") or {}).get(triggered["mid"])  # type: ignore[union-attr]
         review = dict(saved) if saved else _pending_review(moment)
 
-        if frozen:
-            compose_hidden, prefilled = True, ""
-        else:
-            compose_hidden, prefilled = _compose_for_review(engine, thread, focus, review)
+        # The compose box stays hidden until the reviewer submits; _viewer_outputs
+        # decides whether the "Submit reviews" button is shown.
         return (
             focus,
             review,
             _render_thread(thread, focus),
             *_viewer_outputs(group, moment, review, iteration, frozen),
-            compose_hidden,
-            prefilled,
+            True,  # compose hidden
+            "",  # refined query cleared
         )
 
     @app.callback(  # type: ignore[attr-defined,untyped-decorator]
         Output("review-store", "data", allow_duplicate=True),
         Output("review-row", "children", allow_duplicate=True),
+        Output("submit-wrap", "hidden", allow_duplicate=True),
         Output("compose-wrap", "hidden", allow_duplicate=True),
         Output("refined-query-input", "value", allow_duplicate=True),
         Output("converged-banner", "children", allow_duplicate=True),
@@ -825,11 +851,12 @@ def register_callbacks(
         thread: Optional[List[Dict[str, object]]],
         focus: Optional[Dict[str, object]],
     ) -> tuple:
-        """Record a per-camera verdict; reveal the prefilled refine box when done.
+        """Record a per-camera verdict and auto-draft its justification.
 
-        The reviewer types a justification, then clicks one verdict per camera.
-        Once all three cameras have a verdict, the refine compose box appears
-        pre-filled with a query generated from those justifications.
+        The reviewer clicks one verdict per camera; its justification box appears
+        pre-filled with an editable AI draft. The refined query is NOT generated
+        here — that waits for the explicit "Submit reviews" button, which appears
+        once every camera has a verdict (see ``on_submit_reviews``).
         """
         triggered = ctx.triggered_id
         review = dict(review or {})
@@ -846,18 +873,9 @@ def register_callbacks(
         if not _is_live_group(thread, focus_gid):
             raise PreventUpdate
 
-        # Capture every justification field (mapped by camera via its id).
-        just_states = ctx.states_list[0] if ctx.states_list else []
-        for item in just_states:
-            cam = item["id"]["cam"]
-            if cam in review:
-                review[cam] = {
-                    **review[cam],
-                    "justification": item.get("value") or "",
-                }
+        review = _capture_justifications(review, ctx.states_list)
 
         cam = triggered["cam"]
-        moment_id = (focus or {}).get("moment_id")
         if cam in review:
             new_state = _REVIEW_ACTION_STATE[triggered["action"]]
             prev_state = review[cam].get("state", "pending")
@@ -871,6 +889,7 @@ def register_callbacks(
             unedited = cur_just == "" or cur_just == prev_suggestion
             if cur_just == "" or (new_state != prev_state and unedited):
                 group = _find_group(thread, focus_gid)
+                moment_id = (focus or {}).get("moment_id")
                 moment = _find_moment(group, str(moment_id)) if group else None
                 cam_info = (
                     next(
@@ -900,29 +919,67 @@ def register_callbacks(
                         "suggestion": suggestion,
                     }
 
-        # Persist the in-progress verdicts onto the live group so they survive
-        # navigating away and back (and are the ones frozen on the next refine).
-        if moment_id:
-            current = dict(thread[-1])
-            reviews = dict(current.get("reviews") or {})
-            reviews[str(moment_id)] = review
-            current["reviews"] = reviews
-            thread[-1] = current
+        # Persist verdicts onto the live group so they survive navigation.
+        _persist_review(thread, focus, review)
 
-        if _all_verdicts_in(review):
-            if _all_confirmed(review):
-                return (
-                    review, _render_review_row(review), True, "",
-                    _converged_banner(), False, thread,
-                )
+        # Show the Submit button once all cameras have a verdict; clear any prior
+        # compose/converged output since the verdicts just changed.
+        submit_hidden = not _all_verdicts_in(review)
+        return (
+            review,
+            _render_review_row(review),
+            submit_hidden,
+            True,  # compose hidden until submit
+            "",  # refined query cleared
+            [],  # converged banner cleared
+            True,  # converged banner hidden
+            thread,
+        )
 
-            if _needs_refinement(review):
-                claim_text = _focused_claim_text(thread, focus)
-                prefilled = engine.suggest_refined_query(claim_text, review)
-                return (
-                    review, _render_review_row(review), False, prefilled,
-                    [], True, thread,
-                )
+    @app.callback(  # type: ignore[attr-defined,untyped-decorator]
+        Output("review-store", "data", allow_duplicate=True),
+        Output("thread-store", "data", allow_duplicate=True),
+        Output("compose-wrap", "hidden", allow_duplicate=True),
+        Output("refined-query-input", "value", allow_duplicate=True),
+        Output("converged-banner", "children", allow_duplicate=True),
+        Output("converged-banner", "hidden", allow_duplicate=True),
+        Input("submit-reviews-button", "n_clicks"),
+        State({"type": "review-just", "cam": ALL}, "value"),
+        State("review-store", "data"),
+        State("thread-store", "data"),
+        State("focus-store", "data"),
+        prevent_initial_call=True,
+    )
+    def on_submit_reviews(
+        n_clicks: Optional[int],
+        justifications: List[Optional[str]],
+        review: Optional[Dict[str, Dict[str, str]]],
+        thread: Optional[List[Dict[str, object]]],
+        focus: Optional[Dict[str, object]],
+    ) -> tuple:
+        """Commit the three verdicts: converge if all confirmed, else draft a query.
 
-        return review, _render_review_row(review), True, "", [], True, thread
+        Runs only on an explicit click once every camera has a verdict. Picks up
+        the latest (possibly edited) justifications before composing the query.
+        """
+        if not n_clicks:
+            raise PreventUpdate
+        review = dict(review or {})
+        thread = list(thread or [])
+        focus_gid = (focus or {}).get("group_id", "")
+        if not review or not _is_live_group(thread, focus_gid):
+            raise PreventUpdate
+        if not _all_verdicts_in(review):
+            raise PreventUpdate
+
+        # Pick up any edits the reviewer made to the justification boxes, persist.
+        review = _capture_justifications(review, ctx.states_list)
+        _persist_review(thread, focus, review)
+
+        if _all_confirmed(review):
+            return review, thread, True, "", _converged_banner(), False
+
+        claim_text = _focused_claim_text(thread, focus)
+        prefilled = engine.suggest_refined_query(claim_text, review)
+        return review, thread, False, prefilled, [], True
 

@@ -205,8 +205,10 @@ body {
 .frozen-query p { margin: 0; }
 
 /* ---- raw dcc text areas (review justification + refine compose) ---- */
+.submit-wrap { margin-top: 11px; }
 .review-just {
     width: 100%;
+    margin-top: 6px;
     min-height: 34px;
     resize: vertical;
     font: inherit;

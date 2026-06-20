@@ -160,6 +160,23 @@ def _viewer_column() -> html.Div:
                 className="review-loading",
                 children=[
                     html.Div(id="review-row", className="review-row"),
+                    # Appears once all three cameras have a verdict; clicking it
+                    # commits the reviews and drafts the refined query.
+                    html.Div(
+                        id="submit-wrap",
+                        hidden=True,
+                        className="submit-wrap",
+                        children=[
+                            dmc.Button(
+                                "Submit reviews →",
+                                id="submit-reviews-button",
+                                n_clicks=0,
+                                variant="filled",
+                                color="indigo",
+                                fullWidth=True,
+                            ),
+                        ],
+                    ),
                     # html.Div (not DMC) so the callback can toggle `hidden`.
                     html.Div(
                         id="compose-wrap",
@@ -186,7 +203,7 @@ def _viewer_column() -> html.Div:
                                         className="compose-input",
                                     ),
                                     dmc.Button(
-                                        "↑ Send refined query",
+                                        "✓ Confirm & run refined search",
                                         id="send-refined-button",
                                         n_clicks=0,
                                         variant="filled",
