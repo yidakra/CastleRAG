@@ -610,6 +610,10 @@ def register_callbacks(
         triggered = ctx.triggered_id
         if not triggered or not thread:
             raise PreventUpdate
+        # Newly injected moment buttons fire this callback with n_clicks 0/None
+        # even under prevent_initial_call; only act on a real click.
+        if not ctx.triggered or not ctx.triggered[0].get("value"):
+            raise PreventUpdate
         group = _find_group(thread, triggered["gid"])
         if group is None:
             raise PreventUpdate
@@ -658,6 +662,10 @@ def register_callbacks(
         triggered = ctx.triggered_id
         review = dict(review or {})
         if not triggered or not review:
+            raise PreventUpdate
+        # Newly injected verdict buttons fire this callback with n_clicks 0/None
+        # even under prevent_initial_call; only act on a real click.
+        if not ctx.triggered or not ctx.triggered[0].get("value"):
             raise PreventUpdate
 
         # Capture every justification field (mapped by camera via its id).
