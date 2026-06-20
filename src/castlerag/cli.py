@@ -671,22 +671,53 @@ def ui(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind host"),
     port: int = typer.Option(50225, "--port", help="Bind port"),
     debug: bool = typer.Option(False, "--debug", help="Run Dash in debug mode"),
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Config YAML for the live backend (deep-merged on base)."
+    ),
+    require_live: bool = typer.Option(
+        False,
+        "--require-live/--no-require-live",
+        "--live",
+        help="Require the real RAG backend; fail loudly (don't fall back to demo).",
+    ),
 ) -> None:
     """Launch the Dash dashboard (chat + YouTube embeds + Plotly analytics).
 
-    Runs on the offline placeholder engine — no RAG, models, Qdrant, or vLLM
-    required.  Install the UI extra first: ``pip install -e ".[ui]"``.
+    Defaults to the offline placeholder engine so it boots with no backend. Pass
+    ``--require-live`` (optionally ``--config configs/snellius_me.yaml``) to bind
+    the real RAG backend and fail with a precise reason if it isn't reachable —
+    needs ``VLLM_BASE_URL`` plus a running Qdrant + built index. Install the UI
+    extra first: ``pip install -e ".[ui]"``.
     """
     try:
         from castlerag.ui.app import run as run_ui
+        from castlerag.ui.engine_factory import EngineUnavailable
     except ImportError as exc:
         console.print(
             "[red]UI dependencies missing. Install them with:[/red] "
             'pip install -e ".[ui]"'
         )
         raise typer.Exit(1) from exc
-    console.print(f"[bold]castlerag ui[/bold]  http://{host}:{port}")
-    run_ui(host=host, port=port, debug=debug)
+
+    cfg = None
+    if config is not None:
+        from castlerag.config import load_config
+
+        cfg = load_config(override_path=config)
+
+    mode = "live (required)" if require_live else "demo unless backend reachable"
+    console.print(f"[bold]castlerag ui[/bold]  http://{host}:{port}  [{mode}]")
+    try:
+        run_ui(
+            host=host, port=port, debug=debug, cfg=cfg, require_live=require_live
+        )
+    except EngineUnavailable as exc:
+        console.print(f"[red]Live backend unavailable:[/red] {exc}")
+        console.print(
+            "[yellow]Start the stack (vLLM + Qdrant), export VLLM_BASE_URL, then "
+            "retry — or drop --require-live to run the offline demo.[/yellow]"
+        )
+        raise typer.Exit(1) from exc
 
 
 if __name__ == "__main__":

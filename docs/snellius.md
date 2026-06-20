@@ -122,7 +122,7 @@ source ~/castlerag_venv/bin/activate
 vllm serve Tevatron/OmniEmbed-v0.1-multivent \
     --task embedding \
     --port 8200 \
-    --served-model-name omniembed \
+    --served-model-name Tevatron/OmniEmbed-v0.1-multivent omniembed \
     --gpu-memory-utilization 0.90 \
     --tensor-parallel-size 1
 # (leave running; note the hostname — e.g. gcn123)
@@ -134,12 +134,19 @@ module purge && module load 2024 CUDA/12.6.0 Python/3.11.3-GCCcore-12.3.0
 source ~/castlerag_venv/bin/activate
 vllm serve Qwen/Qwen3-VL-8B-Instruct \
     --port 8201 \
-    --served-model-name qwen3vl \
+    --served-model-name Qwen/Qwen3-VL-8B-Instruct qwen3vl \
     --gpu-memory-utilization 0.88 \
     --max-model-len 16384 \
     --trust-remote-code
 # (leave running; note the hostname — e.g. gcn456)
 ```
+
+> **Invariant:** the vLLM **served model name must include `cfg.*.model`**
+> (`Qwen/Qwen3-VL-8B-Instruct` for generation/rerank,
+> `Tevatron/OmniEmbed-v0.1-multivent` for embedding). The pipeline calls the
+> endpoint with those exact ids; serving *only* a short alias like `qwen3vl`
+> makes every generation/rerank/suggestion call 404. Registering both names
+> (as above) keeps the alias working too.
 
 The batch jobs in §6 must be able to reach both endpoints from the compute
 node they land on.  Snellius compute nodes share an internal network, so
@@ -165,6 +172,53 @@ OMNIEMBED_URL=$VLLM_EMBED_URL \
 export OMNIEMBED_QUERY_CACHE=/scratch/$USER/castle_derived/embeddings/query_cache.npz
 # OmniEmbedClient serves dense queries from the NPZ, no embed server needed
 ```
+
+## 5b. Run the dashboard against the live backend
+
+The Dash UI defaults to the **offline demo** engine so it always boots. To bind
+the **real** RAG backend, run it on a node that can reach Qdrant (localhost) and
+the vLLM endpoint, with `--require-live` so it fails loudly (with the exact
+missing dependency) instead of silently serving the demo.
+
+Easiest is one A100 node hosting Qwen3-VL + Qdrant + the UI together (query
+vectors come from the cache, so OmniEmbed isn't needed for the cached questions):
+
+```bash
+srun --account=$ACCOUNT --partition=gpu_a100 --gres=gpu:1 --cpus-per-task=16 \
+     --mem=120G --time=01:00:00 --pty bash
+module purge && module load 2024 Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0
+source ~/castlerag_venv/bin/activate
+export HF_HOME=/scratch-shared/$USER/hf_cache HF_HUB_OFFLINE=1
+cd ~/CastleRAG
+
+# Qwen3-VL (generation/rerank/suggestions) — register the full id (see invariant)
+vllm serve Qwen/Qwen3-VL-8B-Instruct --port 8201 \
+    --served-model-name Qwen/Qwen3-VL-8B-Instruct qwen3vl \
+    --gpu-memory-utilization 0.85 --max-model-len 16384 --trust-remote-code &
+# Qdrant against the EXISTING persisted index (no re-index)
+QDRANT__STORAGE__STORAGE_PATH=/scratch-shared/$USER/qdrant_storage/storage \
+    ~/qdrant/qdrant &
+
+# wait for both, then point the UI at them and require the live backend
+export VLLM_BASE_URL=http://localhost:8201/v1
+export OMNIEMBED_QUERY_CACHE=/scratch-shared/$USER/castle_derived/embeddings/query_cache.npz
+castlerag ui --require-live --config configs/snellius_me.yaml \
+    --host 127.0.0.1 --port 50225
+```
+
+Then SSH-forward the port to your laptop and open the browser:
+
+```bash
+ssh -N -L 50225:<compute-node>:50225 $USER@snellius.surf.nl
+# http://localhost:50225  -> top-bar badge should read "live RAG"
+```
+
+If `--require-live` aborts, the message names the exact gap (VLLM_BASE_URL unset,
+endpoint unreachable, Qdrant/BM25 missing, or a served-model-name mismatch). For
+a free-text question (not one of the cached ones) also start OmniEmbed on :8200
+and `export OMNIEMBED_BASE_URL=http://localhost:8200/v1`. To validate the backend
+without the UI: `castlerag smoke-test /scratch-shared/$USER/questions.json --n 5
+--config configs/snellius_me.yaml`.
 
 ## 6. Run the offline build via SLURM
 
