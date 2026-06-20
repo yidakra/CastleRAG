@@ -99,6 +99,28 @@ body {
     border: 1.5px solid color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
+/* Long live-RAG answers can be very verbose; keep them scrollable inside
+   the query card so the left thread/input bar do not get pushed off-screen. */
+.group-card {
+    min-height: 0;
+}
+
+.answer-text {
+    max-height: 260px;
+    overflow-y: auto;
+    padding-right: 6px;
+    line-height: 1.45;
+}
+
+.answer-text p:first-child {
+    margin-top: 0;
+}
+
+.answer-text p:last-child {
+    margin-bottom: 0;
+}
+
+
 /* ---- ask-new bar (DMC group + raw dcc.Input) ---- */
 .ask-new {
     flex: none;
