@@ -669,7 +669,7 @@ def smoke_test(
 @app.command()
 def ui(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind host"),
-    port: int = typer.Option(8050, "--port", help="Bind port"),
+    port: int = typer.Option(50225, "--port", help="Bind port"),
     debug: bool = typer.Option(False, "--debug", help="Run Dash in debug mode"),
 ) -> None:
     """Launch the Dash dashboard (chat + YouTube embeds + Plotly analytics).
