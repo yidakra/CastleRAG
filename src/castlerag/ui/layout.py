@@ -70,20 +70,13 @@ def _thread_column() -> html.Div:
     return html.Div(
         className="thread-col",
         children=[
-            # #thread owns its scroll via max-height + overflow-y (in styles.css),
-            # which does NOT depend on flex-height propagation — so it scrolls no
-            # matter what wraps it. That lets us put it back INSIDE dcc.Loading,
-            # which is what actually shows the "retrieving" spinner over the thread
-            # while a slow callback updates thread.children. delay_show avoids a
-            # flicker on fast re-renders (e.g. moment clicks).
-            dcc.Loading(
-                type="circle",
-                color="#4f46e5",
-                delay_show=250,
-                children=html.Div(
-                    id="thread", className="thread", children=[_thread_hint()]
-                ),
+            # thread owns the scroll directly. Keep it as a plain html.Div so the left column can stay fixed-height while only the thread content scrolls.
+            html.Div(
+                id="thread",
+                className="thread",
+                children=[_thread_hint()],
             ),
+
             dmc.Group(
                 className="ask-new",
                 gap="sm",

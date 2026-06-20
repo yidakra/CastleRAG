@@ -241,7 +241,7 @@ def _render_group(group: Dict[str, object], focus: Dict[str, object]) -> dmc.Car
                 wrap="nowrap",
                 children=[
                     html.Span(className="question-icon"),
-                    dmc.Text(str(group["question"]), fw=600),
+                    dmc.Text(str(group["question"]), fw=600, className="question-text"),
                 ],
             ),
             dmc.Text("Answer", size="xs", c="dimmed", mt="sm"),
@@ -391,6 +391,33 @@ def _all_verdicts_in(review: Dict[str, Dict[str, str]]) -> bool:
     return bool(review) and all(
         info.get("state", "pending") != "pending" for info in review.values()
     )
+
+def _all_confirmed(review: Dict[str, Dict[str, str]]) -> bool:
+    """Return True when every camera has been confirmed."""
+    return bool(review) and all(
+        info.get("state", "pending") == "confirmed" for info in review.values()
+    )
+
+
+def _needs_refinement(review: Dict[str, Dict[str, str]]) -> bool:
+    """Return True when any camera was flagged for refinement or rejected."""
+    return any(
+        info.get("state", "pending") in {"flagged", "rejected"}
+        for info in review.values()
+    )
+
+
+def _converged_banner() -> List[dmc.Alert]:
+    """Return the review-driven convergence banner."""
+    return [
+        dmc.Alert(
+            "All synchronized camera views were confirmed — no further "
+            "refinement needed.",
+            title="✓ Search converged",
+            color="green",
+            variant="light",
+        )
+    ]
 
 
 def _viewer_outputs(
@@ -606,6 +633,8 @@ def register_callbacks(
         Output("review-row", "children", allow_duplicate=True),
         Output("compose-wrap", "hidden", allow_duplicate=True),
         Output("refined-query-input", "value", allow_duplicate=True),
+        Output("converged-banner", "children", allow_duplicate=True),
+        Output("converged-banner", "hidden", allow_duplicate=True),
         Input({"type": "review-btn", "cam": ALL, "action": ALL}, "n_clicks"),
         State({"type": "review-just", "cam": ALL}, "value"),
         State("review-store", "data"),
@@ -649,7 +678,13 @@ def register_callbacks(
             }
 
         if _all_verdicts_in(review):
-            claim_text = _focused_claim_text(thread, focus)
-            prefilled = compose_refined_query(claim_text, review)
-            return review, _render_review_row(review), False, prefilled
-        return review, _render_review_row(review), True, ""
+            if _all_confirmed(review):
+                return review, _render_review_row(review), True, "", _converged_banner(), False
+
+            if _needs_refinement(review):
+                claim_text = _focused_claim_text(thread, focus)
+                prefilled = compose_refined_query(claim_text, review)
+                return review, _render_review_row(review), False, prefilled, [], True
+
+        return review, _render_review_row(review), True, "", [], True
+
