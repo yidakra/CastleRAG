@@ -196,6 +196,14 @@ body {
 
 .review-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; }
 
+/* ---- frozen (read-only) iterations ---- */
+.review-frozen { background: #fafafa; border-style: dashed; }
+.frozen-query {
+    background: #f4f4ff;
+    border-color: #c7c7f0;
+}
+.frozen-query p { margin: 0; }
+
 /* ---- raw dcc text areas (review justification + refine compose) ---- */
 .review-just {
     width: 100%;

@@ -45,6 +45,13 @@ _REVIEW_ACTION_STATE = {
 }
 # Mantine color per review action button.
 _REVIEW_ACTION_COLOR = {"confirm": "green", "refine": "yellow", "reject": "red"}
+# How each recorded verdict reads on a frozen (read-only) iteration.
+_REVIEW_STATE_DISPLAY = {
+    "confirmed": ("✓ Confirmed", "green"),
+    "flagged": ("↻ Flagged for refine", "yellow"),
+    "rejected": ("✕ Rejected", "red"),
+    "pending": ("— No verdict", "gray"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +98,10 @@ def _serialize_group(
         ]
         moments.append(
             {
-                "moment_id": moment.moment_id,
+                # Namespace the moment id with the group so no button id is ever
+                # reused across groups (prevents React/Dash reconciling a new
+                # group's moments onto an earlier group's DOM nodes).
+                "moment_id": f"{group_id}-{moment.moment_id}",
                 "clock_label": moment.clock_label,
                 "place_label": moment.place_label,
                 "camera_count": moment.camera_count,
@@ -113,6 +123,11 @@ def _serialize_group(
         },
         "is_refinement": is_refinement,
         "refined_query": refined_query,
+        # Frozen per-camera verdicts captured when the user refines past this
+        # iteration, keyed by the reviewed moment_id. Empty until then.
+        "reviews": {},
+        # The refined query the user sent from this iteration (set on freeze).
+        "sent_refined_query": None,
         "moments": moments,
     }
 
@@ -200,7 +215,9 @@ def _render_moment(
     )
 
 
-def _render_group(group: Dict[str, object], focus: Dict[str, object]) -> dmc.Card:
+def _render_group(
+    group: Dict[str, object], focus: Dict[str, object], order: int = 0
+) -> dmc.Card:
     """Render one query group (question, answer, claim, ranked moments)."""
     claim = group["claim"]  # type: ignore[index]
     support = str(claim["support"])
@@ -214,6 +231,16 @@ def _render_group(group: Dict[str, object], focus: Dict[str, object]) -> dmc.Car
                 f"↻ Refined · {group['iteration']} / {_MAX_ITERATIONS}",
                 variant="light",
                 color="indigo",
+                mb="xs",
+            )
+        )
+    elif order > 0:
+        # A fresh question appended after earlier investigations.
+        header.append(
+            dmc.Badge(
+                "🔎 New question",
+                variant="light",
+                color="teal",
                 mb="xs",
             )
         )
@@ -282,7 +309,7 @@ def _render_thread(
                 size="sm",
             )
         ]
-    return [_render_group(group, focus) for group in thread]
+    return [_render_group(group, focus, i) for i, group in enumerate(thread)]
 
 
 def _render_camera_grid(moment: Dict[str, object]) -> List[dmc.Card]:
@@ -342,15 +369,42 @@ def _render_camera_grid(moment: Dict[str, object]) -> List[dmc.Card]:
     return tiles
 
 
-def _review_column(camera_id: str, info: Dict[str, str]) -> dmc.Paper:
+def _review_column(
+    camera_id: str, info: Dict[str, str], frozen: bool = False
+) -> dmc.Paper:
     """Render one per-camera review column with confirm/refine/reject controls.
 
     The verdict buttons are ``dmc.Button``s carrying the same pattern-matching
     ids/``n_clicks`` the review callback listens on; the active verdict is shown
-    as a filled button, the others light.
+    as a filled button, the others light. When ``frozen`` (a past iteration), the
+    controls are disabled so the recorded verdict is visible but read-only.
     """
     state = info.get("state", "pending")
     justification = info.get("justification", "")
+
+    if frozen:
+        # Read-only: show the recorded verdict as a clear coloured badge plus the
+        # justification text, so it's obvious which verdict was chosen.
+        verdict_label, verdict_color = _REVIEW_STATE_DISPLAY.get(
+            state, _REVIEW_STATE_DISPLAY["pending"]
+        )
+        just_node = (
+            dmc.Text(justification, size="xs", c="dimmed")
+            if justification
+            else dmc.Text("No justification recorded", size="xs", c="dimmed", fs="italic")
+        )
+        return dmc.Paper(
+            className=f"review review-{state} review-frozen",
+            withBorder=True,
+            radius="sm",
+            p="xs",
+            children=[
+                dmc.Text(camera_id, size="sm", fw=600, mb=4),
+                dmc.Badge(verdict_label, color=verdict_color, variant="filled", mb=6),
+                just_node,
+            ],
+        )
+
     actions = (("confirm", "✓ Confirm"), ("refine", "↻ Refine"), ("reject", "✕"))
     buttons = [
         dmc.Button(
@@ -381,9 +435,31 @@ def _review_column(camera_id: str, info: Dict[str, str]) -> dmc.Paper:
     )
 
 
-def _render_review_row(review: Dict[str, Dict[str, str]]) -> List[html.Div]:
-    """Render the three review columns from the review store."""
-    return [_review_column(cam, info) for cam, info in review.items()]
+def _frozen_query_panel(refined_query: str) -> dmc.Paper:
+    """Full-width banner showing the refined query sent from a frozen iteration."""
+    return dmc.Paper(
+        className="frozen-query",
+        withBorder=True,
+        radius="sm",
+        p="xs",
+        style={"gridColumn": "1 / -1"},
+        children=[
+            dmc.Text("↻ Refined query sent from this iteration", size="xs", c="dimmed"),
+            dmc.Text(refined_query or "—", size="sm", fw=500),
+        ],
+    )
+
+
+def _render_review_row(
+    review: Dict[str, Dict[str, str]],
+    frozen: bool = False,
+    refined_query: str = "",
+) -> List[object]:
+    """Render the review columns; frozen rows lead with the sent refined query."""
+    columns = [_review_column(cam, info, frozen) for cam, info in review.items()]
+    if frozen and refined_query:
+        return [_frozen_query_panel(refined_query), *columns]
+    return columns
 
 
 def _all_verdicts_in(review: Dict[str, Dict[str, str]]) -> bool:
@@ -407,6 +483,27 @@ def _needs_refinement(review: Dict[str, Dict[str, str]]) -> bool:
     )
 
 
+def _is_live_group(thread: List[Dict[str, object]], group_id: str) -> bool:
+    """Return True when ``group_id`` is the latest (editable) iteration.
+
+    Only the last group in the thread is live; every earlier iteration is frozen
+    and shown read-only.
+    """
+    return bool(thread) and thread[-1]["group_id"] == group_id
+
+
+def _compose_for_review(
+    thread: Optional[List[Dict[str, object]]],
+    focus: Optional[Dict[str, object]],
+    review: Dict[str, Dict[str, str]],
+) -> tuple:
+    """Return ``(compose_hidden, prefilled_query)`` for a live review state."""
+    if _all_verdicts_in(review) and _needs_refinement(review):
+        claim_text = _focused_claim_text(thread, focus)
+        return False, compose_refined_query(claim_text, review)
+    return True, ""
+
+
 def _converged_banner() -> List[dmc.Alert]:
     """Return the review-driven convergence banner."""
     return [
@@ -425,36 +522,32 @@ def _viewer_outputs(
     moment: Dict[str, object],
     review: Dict[str, Dict[str, str]],
     iteration: int,
+    frozen: bool = False,
 ) -> tuple:
     """Build the seven viewer outputs for a focused (group, moment).
 
     Returns: title, subtitle, camera-grid, review-row, banner children, banner
     hidden, evidence figure. (The compose box and its prefilled query are managed
-    separately, as they appear only once all three cameras have a verdict.)
+    separately, as they appear only once all three cameras have a verdict.) When
+    ``frozen`` the review controls render read-only for a past iteration.
     """
-    title = "Refined moment" if group["is_refinement"] else "Selected moment"
+    if frozen:
+        title = f"Iteration {iteration} · frozen"
+    else:
+        title = "Refined moment" if group["is_refinement"] else "Selected moment"
     subtitle = (
         f"{moment['clock_label']} · {moment['camera_count']} synchronized cameras"
     )
-    support = str(group["claim"]["support"])  # type: ignore[index]
-    converged = support == "supported"
-    if converged:
-        banner = [
-            dmc.Alert(
-                f"Claim supported after {iteration} of {_MAX_ITERATIONS} max "
-                f"iterations — no further refinement needed.",
-                title="✓ Search converged",
-                color="green",
-                variant="light",
-            )
-        ]
-    else:
-        banner = []
+    # Convergence is human-in-the-loop: it is reached only once the reviewer has
+    # confirmed every camera, never auto-declared from the engine's claim support.
+    converged = _all_confirmed(review)
+    banner = _converged_banner() if converged else []
+    sent_query = str(group.get("sent_refined_query") or "") if frozen else ""
     return (
         title,
         subtitle,
         _render_camera_grid(moment),
-        _render_review_row(review),
+        _render_review_row(review, frozen, sent_query),
         banner,
         not converged,
         camera_match_figure(moment),
@@ -500,41 +593,80 @@ def register_callbacks(
 
     @app.callback(  # type: ignore[attr-defined,untyped-decorator]
         *_thread_outputs(),
+        Output("new-question-input", "value", allow_duplicate=True),
         Input("ask-new-button", "n_clicks"),
         Input("new-question-input", "n_submit"),
         State("new-question-input", "value"),
+        State("thread-store", "data"),
+        State("iteration-store", "data"),
+        State("focus-store", "data"),
+        State("review-store", "data"),
         prevent_initial_call=True,
     )
     def on_ask_new(
-        n_clicks: Optional[int], n_submit: Optional[int], question: Optional[str]
+        n_clicks: Optional[int],
+        n_submit: Optional[int],
+        question: Optional[str],
+        thread: Optional[List[Dict[str, object]]],
+        iteration_store: Optional[Dict[str, object]],
+        focus: Optional[Dict[str, object]],
+        review: Optional[Dict[str, Dict[str, str]]],
     ) -> tuple:
-        """Open a fresh investigation thread (button click or Enter in the box)."""
+        """Append a new investigation block, freezing the current iteration.
+
+        A new question never wipes the thread: the previous iteration is frozen
+        (kept read-only) and the new question is appended as its own block so the
+        whole history stays visible.
+        """
         if not question or not question.strip():
             raise PreventUpdate
         question = question.strip()
+        thread = list(thread or [])
+        store = iteration_store or {}
+
+        # Freeze the current live iteration before opening a new block. Only
+        # snapshot review-store if it belongs to the live group; otherwise the
+        # group already carries its persisted verdicts.
+        if thread:
+            live = dict(thread[-1])
+            if (focus or {}).get("group_id") == live["group_id"]:
+                mid = (focus or {}).get("moment_id")
+                if mid and review:
+                    reviews = dict(live.get("reviews") or {})
+                    reviews[str(mid)] = review
+                    live["reviews"] = reviews
+                    thread[-1] = live
+
+        seq = int(store.get("next_seq", 1) or 1) if thread else 1
+        group_id = f"g{seq}"
         result = engine.answer(question)
         group = _serialize_group(
             result,
-            group_id="g1",
+            group_id=group_id,
             iteration=1,
             question=question,
             mirror=mirror,
             is_refinement=False,
         )
-        thread = [group]
+        thread.append(group)
         moment = group["moments"][0]  # type: ignore[index]
-        focus = {"group_id": "g1", "moment_id": moment["moment_id"]}
-        review = _pending_review(moment)
-        iteration_store = {"claim": group["claim"]["text"], "iteration": 1}  # type: ignore[index]
+        new_focus = {"group_id": group_id, "moment_id": moment["moment_id"]}
+        new_review = _pending_review(moment)
+        iteration_store = {
+            "claim": group["claim"]["text"],  # type: ignore[index]
+            "iteration": 1,
+            "next_seq": seq + 1,
+        }
         return (
             thread,
             iteration_store,
-            focus,
-            review,
-            _render_thread(thread, focus),
-            *_viewer_outputs(group, moment, review, 1),
+            new_focus,
+            new_review,
+            _render_thread(thread, new_focus),
+            *_viewer_outputs(group, moment, new_review, 1),
             True,  # compose-wrap hidden until all cameras are reviewed
             "",  # clear any prior refined query
+            "",  # clear the new-question box
         )
 
     @app.callback(  # type: ignore[attr-defined,untyped-decorator]
@@ -543,6 +675,8 @@ def register_callbacks(
         State("refined-query-input", "value"),
         State("thread-store", "data"),
         State("iteration-store", "data"),
+        State("focus-store", "data"),
+        State("review-store", "data"),
         prevent_initial_call=True,
     )
     def on_send_refined(
@@ -550,23 +684,47 @@ def register_callbacks(
         refined_query: Optional[str],
         thread: Optional[List[Dict[str, object]]],
         iteration_store: Optional[Dict[str, object]],
+        focus: Optional[Dict[str, object]],
+        review: Optional[Dict[str, Dict[str, str]]],
     ) -> tuple:
-        """Re-run retrieval for the same claim, appending a refinement group."""
+        """Freeze the current iteration's verdicts and append the next one.
+
+        Refinement is linear: it always continues from the latest iteration. The
+        verdicts the reviewer gave for the focused moment are frozen onto that
+        (now previous) iteration so it stays visible but read-only; earlier
+        iterations are never removed or re-run.
+        """
         thread = list(thread or [])
         store = iteration_store or {}
         claim = store.get("claim")
-        iteration = int(store.get("iteration", 0) or 0)
-        if not thread or not claim or iteration >= _MAX_ITERATIONS:
+        if not thread or not claim:
             raise PreventUpdate
         if not refined_query or not refined_query.strip():
             raise PreventUpdate
         refined_query = refined_query.strip()
 
-        new_iteration = iteration + 1
+        # Linear: continue from the latest iteration only.
+        current = dict(thread[-1])
+        current_iteration = int(current["iteration"])  # type: ignore[index]
+        if current_iteration >= _MAX_ITERATIONS:
+            raise PreventUpdate
+
+        # Freeze the reviewed moment's verdicts and the query we send onto the
+        # iteration we leave, so the frozen view can show both.
+        moment_id = (focus or {}).get("moment_id")
+        if moment_id and review:
+            reviews = dict(current.get("reviews") or {})
+            reviews[str(moment_id)] = review
+            current["reviews"] = reviews
+        current["sent_refined_query"] = refined_query
+        thread[-1] = current
+
+        new_iteration = current_iteration + 1
+        seq = int(store.get("next_seq", len(thread) + 1) or (len(thread) + 1))
         result = engine.refine(str(claim), refined_query, new_iteration)
         group = _serialize_group(
             result,
-            group_id=f"g{len(thread) + 1}",
+            group_id=f"g{seq}",
             iteration=new_iteration,
             question=refined_query,
             mirror=mirror,
@@ -575,16 +733,16 @@ def register_callbacks(
         )
         thread.append(group)
         moment = group["moments"][0]  # type: ignore[index]
-        focus = {"group_id": group["group_id"], "moment_id": moment["moment_id"]}
-        review = _pending_review(moment)
-        new_store = {"claim": claim, "iteration": new_iteration}
+        new_focus = {"group_id": group["group_id"], "moment_id": moment["moment_id"]}
+        new_review = _pending_review(moment)
+        new_store = {"claim": claim, "iteration": new_iteration, "next_seq": seq + 1}
         return (
             thread,
             new_store,
-            focus,
-            review,
-            _render_thread(thread, focus),
-            *_viewer_outputs(group, moment, review, new_iteration),
+            new_focus,
+            new_review,
+            _render_thread(thread, new_focus),
+            *_viewer_outputs(group, moment, new_review, new_iteration),
             True,  # re-hide compose until the new moment's cameras are reviewed
             "",
         )
@@ -621,15 +779,24 @@ def register_callbacks(
         if moment is None:
             raise PreventUpdate
         focus = {"group_id": triggered["gid"], "moment_id": triggered["mid"]}
-        review = _pending_review(moment)
-        iteration = int((iteration_store or {}).get("iteration", 0) or 0)
+        iteration = int(group["iteration"])  # type: ignore[index]
+        frozen = not _is_live_group(thread, triggered["gid"])
+
+        # Restore any saved verdicts for this moment; pending if never reviewed.
+        saved = (group.get("reviews") or {}).get(triggered["mid"])  # type: ignore[union-attr]
+        review = dict(saved) if saved else _pending_review(moment)
+
+        if frozen:
+            compose_hidden, prefilled = True, ""
+        else:
+            compose_hidden, prefilled = _compose_for_review(thread, focus, review)
         return (
             focus,
             review,
             _render_thread(thread, focus),
-            *_viewer_outputs(group, moment, review, iteration),
-            True,  # compose hidden until this moment's cameras are reviewed
-            "",
+            *_viewer_outputs(group, moment, review, iteration, frozen),
+            compose_hidden,
+            prefilled,
         )
 
     @app.callback(  # type: ignore[attr-defined,untyped-decorator]
@@ -639,6 +806,7 @@ def register_callbacks(
         Output("refined-query-input", "value", allow_duplicate=True),
         Output("converged-banner", "children", allow_duplicate=True),
         Output("converged-banner", "hidden", allow_duplicate=True),
+        Output("thread-store", "data", allow_duplicate=True),
         Input({"type": "review-btn", "cam": ALL, "action": ALL}, "n_clicks"),
         State({"type": "review-just", "cam": ALL}, "value"),
         State("review-store", "data"),
@@ -661,11 +829,17 @@ def register_callbacks(
         """
         triggered = ctx.triggered_id
         review = dict(review or {})
+        thread = list(thread or [])
         if not triggered or not review:
             raise PreventUpdate
         # Newly injected verdict buttons fire this callback with n_clicks 0/None
         # even under prevent_initial_call; only act on a real click.
         if not ctx.triggered or not ctx.triggered[0].get("value"):
+            raise PreventUpdate
+        # Verdicts are only editable on the latest (live) iteration; frozen ones
+        # render disabled controls, but guard here in case one slips through.
+        focus_gid = (focus or {}).get("group_id", "")
+        if not _is_live_group(thread, focus_gid):
             raise PreventUpdate
 
         # Capture every justification field (mapped by camera via its id).
@@ -685,14 +859,30 @@ def register_callbacks(
                 "state": _REVIEW_ACTION_STATE[triggered["action"]],
             }
 
+        # Persist the in-progress verdicts onto the live group so they survive
+        # navigating away and back (and are the ones frozen on the next refine).
+        moment_id = (focus or {}).get("moment_id")
+        if moment_id:
+            current = dict(thread[-1])
+            reviews = dict(current.get("reviews") or {})
+            reviews[str(moment_id)] = review
+            current["reviews"] = reviews
+            thread[-1] = current
+
         if _all_verdicts_in(review):
             if _all_confirmed(review):
-                return review, _render_review_row(review), True, "", _converged_banner(), False
+                return (
+                    review, _render_review_row(review), True, "",
+                    _converged_banner(), False, thread,
+                )
 
             if _needs_refinement(review):
                 claim_text = _focused_claim_text(thread, focus)
                 prefilled = compose_refined_query(claim_text, review)
-                return review, _render_review_row(review), False, prefilled, [], True
+                return (
+                    review, _render_review_row(review), False, prefilled,
+                    [], True, thread,
+                )
 
-        return review, _render_review_row(review), True, "", [], True
+        return review, _render_review_row(review), True, "", [], True, thread
 

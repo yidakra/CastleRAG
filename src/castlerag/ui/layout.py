@@ -206,6 +206,9 @@ def build_layout(mirror: YouTubeMirror, mode: str = "offline") -> html.Div:
             dcc.Store(id="thread-store", data=[]),
             dcc.Store(id="focus-store", data={}),
             dcc.Store(id="review-store", data={}),
-            dcc.Store(id="iteration-store", data={"claim": None, "iteration": 0}),
+            dcc.Store(
+                id="iteration-store",
+                data={"claim": None, "iteration": 0, "next_seq": 1},
+            ),
         ],
     )
