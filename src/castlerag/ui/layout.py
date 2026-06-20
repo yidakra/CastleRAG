@@ -153,39 +153,49 @@ def _viewer_column() -> html.Div:
                     ),
                 ],
             ),
-            html.Div(id="review-row", className="review-row"),
-            # html.Div (not DMC) so the callback can toggle the `hidden` attribute.
-            html.Div(
-                id="compose-wrap",
-                hidden=True,
+            # Spinner covers the review controls + compose box while the engine
+            # drafts justification/refined-query suggestions (and during retrieval).
+            dcc.Loading(
+                type="dot",
+                className="review-loading",
                 children=[
-                    dmc.Paper(
-                        className="compose-box",
-                        withBorder=True,
-                        p="sm",
+                    html.Div(id="review-row", className="review-row"),
+                    # html.Div (not DMC) so the callback can toggle `hidden`.
+                    html.Div(
+                        id="compose-wrap",
+                        hidden=True,
                         children=[
-                            dmc.Text(
-                                "Refine the query · re-run retrieval for this claim",
-                                size="sm",
-                                fw=600,
-                                mb=6,
-                            ),
-                            dcc.Textarea(
-                                id="refined-query-input",
-                                placeholder=(
-                                    "Describe a sharper angle for the same claim…"
-                                ),
-                                className="compose-input",
-                            ),
-                            dmc.Button(
-                                "↑ Send refined query",
-                                id="send-refined-button",
-                                n_clicks=0,
-                                variant="filled",
-                                mt="sm",
-                            ),
+                            dmc.Paper(
+                                className="compose-box",
+                                withBorder=True,
+                                p="sm",
+                                children=[
+                                    dmc.Text(
+                                        "Refine the query · re-run retrieval "
+                                        "for this claim",
+                                        size="sm",
+                                        fw=600,
+                                        mb=6,
+                                    ),
+                                    dcc.Textarea(
+                                        id="refined-query-input",
+                                        placeholder=(
+                                            "Describe a sharper angle for the "
+                                            "same claim…"
+                                        ),
+                                        className="compose-input",
+                                    ),
+                                    dmc.Button(
+                                        "↑ Send refined query",
+                                        id="send-refined-button",
+                                        n_clicks=0,
+                                        variant="filled",
+                                        mt="sm",
+                                    ),
+                                ],
+                            )
                         ],
-                    )
+                    ),
                 ],
             ),
             html.Div(id="converged-banner", hidden=True),

@@ -22,7 +22,7 @@ import dash_mantine_components as dmc
 from dash import ALL, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
-from castlerag.ui.chat import ChatEngine, ChatTurnResult, compose_refined_query
+from castlerag.ui.chat import ChatEngine, ChatTurnResult
 from castlerag.ui.figures import camera_match_figure
 from castlerag.ui.youtube import YouTubeMirror
 
@@ -84,6 +84,9 @@ def _serialize_group(
                 "start_seconds": cam.start_seconds,
                 "match_score": cam.match_score,
                 "is_best": cam.is_best,
+                # Retrieved evidence snippet for this camera (None offline), used
+                # to ground LLM justification suggestions in the review UI.
+                "evidence_text": getattr(cam, "evidence_text", None),
                 # None when the mirror has no real upload for this triple, so the
                 # viewer shows a "no footage" tile instead of a placeholder video.
                 "embed_url": (
@@ -493,6 +496,7 @@ def _is_live_group(thread: List[Dict[str, object]], group_id: str) -> bool:
 
 
 def _compose_for_review(
+    engine: ChatEngine,
     thread: Optional[List[Dict[str, object]]],
     focus: Optional[Dict[str, object]],
     review: Dict[str, Dict[str, str]],
@@ -500,7 +504,7 @@ def _compose_for_review(
     """Return ``(compose_hidden, prefilled_query)`` for a live review state."""
     if _all_verdicts_in(review) and _needs_refinement(review):
         claim_text = _focused_claim_text(thread, focus)
-        return False, compose_refined_query(claim_text, review)
+        return False, engine.suggest_refined_query(claim_text, review)
     return True, ""
 
 
@@ -789,7 +793,7 @@ def register_callbacks(
         if frozen:
             compose_hidden, prefilled = True, ""
         else:
-            compose_hidden, prefilled = _compose_for_review(thread, focus, review)
+            compose_hidden, prefilled = _compose_for_review(engine, thread, focus, review)
         return (
             focus,
             review,
@@ -853,15 +857,51 @@ def register_callbacks(
                 }
 
         cam = triggered["cam"]
+        moment_id = (focus or {}).get("moment_id")
         if cam in review:
-            review[cam] = {
-                **review[cam],
-                "state": _REVIEW_ACTION_STATE[triggered["action"]],
-            }
+            new_state = _REVIEW_ACTION_STATE[triggered["action"]]
+            prev_state = review[cam].get("state", "pending")
+            cur_just = review[cam].get("justification") or ""
+            prev_suggestion = review[cam].get("suggestion", "")
+            review[cam] = {**review[cam], "state": new_state}
+
+            # Auto-draft a justification on the verdict click (create-then-edit):
+            # fill when the box is empty, or when the verdict changed and the
+            # reviewer hasn't edited the previous AI draft. Never clobber edits.
+            unedited = cur_just == "" or cur_just == prev_suggestion
+            if cur_just == "" or (new_state != prev_state and unedited):
+                group = _find_group(thread, focus_gid)
+                moment = _find_moment(group, str(moment_id)) if group else None
+                cam_info = (
+                    next(
+                        (c for c in moment["cameras"]  # type: ignore[index]
+                         if c["camera_id"] == cam),
+                        None,
+                    )
+                    if moment
+                    else None
+                )
+                meta = {
+                    "clock_label": (moment or {}).get("clock_label"),
+                    "place_label": (moment or {}).get("place_label"),
+                    "match_score": (cam_info or {}).get("match_score"),
+                }
+                suggestion = engine.suggest_justification(
+                    _focused_claim_text(thread, focus),
+                    cam,
+                    new_state,
+                    (cam_info or {}).get("evidence_text"),
+                    meta,
+                )
+                if suggestion:
+                    review[cam] = {
+                        **review[cam],
+                        "justification": suggestion,
+                        "suggestion": suggestion,
+                    }
 
         # Persist the in-progress verdicts onto the live group so they survive
         # navigating away and back (and are the ones frozen on the next refine).
-        moment_id = (focus or {}).get("moment_id")
         if moment_id:
             current = dict(thread[-1])
             reviews = dict(current.get("reviews") or {})
@@ -878,7 +918,7 @@ def register_callbacks(
 
             if _needs_refinement(review):
                 claim_text = _focused_claim_text(thread, focus)
-                prefilled = compose_refined_query(claim_text, review)
+                prefilled = engine.suggest_refined_query(claim_text, review)
                 return (
                     review, _render_review_row(review), False, prefilled,
                     [], True, thread,

@@ -98,6 +98,9 @@ class CameraAngle:
     start_seconds: float
     match_score: float
     is_best: bool = False
+    # Retrieved evidence snippet (transcript / event summary / OCR) for this
+    # angle; None offline. Grounds LLM justification suggestions in the review UI.
+    evidence_text: Optional[str] = None
 
 
 @dataclass
@@ -172,6 +175,23 @@ class ChatEngine(Protocol):
         self, claim: str, refined_query: str, iteration: int
     ) -> ChatTurnResult:
         """Re-run retrieval for the same ``claim`` with a sharper query."""
+        ...
+
+    def suggest_justification(
+        self,
+        claim: str,
+        camera_id: str,
+        verdict: str,
+        evidence_text: Optional[str] = None,
+        meta: Optional[Dict[str, object]] = None,
+    ) -> str:
+        """Draft a per-camera justification for a verdict (the reviewer edits)."""
+        ...
+
+    def suggest_refined_query(
+        self, claim: str, reviews: Dict[str, Dict[str, str]]
+    ) -> str:
+        """Draft a refined retrieval query from the verdicts (the reviewer edits)."""
         ...
 
 
@@ -267,6 +287,23 @@ class PlaceholderEngine:
             claim=Claim(text=claim, support=support),
             moments=moments,
         )
+
+    def suggest_justification(
+        self,
+        claim: str,
+        camera_id: str,
+        verdict: str,
+        evidence_text: Optional[str] = None,
+        meta: Optional[Dict[str, object]] = None,
+    ) -> str:
+        """Offline justification draft — deterministic template, no model."""
+        return compose_justification(claim, camera_id, verdict, evidence_text)
+
+    def suggest_refined_query(
+        self, claim: str, reviews: Dict[str, Dict[str, str]]
+    ) -> str:
+        """Offline refined-query draft — the deterministic template."""
+        return compose_refined_query(claim, reviews)
 
     # -- internals ----------------------------------------------------------
 
@@ -400,6 +437,34 @@ def _support_priors(rng: random.Random) -> Dict[str, float]:
 
 # Verdicts that mark a camera angle as a weak / unconvincing perspective.
 _WEAK_VERDICTS = {"flagged", "rejected"}
+
+# Deterministic per-verdict phrasing for the offline justification draft.
+_JUSTIFICATION_TEMPLATE = {
+    "confirmed": "{cam}'s angle clearly supports the claim",
+    "flagged": "{cam}'s view is inconclusive — a clearer angle is needed",
+    "rejected": "{cam}'s angle does not support the claim",
+}
+
+
+def compose_justification(
+    claim: str,
+    camera_id: str,
+    verdict: str,
+    evidence_text: Optional[str] = None,
+) -> str:
+    """Build an editable per-camera justification draft (deterministic, offline).
+
+    ``verdict`` is the stored state (``confirmed`` / ``flagged`` / ``rejected``).
+    A live engine replaces this with an LLM-composed, evidence-grounded draft.
+    """
+    base = _JUSTIFICATION_TEMPLATE.get(
+        verdict, "{cam} was reviewed for the claim"
+    ).format(cam=camera_id)
+    snippet = (evidence_text or "").strip()
+    if snippet:
+        clipped = snippet[:80].rstrip()
+        base += f" ({clipped}…)" if len(snippet) > 80 else f" ({clipped})"
+    return base + "."
 
 
 def compose_refined_query(claim: str, reviews: Dict[str, Dict[str, str]]) -> str:
