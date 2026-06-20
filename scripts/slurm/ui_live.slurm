@@ -111,4 +111,7 @@ cat <<EOF
 EOF
 
 # Bind 0.0.0.0 so the login node can forward the tunnel to this compute node.
-exec castlerag ui --host 0.0.0.0 --port "${UI_PORT}"
+# --require-live: fail loudly with the exact missing dependency instead of
+# silently serving the offline demo (the whole point of this job).
+exec castlerag ui --host 0.0.0.0 --port "${UI_PORT}" \
+    --require-live --config "${CONF}"

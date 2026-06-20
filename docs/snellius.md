@@ -175,50 +175,39 @@ export OMNIEMBED_QUERY_CACHE=/scratch/$USER/castle_derived/embeddings/query_cach
 
 ## 5b. Run the dashboard against the live backend
 
-The Dash UI defaults to the **offline demo** engine so it always boots. To bind
-the **real** RAG backend, run it on a node that can reach Qdrant (localhost) and
-the vLLM endpoint, with `--require-live` so it fails loudly (with the exact
-missing dependency) instead of silently serving the demo.
-
-Easiest is one A100 node hosting Qwen3-VL + Qdrant + the UI together (query
-vectors come from the cache, so OmniEmbed isn't needed for the cached questions):
+The Dash UI defaults to the **offline demo** engine so it always boots. The
+one-command way to run it against the **real** backend is the batch job
+`scripts/slurm/ui_live.slurm`, which boots OmniEmbed (:8200), Qwen3-VL (:8201)
+and Qdrant on the existing persisted index, then launches
+`castlerag ui --require-live --config configs/snellius_me.yaml`:
 
 ```bash
-srun --account=$ACCOUNT --partition=gpu_a100 --gres=gpu:1 --cpus-per-task=16 \
-     --mem=120G --time=01:00:00 --pty bash
-module purge && module load 2024 Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0
-source ~/castlerag_venv/bin/activate
-export HF_HOME=/scratch-shared/$USER/hf_cache HF_HUB_OFFLINE=1
-cd ~/CastleRAG
-
-# Qwen3-VL (generation/rerank/suggestions) — register the full id (see invariant)
-vllm serve Qwen/Qwen3-VL-8B-Instruct --port 8201 \
-    --served-model-name Qwen/Qwen3-VL-8B-Instruct qwen3vl \
-    --gpu-memory-utilization 0.85 --max-model-len 16384 --trust-remote-code &
-# Qdrant against the EXISTING persisted index (no re-index)
-QDRANT__STORAGE__STORAGE_PATH=/scratch-shared/$USER/qdrant_storage/storage \
-    ~/qdrant/qdrant &
-
-# wait for both, then point the UI at them and require the live backend
-export VLLM_BASE_URL=http://localhost:8201/v1
-export OMNIEMBED_QUERY_CACHE=/scratch-shared/$USER/castle_derived/embeddings/query_cache.npz
-castlerag ui --require-live --config configs/snellius_me.yaml \
-    --host 127.0.0.1 --port 50225
+sbatch --account=gpuuva082 scripts/slurm/ui_live.slurm
+# watch logs/castle-ui-live_<jobid>.out for the SSH-tunnel command it prints, then
+# from your laptop:  ssh -L 8050:<NODE>:8050 $USER@snellius.surf.nl
+# open http://localhost:8050  -> top-bar chip should read "live RAG"
 ```
 
-Then SSH-forward the port to your laptop and open the browser:
+`--require-live` is the important part: if any dependency is missing the job
+**fails with the exact reason** in the log (VLLM_BASE_URL unset, endpoint
+unreachable, Qdrant/BM25 missing, or a served-model-name mismatch) instead of
+silently serving the demo. Drop `--require-live` only if you *want* the
+demo-on-failure behavior.
+
+The env wiring it sets (mirror this if launching by hand):
 
 ```bash
-ssh -N -L 50225:<compute-node>:50225 $USER@snellius.surf.nl
-# http://localhost:50225  -> top-bar badge should read "live RAG"
+export CASTLERAG_CONFIG=configs/snellius_me.yaml
+export OMNIEMBED_BASE_URL=http://localhost:8200/v1   # OmniEmbed query embeddings
+export VLLM_BASE_URL=http://localhost:8201/v1        # Qwen3-VL rerank + generation
 ```
 
-If `--require-live` aborts, the message names the exact gap (VLLM_BASE_URL unset,
-endpoint unreachable, Qdrant/BM25 missing, or a served-model-name mismatch). For
-a free-text question (not one of the cached ones) also start OmniEmbed on :8200
-and `export OMNIEMBED_BASE_URL=http://localhost:8200/v1`. To validate the backend
-without the UI: `castlerag smoke-test /scratch-shared/$USER/questions.json --n 5
---config configs/snellius_me.yaml`.
+Validate the backend **without** the UI (uses the query cache, so OmniEmbed isn't
+needed for the 5 smoke questions):
+`castlerag smoke-test /scratch-shared/$USER/questions.json --n 5 --config
+configs/snellius_me.yaml`. A fast headless check of the live engine + the review
+suggestions specifically is `scripts/_live_ui_check.sh` (run inside a 1-GPU
+`srun`; needs only Qwen3-VL + Qdrant + the query cache).
 
 ## 6. Run the offline build via SLURM
 
