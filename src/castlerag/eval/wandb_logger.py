@@ -68,7 +68,7 @@ class WandbLogger:
                 entity=entity,
                 name=name,
                 config=_flat_config(cfg, n_questions),
-                reinit=True,
+                reinit="finish_previous",
             )
             self._table = w.Table(
                 columns=[

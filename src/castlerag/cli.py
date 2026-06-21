@@ -661,9 +661,10 @@ def eval_cmd(
 
 @app.command(name="smoke-test")
 def smoke_test(
-    questions_path: Path = typer.Argument(..., help="CASTLE questions JSON"),
+    questions_path: Path = typer.Argument(..., help="CASTLE questions JSON or CSV"),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     n: int = typer.Option(5, "--n", help="Number of questions to run (default 5)"),
+    wandb: bool = typer.Option(False, "--wandb", help="Log run to Weights & Biases"),
 ) -> None:
     """5-question end-to-end smoke test (issue #15)."""
     cfg = _resolve_config(config, False)
@@ -682,6 +683,7 @@ def smoke_test(
             config_path=config,
             out_dir=out_dir,
             max_questions=n,
+            use_wandb=wandb,
         )
     except (PipelineDependencyError, NotImplementedError, ValueError, KeyError) as exc:
         console.print(f"[red]{exc}[/red]")
@@ -689,6 +691,12 @@ def smoke_test(
 
     console.print(f"  predicted : {len(result.predictions)} questions")
     console.print(f"  output    : {result.output_paths.predictions}")
+    if result.accuracy is not None:
+        n_correct = int(round(result.accuracy * n))
+        console.print(
+            f"  accuracy  : [green]{result.accuracy:.4f}[/green]"
+            f"  ({n_correct}/{n})"
+        )
 
 
 @app.command()

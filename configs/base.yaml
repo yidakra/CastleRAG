@@ -109,7 +109,7 @@ ui:
 wandb:
   enabled: false          # set to true or pass --wandb to castlerag answer/eval
   project: "castlerag"
-  entity: ""              # your W&B username or team; leave blank to use default
+  entity: "natlang"      # W&B team
   run_name: ""            # auto-generated if blank
 
 # BLOCKED: do not enable until a CASTLE QA train/val split is explicitly found
