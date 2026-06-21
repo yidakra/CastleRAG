@@ -46,9 +46,15 @@ def build_app(
     mirror = mirror or YouTubeMirror.from_csv()
     engine = engine or build_engine(mirror)
 
+    # Read score_mode from engine config when live; fall back to default otherwise.
+    score_mode: str = "rrf_normalized"
+    cfg = getattr(engine, "cfg", None)
+    if cfg is not None:
+        score_mode = getattr(getattr(cfg, "ui", None), "score_mode", "rrf_normalized")
+
     app = Dash(__name__, title="CastleRAG")
     app.layout = dmc.MantineProvider(
-        build_layout(mirror, mode=engine_mode(engine)),
+        build_layout(mirror, mode=engine_mode(engine), score_mode=score_mode),
         theme=THEME,
         forceColorScheme="light",
     )

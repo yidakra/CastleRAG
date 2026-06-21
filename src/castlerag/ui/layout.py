@@ -26,6 +26,24 @@ from dash import dcc, html
 from castlerag.ui.figures import empty_figure
 from castlerag.ui.youtube import YouTubeMirror
 
+_SCORE_MODE_TOOLTIP: dict[str, str] = {
+    "rrf_normalized": (
+        "Relative ranking score. The top moment for this query always scores 1.0; "
+        "others are scaled proportionally by how consistently they ranked across "
+        "the BM25 lexical and dense vector search passes."
+    ),
+    "cosine": (
+        "Cosine similarity between the query embedding and each clip or transcript "
+        "embedding (range 0–1). Scores above ~0.7 indicate a strong semantic match; "
+        "below ~0.4 is a weak one."
+    ),
+    "reranker": (
+        "VLM-assessed relevance score. The reranker model rates each evidence pack "
+        "0–4 on how well it supports the answer choices; that score is normalised "
+        "to 0–1 here. Falls back to the relative RRF score in offline mode."
+    ),
+}
+
 
 def _top_bar(mode: str) -> dmc.Group:
     """Return the static top bar with the CastleRAG mark and status badges.
@@ -121,8 +139,11 @@ def _thread_hint() -> dmc.Text:
     )
 
 
-def _viewer_column() -> html.Div:
+def _viewer_column(score_mode: str = "rrf_normalized") -> html.Div:
     """Return the right column: the pinned evidence viewer for the focus moment."""
+    tooltip_text = _SCORE_MODE_TOOLTIP.get(
+        score_mode, _SCORE_MODE_TOOLTIP["rrf_normalized"]
+    )
     return html.Div(
         className="viewer-col",
         children=[
@@ -151,7 +172,27 @@ def _viewer_column() -> html.Div:
                 withBorder=True,
                 p="sm",
                 children=[
-                    dmc.Text("Camera match scores", size="sm", fw=600, mb=4),
+                    dmc.Group(
+                        gap=4,
+                        align="center",
+                        mb=4,
+                        children=[
+                            dmc.Text("Camera match scores", size="sm", fw=600),
+                            dmc.Tooltip(
+                                label=tooltip_text,
+                                multiline=True,
+                                w=300,
+                                withArrow=True,
+                                position="top-start",
+                                children=dmc.Text(
+                                    "ⓘ",
+                                    size="sm",
+                                    c="dimmed",
+                                    style={"cursor": "default", "lineHeight": 1},
+                                ),
+                            ),
+                        ],
+                    ),
                     dcc.Graph(
                         id="evidence-figure",
                         className="evidence-figure",
@@ -200,7 +241,11 @@ def _viewer_column() -> html.Div:
     )
 
 
-def build_layout(mirror: YouTubeMirror, mode: str = "offline") -> html.Div:
+def build_layout(
+    mirror: YouTubeMirror,
+    mode: str = "offline",
+    score_mode: str = "rrf_normalized",
+) -> html.Div:
     """Build the full dashboard layout (state lives in the stores below)."""
     return html.Div(
         className="app-root",
@@ -208,7 +253,7 @@ def build_layout(mirror: YouTubeMirror, mode: str = "offline") -> html.Div:
             _top_bar(mode),
             html.Div(
                 className="app-body",
-                children=[_thread_column(), _viewer_column()],
+                children=[_thread_column(), _viewer_column(score_mode)],
             ),
             dcc.Store(id="thread-store", data=[]),
             dcc.Store(id="focus-store", data={}),
