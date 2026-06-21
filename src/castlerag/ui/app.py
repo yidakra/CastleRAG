@@ -46,11 +46,14 @@ def build_app(
     mirror = mirror or YouTubeMirror.from_csv()
     engine = engine or build_engine(mirror)
 
-    # Read score_mode from engine config when live; fall back to default otherwise.
-    score_mode: str = "rrf_normalized"
+    # Read score_mode from engine config when live, else load it from base.yaml so
+    # offline mode still honours whatever is set in the config file.
+    import os
+    from castlerag.config import load_config
     cfg = getattr(engine, "cfg", None)
-    if cfg is not None:
-        score_mode = getattr(getattr(cfg, "ui", None), "score_mode", "rrf_normalized")
+    if cfg is None:
+        cfg = load_config(override_path=os.getenv("CASTLERAG_CONFIG"))
+    score_mode: str = getattr(getattr(cfg, "ui", None), "score_mode", "rrf_normalized")
 
     app = Dash(__name__, title="CastleRAG")
     app.layout = dmc.MantineProvider(

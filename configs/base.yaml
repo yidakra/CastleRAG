@@ -104,7 +104,7 @@ ui:
   # cosine:         Raw cosine similarity from Qdrant (always [0,1], most intuitive).
   # reranker:       VLM-assessed relevance normalised to [0,1]; falls back to
   #                 rrf_normalized when the reranker did not run (offline mode).
-  score_mode: "rrf_normalized"  # rrf_normalized | cosine | reranker
+  score_mode: "reranker"  # rrf_normalized | cosine | reranker
 
 # BLOCKED: do not enable until a CASTLE QA train/val split is explicitly found
 lora:
