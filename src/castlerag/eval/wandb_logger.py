@@ -103,6 +103,11 @@ class WandbLogger:
 
     # ------------------------------------------------------------------
 
+    @property
+    def active(self) -> bool:
+        """True only when a wandb run was successfully initialised."""
+        return self._active
+
     def log_question(
         self,
         question: "EvalQuestion",

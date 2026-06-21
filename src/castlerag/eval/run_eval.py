@@ -124,7 +124,15 @@ def run_question(
     and support priors so callers (the eval loop and the UI ``RagEngine``) can
     both reuse the exact same per-question path.
     """
-    hints = pipeline.route(question.query, question.answers)
+    try:
+        hints = pipeline.route(question.query, question.answers)
+    except PipelineDependencyError as exc:
+        raise _stage_dependency_error("routing", question.question_id, exc) from exc
+    except NotImplementedError as exc:
+        raise _stage_error("routing", question.question_id, exc) from exc
+    except Exception as exc:
+        raise _stage_failure_error("routing", question.question_id, exc) from exc
+
     try:
         retrieved = pipeline.retrieve(question, hints)
     except PipelineDependencyError as exc:

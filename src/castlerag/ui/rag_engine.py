@@ -91,6 +91,10 @@ class RagEngine:
         """Answer a question with the real pipeline and adapt to the UI model."""
         from castlerag.eval.run_eval import run_question
 
+        # Real MCQ calls pass ``choices``; free-form UI questions don't, so the
+        # dummy "Option A".."Option D" we feed the pipeline (and the per-choice
+        # priors it yields) are meaningless and must not drive the claim/support.
+        is_mcq = choices is not None
         resolved = choices or {key: f"Option {key.upper()}" for key in _CHOICES}
         eval_q = EvalQuestion(
             question_id=_question_id(question),
@@ -99,9 +103,16 @@ class RagEngine:
         )
         result = run_question(self.pipeline, self.cfg, eval_q)
         claim = self._synthesize_claim(
-            result.prediction, result.support_priors, resolved
+            result.prediction,
+            result.support_priors,
+            resolved,
+            is_mcq=is_mcq,
+            question=question,
+            evidence_rows=result.evidence_rows,
         )
-        moments = self._hits_to_moments(result.evidence_rows, claim.support)
+        moments = self._hits_to_moments(result.evidence_rows, claim.support) or [
+            self._no_evidence_moment(claim.support)
+        ]
         answer_text = result.prediction.raw_answer_text or (
             f"Predicted **{result.prediction.predicted_answer.upper()}** — "
             f"{resolved.get(result.prediction.predicted_answer, '')}."
@@ -190,18 +201,58 @@ class RagEngine:
         prediction: Prediction,
         support_priors: Dict[str, float],
         choices: Dict[str, str],
+        *,
+        is_mcq: bool = True,
+        question: str = "",
+        evidence_rows: Optional[List[RetrievalHit]] = None,
     ) -> Claim:
-        """Derive the claim under review from the predicted choice + priors."""
-        choice = prediction.predicted_answer
-        choice_text = (choices or {}).get(choice) or f"Option {choice.upper()}"
-        max_prior = max(support_priors.values(), default=0.0)
-        if max_prior >= _SUPPORTED_AT:
+        """Derive the claim under review and its support level.
+
+        For a real MCQ (``is_mcq``) the claim is the predicted choice and support
+        is thresholded on *that choice's* prior — not the max across choices, so
+        support can't be borrowed from a different answer. For a free-form UI
+        question the per-choice priors are meaningless (the choices are dummies),
+        so the claim comes from the model's answer text / the question and support
+        is gauged from retrieval evidence strength instead.
+        """
+        if is_mcq:
+            choice = prediction.predicted_answer
+            choice_text = (choices or {}).get(choice) or f"Option {choice.upper()}"
+            text = f"The footage supports: {choice_text}"
+            score = float(support_priors.get(choice, 0.0))
+        else:
+            text = (prediction.raw_answer_text or question or "").strip() or (
+                "The retrieved footage"
+            )
+            rows = evidence_rows or []
+            score = max((h.rerank_score or 0.0 for h in rows), default=0.0)
+        if score >= _SUPPORTED_AT:
             support = SupportLevel.SUPPORTED
-        elif max_prior >= _PARTIAL_AT:
+        elif score >= _PARTIAL_AT:
             support = SupportLevel.PARTIAL
         else:
             support = SupportLevel.UNSUPPORTED
-        return Claim(text=f"The footage supports: {choice_text}", support=support)
+        return Claim(text=text, support=support)
+
+    def _no_evidence_moment(self, support: SupportLevel) -> EvidenceMoment:
+        """Explicit placeholder moment when retrieval returns no timestamped hits.
+
+        Keeps the investigation contract intact (callbacks always focus
+        ``moments[0]``) while honestly signalling that nothing was retrieved:
+        the synthetic camera tiles resolve no mirror embed and carry score 0.
+        """
+        cameras = self._pad_cameras([], "day1", 0, 0.0)
+        cameras[0].is_best = True
+        return EvidenceMoment(
+            moment_id="m0",
+            clock_label="--:--",
+            place_label="No supporting footage found",
+            camera_count=_FIXED_CAMERA_COUNT,
+            aggregate_score=0.0,
+            score_caption="no evidence",
+            dot_color=_DOT_COLORS[support],
+            cameras=cameras,
+        )
 
     def _hits_to_moments(
         self, hits: List[RetrievalHit], support: SupportLevel

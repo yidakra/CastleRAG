@@ -53,7 +53,8 @@ The offline `PlaceholderEngine` returns deterministic, structurally valid turns.
 The live `RagEngine` wraps `castlerag.eval.run_eval` and implements the same
 protocol; `engine_factory.build_engine` selects it when the backend is reachable,
 else falls back to the placeholder. `EvidenceRef` mirrors `schemas.RetrievalHit`
-(plus `hour` / `start_seconds`) to keep that swap mechanical.
+(carrying `room`, `hour`, `start_seconds`, and `end_seconds`) to keep that swap
+mechanical.
 
 Only the right-column camera grid renders live iframes (at most three at once,
 for the focused moment); the left-thread moment thumbnails are static.

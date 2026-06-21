@@ -113,6 +113,8 @@ def score_windows(
             participant_id=window.participant_id,
             room=window.room,
             hour=window.hour,
+            start_seconds=float((window.absolute_start // 1000) % 3600),
+            end_seconds=float((window.absolute_end // 1000) % 3600),
             absolute_start=window.absolute_start,
             absolute_end=window.absolute_end,
             transcript_text=window.transcript_text,

@@ -82,8 +82,12 @@ wait_ready "http://localhost:8200/v1/models"      embed  "${EMB_LOG}" $EMB_PID
 wait_ready "http://localhost:8201/v1/models"      gen    "${GEN_LOG}" $GEN_PID
 
 # --- SAFETY: confirm the existing index is intact before serving ---
-PTS=$(curl -s "http://localhost:6333/collections/${COLL}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["points_count"])')
-echo "[ui] collection ${COLL} points_count=${PTS}"
+PTS=$(curl -s "http://localhost:6333/collections/${COLL}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["points_count"])' 2>/dev/null)
+echo "[ui] collection ${COLL} points_count=${PTS:-<none>}"
+if ! [[ "${PTS}" =~ ^[0-9]+$ ]]; then
+  echo "[ui] ABORT: could not read points_count for ${COLL} (got '${PTS}'); is Qdrant up and the collection present? Not serving."
+  exit 2
+fi
 if [ "${PTS}" -lt 25000 ]; then
   echo "[ui] ABORT: collection has ${PTS} points (<25000); index looks altered. Not serving."
   exit 2

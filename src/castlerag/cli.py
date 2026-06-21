@@ -664,8 +664,15 @@ def eval_cmd(
         wb = WandbLogger(cfg, n_questions=len(questions))
         wb.log_summary(accuracy, diversity=None, n_questions=len(questions))
         wb.log_artifacts([sub_path, predictions_path])
+        logged = wb.active
         wb.finish()
-        console.print("  wandb     : [cyan]run logged[/cyan]")
+        if logged:
+            console.print("  wandb     : [cyan]run logged[/cyan]")
+        else:
+            console.print(
+                "  wandb     : [yellow]not logged (wandb unavailable or "
+                "init failed)[/yellow]"
+            )
 
 
 @app.command(name="smoke-test")

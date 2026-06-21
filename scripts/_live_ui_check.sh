@@ -38,7 +38,7 @@ export OMNIEMBED_QUERY_CACHE="${SC}/castle_derived/embeddings/query_cache.npz"
 export CASTLERAG_CONFIG=configs/snellius_me.yaml
 
 PYTHONPATH=src python - <<'PY'
-import json, traceback
+import json, sys, traceback
 out = {}
 try:
     from castlerag.config import load_config
@@ -84,5 +84,10 @@ try:
 except Exception:
     out["error"] = traceback.format_exc()[-1500:]
 print("RESULT_JSON " + json.dumps(out, ensure_ascii=False))
+# Exit non-zero if any stage captured an error, so the run can't go false-green.
+if any(out.get(k) for k in ("error", "answer_error", "suggestion_error")):
+    sys.exit(1)
 PY
-echo "[live] DONE"
+RC=$?
+echo "[live] DONE (rc=${RC})"
+exit "${RC}"

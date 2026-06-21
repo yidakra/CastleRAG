@@ -103,6 +103,10 @@ def test_score_windows_prefers_exact_overlap_and_hints():
     )
     assert hits[0].record_id == "tw_1"
     assert hits[0].score > hits[1].score
+    # Lexical hits explicitly carry within-hour second offsets so downstream
+    # consumers don't fall back to recomputing them from absolute_start.
+    assert hits[0].start_seconds == 0.0
+    assert hits[0].end_seconds == 15.0
 
 
 def test_reciprocal_rank_fusion_merges_on_record_id():

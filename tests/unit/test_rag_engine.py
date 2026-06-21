@@ -103,6 +103,53 @@ def test_synthesize_claim_support_thresholds(max_prior, expected):
     assert "Luca" in claim.text
 
 
+def test_synthesize_claim_thresholds_on_predicted_choice_not_max():
+    """Support must come from the predicted choice, never borrowed from another."""
+    from castlerag.schemas import Prediction
+
+    pred = Prediction(question_id="q", predicted_answer="b")
+    # 'a' is strongly supported but 'b' (the prediction) is not — support must
+    # follow 'b', so the claim is UNSUPPORTED rather than borrowing 'a''s prior.
+    priors = {"a": 0.9, "b": 0.1, "c": 0.0, "d": 0.0}
+    claim = _engine()._synthesize_claim(pred, priors, {"b": "Luca"})
+    assert claim.support is SupportLevel.UNSUPPORTED
+
+
+def test_synthesize_claim_free_form_uses_evidence_not_dummy_priors():
+    """Free-form questions ignore MCQ priors and gauge support from evidence."""
+    from castlerag.schemas import Prediction
+
+    pred = Prediction(
+        question_id="q", predicted_answer="a", raw_answer_text="Bjorn cooks porridge."
+    )
+    # Dummy priors are high, but is_mcq=False must disregard them; the strong
+    # evidence rerank_score is what drives SUPPORTED, and the claim text is the
+    # model's free-form answer (never "Option A").
+    priors = {"a": 9.0, "b": 0.0, "c": 0.0, "d": 0.0}
+    rows = [_clip_hit("Bjorn", 0.5)]
+    rows[0] = rows[0].model_copy(update={"rerank_score": 0.85})
+    claim = _engine()._synthesize_claim(
+        pred,
+        priors,
+        {key: f"Option {key.upper()}" for key in "abcd"},
+        is_mcq=False,
+        question="What does Bjorn cook?",
+        evidence_rows=rows,
+    )
+    assert claim.support is SupportLevel.SUPPORTED
+    assert "Option" not in claim.text
+    assert claim.text == "Bjorn cooks porridge."
+
+
+def test_no_evidence_moment_keeps_focus_contract():
+    """A no-hit query still yields a focusable, clearly-labelled moment."""
+    moment = _engine()._no_evidence_moment(SupportLevel.UNSUPPORTED)
+    assert moment.moment_id == "m0"
+    assert "No supporting footage" in moment.place_label
+    assert moment.cameras  # padded to the fixed camera count, all score 0
+    assert all(cam.match_score == 0.0 for cam in moment.cameras)
+
+
 # ---------------------------------------------------------------------------
 # RetrievalHit timing fields plumb through _dense_search
 # ---------------------------------------------------------------------------

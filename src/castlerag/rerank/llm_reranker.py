@@ -246,7 +246,11 @@ def rerank_candidates(
         route=hints.route,
         kept_packs=kept,
         support_priors=_aggregate_support_priors(kept),
-        evidence_rows=_flatten_evidence_rows(kept, max_rows=max_evidence_rows),
+        evidence_rows=_flatten_evidence_rows(
+            kept,
+            max_rows=max_evidence_rows,
+            max_score=(relevance_weight + support_weight) * 4.0,
+        ),
     )
 
 
@@ -332,16 +336,21 @@ def _flatten_evidence_rows(
     kept_packs: Sequence[RerankedEvidencePack],
     *,
     max_rows: int,
+    max_score: float = 4.0,
 ) -> list[RetrievalHit]:
     """Deduplicate and collect evidence rows from kept packs up to max_rows.
 
     Each hit gets ``rerank_score`` stamped from its pack's ``final_rerank_score``
-    normalised to [0, 1] (max possible = relevance_weight×4 + support_weight×4 = 4.0).
+    normalised to [0, 1]. The max possible final score is
+    ``(relevance_weight + support_weight) × 4`` (relevance and per-choice support
+    are each rubric-capped at 4), so callers pass that sum as ``max_score``; it
+    only equals 4.0 when the weights sum to 1.0.
     """
     rows: list[RetrievalHit] = []
     seen: set[str] = set()
+    divisor = max_score if max_score > 0 else 4.0
     for item in kept_packs:
-        normed = round(item.final_rerank_score / 4.0, 4)
+        normed = round(item.final_rerank_score / divisor, 4)
         for row in item.pack.evidence_rows:
             if row.record_id in seen:
                 continue
