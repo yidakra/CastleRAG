@@ -15,8 +15,9 @@ offline ``PlaceholderEngine`` and is selected by
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from castlerag.schemas import EvalQuestion, Prediction, RetrievalHit
@@ -28,7 +29,11 @@ from castlerag.ui.chat import (
     EvidenceMoment,
     EvidenceRef,
     SupportLevel,
+    compose_justification,
+    compose_refined_query,
 )
+
+log = logging.getLogger(__name__)
 
 _CHOICES = ("a", "b", "c", "d")
 
@@ -53,6 +58,8 @@ class RagEngine:
     pipeline: Any
     ego_cameras: Tuple[str, ...] = ()
     is_live: bool = True
+    # Lazily-built OpenAI-compatible vLLM client, reused for review suggestions.
+    _client: Any = field(default=None, init=False, repr=False, compare=False)
 
     @classmethod
     def from_config(cls, cfg: Any = None, mirror: object = None) -> "RagEngine":
@@ -124,6 +131,58 @@ class RagEngine:
         result.moments = result.moments[:1]
         return result
 
+    # -- review suggestions -------------------------------------------------
+
+    def _chat_client(self) -> Any:
+        """Build (once) and return the vLLM chat client used for suggestions."""
+        if self._client is None:
+            from castlerag.eval.run_eval import _build_vllm_chat_client
+
+            self._client = _build_vllm_chat_client()
+        return self._client
+
+    def _gen_model(self) -> str:
+        gen = getattr(self.cfg, "generation", None)
+        return getattr(gen, "model", "Qwen/Qwen3-VL-8B-Instruct")
+
+    def suggest_justification(
+        self,
+        claim: str,
+        camera_id: str,
+        verdict: str,
+        evidence_text: Optional[str] = None,
+        meta: Optional[Dict[str, object]] = None,
+    ) -> str:
+        """LLM-drafted per-camera justification; template fallback on failure."""
+        from castlerag.generation.suggestions import suggest_justification_text
+
+        try:
+            text = suggest_justification_text(
+                claim, camera_id, verdict, evidence_text, meta,
+                self._chat_client(), model=self._gen_model(),
+            )
+            return text or compose_justification(
+                claim, camera_id, verdict, evidence_text
+            )
+        except Exception as exc:  # never let the UI break on a model hiccup
+            log.warning("suggest_justification fell back to template (%s)", exc)
+            return compose_justification(claim, camera_id, verdict, evidence_text)
+
+    def suggest_refined_query(
+        self, claim: str, reviews: Dict[str, Dict[str, str]]
+    ) -> str:
+        """LLM-drafted refined query; template fallback on failure."""
+        from castlerag.generation.suggestions import suggest_refined_query_text
+
+        try:
+            text = suggest_refined_query_text(
+                claim, reviews, self._chat_client(), model=self._gen_model()
+            )
+            return text or compose_refined_query(claim, reviews)
+        except Exception as exc:
+            log.warning("suggest_refined_query fell back to template (%s)", exc)
+            return compose_refined_query(claim, reviews)
+
     # -- adapters -----------------------------------------------------------
 
     def _synthesize_claim(
@@ -180,7 +239,8 @@ class RagEngine:
             hour = _hour_of(anchor)
             start = _seconds_within_hour(anchor)
 
-            # Best display score per distinct camera, highest first.
+            # Best-scoring hit per distinct camera, highest first (kept whole so
+            # we can surface its evidence text for grounded suggestions).
             by_camera: "OrderedDict[str, RetrievalHit]" = OrderedDict()
             for hit in sorted(rows, key=lambda h: h.score, reverse=True):
                 cam = hit.camera_id
@@ -195,6 +255,7 @@ class RagEngine:
                     start_seconds=start,
                     match_score=round(_display_score(hit, score_mode, max_rrf), 4),
                     is_best=False,
+                    evidence_text=_hit_evidence_text(hit),
                 )
                 for cam, hit in list(by_camera.items())[:_FIXED_CAMERA_COUNT]
             ]
@@ -354,3 +415,12 @@ def _display_score(
         return _clamp(hit.rerank_score)
     # rrf_normalized (default) or fallback
     return _clamp(hit.score / max_rrf if max_rrf > 0 else 0.0)
+
+
+def _hit_evidence_text(hit: RetrievalHit, limit: int = 300) -> Optional[str]:
+    """Best available evidence snippet for a hit (transcript/event/OCR)."""
+    for text in (hit.transcript_text, hit.event_summary, hit.ocr_text):
+        snippet = (text or "").strip()
+        if snippet:
+            return snippet[:limit]
+    return None

@@ -97,20 +97,14 @@ def _thread_column() -> html.Div:
     return html.Div(
         className="thread-col",
         children=[
-            # #thread owns its scroll via max-height + overflow-y (in styles.css),
-            # which does NOT depend on flex-height propagation — so it scrolls no
-            # matter what wraps it. That lets us put it back INSIDE dcc.Loading,
-            # which is what actually shows the "retrieving" spinner over the thread
-            # while a slow callback updates thread.children. delay_show avoids a
-            # flicker on fast re-renders (e.g. moment clicks).
-            dcc.Loading(
-                type="circle",
-                color="#4f46e5",
-                delay_show=250,
-                children=html.Div(
-                    id="thread", className="thread", children=[_thread_hint()]
-                ),
+            # thread owns the scroll directly. Keep it as a plain html.Div so the
+            # left column can stay fixed-height while only the thread content scrolls.
+            html.Div(
+                id="thread",
+                className="thread",
+                children=[_thread_hint()],
             ),
+
             dmc.Group(
                 className="ask-new",
                 gap="sm",
@@ -210,39 +204,66 @@ def _viewer_column(score_mode: str = "rrf_normalized") -> html.Div:
                     ),
                 ],
             ),
-            html.Div(id="review-row", className="review-row"),
-            # html.Div (not DMC) so the callback can toggle the `hidden` attribute.
-            html.Div(
-                id="compose-wrap",
-                hidden=True,
+            # Spinner covers the review controls + compose box while the engine
+            # drafts justification/refined-query suggestions (and during retrieval).
+            dcc.Loading(
+                type="dot",
+                className="review-loading",
                 children=[
-                    dmc.Paper(
-                        className="compose-box",
-                        withBorder=True,
-                        p="sm",
+                    html.Div(id="review-row", className="review-row"),
+                    # Appears once all three cameras have a verdict; clicking it
+                    # commits the reviews and drafts the refined query.
+                    html.Div(
+                        id="submit-wrap",
+                        hidden=True,
+                        className="submit-wrap",
                         children=[
-                            dmc.Text(
-                                "Refine the query · re-run retrieval for this claim",
-                                size="sm",
-                                fw=600,
-                                mb=6,
-                            ),
-                            dcc.Textarea(
-                                id="refined-query-input",
-                                placeholder=(
-                                    "Describe a sharper angle for the same claim…"
-                                ),
-                                className="compose-input",
-                            ),
                             dmc.Button(
-                                "↑ Send refined query",
-                                id="send-refined-button",
+                                "Submit reviews →",
+                                id="submit-reviews-button",
                                 n_clicks=0,
                                 variant="filled",
-                                mt="sm",
+                                color="indigo",
+                                fullWidth=True,
                             ),
                         ],
-                    )
+                    ),
+                    # html.Div (not DMC) so the callback can toggle `hidden`.
+                    html.Div(
+                        id="compose-wrap",
+                        hidden=True,
+                        children=[
+                            dmc.Paper(
+                                className="compose-box",
+                                withBorder=True,
+                                p="sm",
+                                children=[
+                                    dmc.Text(
+                                        "Refine the query · re-run retrieval "
+                                        "for this claim",
+                                        size="sm",
+                                        fw=600,
+                                        mb=6,
+                                    ),
+                                    dcc.Textarea(
+                                        id="refined-query-input",
+                                        placeholder=(
+                                            "Describe a sharper angle for the "
+                                            "same claim…"
+                                        ),
+                                        className="compose-input",
+                                    ),
+                                    dmc.Button(
+                                        "✓ Confirm & run refined search",
+                                        id="send-refined-button",
+                                        n_clicks=0,
+                                        variant="filled",
+                                        mt="sm",
+                                    ),
+                                ],
+                            )
+                        ],
+                    ),
                 ],
             ),
             html.Div(id="converged-banner", hidden=True),
@@ -267,6 +288,9 @@ def build_layout(
             dcc.Store(id="thread-store", data=[]),
             dcc.Store(id="focus-store", data={}),
             dcc.Store(id="review-store", data={}),
-            dcc.Store(id="iteration-store", data={"claim": None, "iteration": 0}),
+            dcc.Store(
+                id="iteration-store",
+                data={"claim": None, "iteration": 0, "next_seq": 1},
+            ),
         ],
     )

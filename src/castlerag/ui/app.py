@@ -36,15 +36,22 @@ THEME = {
 def build_app(
     engine: Optional[ChatEngine] = None,
     mirror: Optional[YouTubeMirror] = None,
+    cfg: Optional[object] = None,
+    require_live: bool = False,
 ) -> "Dash":
-    """Build and return the configured Dash app (callbacks registered)."""
+    """Build and return the configured Dash app (callbacks registered).
+
+    With ``require_live=True`` the real RagEngine is required: if the backend
+    cannot be built, ``build_engine`` raises ``EngineUnavailable`` instead of
+    silently falling back to the offline demo engine.
+    """
     import dash_mantine_components as dmc
     from dash import Dash
 
     from castlerag.ui.engine_factory import build_engine, engine_mode
 
     mirror = mirror or YouTubeMirror.from_csv()
-    engine = engine or build_engine(mirror)
+    engine = engine or build_engine(mirror, cfg=cfg, require_live=require_live)
 
     # Read score_mode from engine config when live, else load it from base.yaml so
     # offline mode still honours whatever is set in the config file.
@@ -70,9 +77,13 @@ def run(
     host: str = "127.0.0.1",
     port: int = 8050,
     debug: bool = False,
+    cfg: Optional[object] = None,
+    require_live: bool = False,
 ) -> None:
     """Launch the Dash development server."""
-    build_app().run(host=host, port=port, debug=debug)
+    build_app(cfg=cfg, require_live=require_live).run(
+        host=host, port=port, debug=debug
+    )
 
 
 if __name__ == "__main__":

@@ -122,7 +122,7 @@ source ~/castlerag_venv/bin/activate
 vllm serve Tevatron/OmniEmbed-v0.1-multivent \
     --task embedding \
     --port 8200 \
-    --served-model-name omniembed \
+    --served-model-name Tevatron/OmniEmbed-v0.1-multivent omniembed \
     --gpu-memory-utilization 0.90 \
     --tensor-parallel-size 1
 # (leave running; note the hostname — e.g. gcn123)
@@ -134,12 +134,19 @@ module purge && module load 2024 CUDA/12.6.0 Python/3.11.3-GCCcore-12.3.0
 source ~/castlerag_venv/bin/activate
 vllm serve Qwen/Qwen3-VL-8B-Instruct \
     --port 8201 \
-    --served-model-name qwen3vl \
+    --served-model-name Qwen/Qwen3-VL-8B-Instruct qwen3vl \
     --gpu-memory-utilization 0.88 \
     --max-model-len 16384 \
     --trust-remote-code
 # (leave running; note the hostname — e.g. gcn456)
 ```
+
+> **Invariant:** the vLLM **served model name must include `cfg.*.model`**
+> (`Qwen/Qwen3-VL-8B-Instruct` for generation/rerank,
+> `Tevatron/OmniEmbed-v0.1-multivent` for embedding). The pipeline calls the
+> endpoint with those exact ids; serving *only* a short alias like `qwen3vl`
+> makes every generation/rerank/suggestion call 404. Registering both names
+> (as above) keeps the alias working too.
 
 The batch jobs in §6 must be able to reach both endpoints from the compute
 node they land on.  Snellius compute nodes share an internal network, so
@@ -165,6 +172,42 @@ OMNIEMBED_URL=$VLLM_EMBED_URL \
 export OMNIEMBED_QUERY_CACHE=/scratch/$USER/castle_derived/embeddings/query_cache.npz
 # OmniEmbedClient serves dense queries from the NPZ, no embed server needed
 ```
+
+## 5b. Run the dashboard against the live backend
+
+The Dash UI defaults to the **offline demo** engine so it always boots. The
+one-command way to run it against the **real** backend is the batch job
+`scripts/slurm/ui_live.slurm`, which boots OmniEmbed (:8200), Qwen3-VL (:8201)
+and Qdrant on the existing persisted index, then launches
+`castlerag ui --require-live --config configs/snellius_me.yaml`:
+
+```bash
+sbatch --account=gpuuva082 scripts/slurm/ui_live.slurm
+# watch logs/castle-ui-live_<jobid>.out for the SSH-tunnel command it prints, then
+# from your laptop:  ssh -L 8050:<NODE>:8050 $USER@snellius.surf.nl
+# open http://localhost:8050  -> top-bar chip should read "live RAG"
+```
+
+`--require-live` is the important part: if any dependency is missing the job
+**fails with the exact reason** in the log (VLLM_BASE_URL unset, endpoint
+unreachable, Qdrant/BM25 missing, or a served-model-name mismatch) instead of
+silently serving the demo. Drop `--require-live` only if you *want* the
+demo-on-failure behavior.
+
+The env wiring it sets (mirror this if launching by hand):
+
+```bash
+export CASTLERAG_CONFIG=configs/snellius_me.yaml
+export OMNIEMBED_BASE_URL=http://localhost:8200/v1   # OmniEmbed query embeddings
+export VLLM_BASE_URL=http://localhost:8201/v1        # Qwen3-VL rerank + generation
+```
+
+Validate the backend **without** the UI (uses the query cache, so OmniEmbed isn't
+needed for the 5 smoke questions):
+`castlerag smoke-test /scratch-shared/$USER/questions.json --n 5 --config
+configs/snellius_me.yaml`. A fast headless check of the live engine + the review
+suggestions specifically is `scripts/_live_ui_check.sh` (run inside a 1-GPU
+`srun`; needs only Qwen3-VL + Qdrant + the query cache).
 
 ## 6. Run the offline build via SLURM
 

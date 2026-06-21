@@ -282,4 +282,6 @@ def test_viewer_outputs_match_their_output_specs():
     }
     out = _viewer_outputs(group, moment, {"Luca": {"state": "pending"}}, 1)
     assert len(out) == len(_viewer_output_specs())
-    assert isinstance(out[-1], go.Figure)  # last output is the evidence figure
+    assert any(isinstance(o, go.Figure) for o in out)  # evidence figure present
+    # All cameras pending -> the Submit button stays hidden (last output).
+    assert out[-1] is True
