@@ -354,3 +354,8 @@ class Prediction(BaseModel):
     top_evidence_ids: List[str] = Field(default_factory=list)
     raw_answer_text: Optional[str] = None
     confidence: Optional[float] = None
+    # False when the answer is an unsupported fallback guess — i.e. no evidence
+    # was retrieved or the reranker credited no choice with any support. Lets
+    # error analysis split retrieval failures from reasoning failures and the
+    # UI flag low-confidence answers.
+    is_supported: bool = True

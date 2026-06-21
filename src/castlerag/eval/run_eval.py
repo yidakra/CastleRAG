@@ -241,6 +241,7 @@ def run_eval(
                     result.prediction.support_priors or result.support_priors
                 ),
                 "predicted_answer": result.prediction.predicted_answer,
+                "is_supported": result.prediction.is_supported,
             }
         )
         if wb is not None:
