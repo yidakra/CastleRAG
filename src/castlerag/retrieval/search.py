@@ -20,6 +20,7 @@ def reciprocal_rank_fusion(
     """Fuse multiple ranked lists into one using RRF(k)."""
     by_record: Dict[str, RetrievalHit] = {}
     scores = defaultdict(float)
+    max_raw: Dict[str, float] = {}
 
     for ranked in ranked_lists:
         for rank, hit in enumerate(ranked, start=1):
@@ -27,10 +28,19 @@ def reciprocal_rank_fusion(
             existing = by_record.get(hit.record_id)
             if existing is None or hit.score > existing.score:
                 by_record[hit.record_id] = hit
+            # Preserve the best raw cosine similarity seen for this record across
+            # all query variants and modality lanes.
+            if hit.raw_score is not None:
+                max_raw[hit.record_id] = max(
+                    max_raw.get(hit.record_id, 0.0), hit.raw_score
+                )
 
     fused = []
     for record_id, hit in by_record.items():
-        fused.append(hit.model_copy(update={"score": scores[record_id]}))
+        update: Dict[str, object] = {"score": scores[record_id]}
+        if record_id in max_raw:
+            update["raw_score"] = max_raw[record_id]
+        fused.append(hit.model_copy(update=update))
 
     fused.sort(
         key=lambda hit: (
@@ -197,10 +207,12 @@ def _dense_search(
     hits: List[RetrievalHit] = []
     for rank, point in enumerate(points, start=1):
         payload = dict(getattr(point, "payload", {}) or {})
+        raw = float(getattr(point, "score"))
         hits.append(
             RetrievalHit(
                 rank=rank,
-                score=float(getattr(point, "score")),
+                score=raw,
+                raw_score=raw,
                 point_id=str(getattr(point, "id", payload.get("point_id", ""))),
                 record_id=str(payload["record_id"]),
                 source_type=str(payload["source_type"]),

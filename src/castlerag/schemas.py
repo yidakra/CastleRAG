@@ -257,6 +257,11 @@ class RetrievalHit(BaseModel):
     event_summary: Optional[str] = None
     ocr_text: Optional[str] = None
     asset_path: Optional[str] = None
+    # Display-score fields — populated at different pipeline stages.
+    # raw_score: cosine similarity from Qdrant before RRF overwrites `score`.
+    # rerank_score: VLM-assessed relevance from the reranker, normalised to [0,1].
+    raw_score: Optional[float] = None
+    rerank_score: Optional[float] = None
 
 
 class EvidencePack(BaseModel):

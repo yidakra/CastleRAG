@@ -333,14 +333,19 @@ def _flatten_evidence_rows(
     *,
     max_rows: int,
 ) -> list[RetrievalHit]:
-    """Deduplicate and collect evidence rows from kept packs up to max_rows."""
+    """Deduplicate and collect evidence rows from kept packs up to max_rows.
+
+    Each hit gets ``rerank_score`` stamped from its pack's ``final_rerank_score``
+    normalised to [0, 1] (max possible = relevance_weight×4 + support_weight×4 = 4.0).
+    """
     rows: list[RetrievalHit] = []
     seen: set[str] = set()
     for item in kept_packs:
+        normed = round(item.final_rerank_score / 4.0, 4)
         for row in item.pack.evidence_rows:
             if row.record_id in seen:
                 continue
-            rows.append(row)
+            rows.append(row.model_copy(update={"rerank_score": normed}))
             seen.add(row.record_id)
             if len(rows) >= max_rows:
                 return rows

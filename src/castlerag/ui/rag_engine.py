@@ -164,6 +164,13 @@ class RagEngine:
             reverse=True,
         )[:_MAX_MOMENTS]
 
+        score_mode: str = getattr(getattr(self.cfg, "ui", None), "score_mode", "rrf_normalized")
+        # Normalisation denominator for rrf_normalized mode: best RRF score across
+        # all moments so the top moment always displays 1.0.
+        max_rrf = max(
+            (max(h.score for h in rows) for rows in ranked_buckets), default=1.0
+        ) or 1.0
+
         moments: List[EvidenceMoment] = []
         for index, rows in enumerate(ranked_buckets):
             anchor = max(rows, key=lambda h: h.score)
@@ -171,12 +178,12 @@ class RagEngine:
             hour = _hour_of(anchor)
             start = _seconds_within_hour(anchor)
 
-            # Best score per distinct camera, highest first.
-            by_camera: "OrderedDict[str, float]" = OrderedDict()
+            # Best display score per distinct camera, highest first.
+            by_camera: "OrderedDict[str, RetrievalHit]" = OrderedDict()
             for hit in sorted(rows, key=lambda h: h.score, reverse=True):
                 cam = hit.camera_id
                 if cam and cam not in by_camera:
-                    by_camera[cam] = float(hit.score)
+                    by_camera[cam] = hit
 
             real = [
                 CameraAngle(
@@ -184,16 +191,17 @@ class RagEngine:
                     day=day,
                     hour=hour,
                     start_seconds=start,
-                    match_score=round(_clamp(score), 4),
+                    match_score=round(_display_score(hit, score_mode, max_rrf), 4),
                     is_best=False,
                 )
-                for cam, score in list(by_camera.items())[:_FIXED_CAMERA_COUNT]
+                for cam, hit in list(by_camera.items())[:_FIXED_CAMERA_COUNT]
             ]
             cameras = self._pad_cameras(real, day, hour, start)
             best = max(cameras, key=lambda c: c.match_score)
             best.is_best = True
 
-            agg = round(_clamp(anchor.score), 2)
+            agg = round(_display_score(anchor, score_mode, max_rrf), 2)
+            score_label = {"rrf_normalized": "rel", "cosine": "cos", "reranker": "rnk"}.get(score_mode, "match")
             minute = int(start // 60)
             moments.append(
                 EvidenceMoment(
@@ -202,7 +210,7 @@ class RagEngine:
                     place_label=anchor.room or "Scene",
                     camera_count=_FIXED_CAMERA_COUNT,
                     aggregate_score=agg,
-                    score_caption=f"match {agg:.2f}",
+                    score_caption=f"{score_label} {agg:.2f}",
                     dot_color=_DOT_COLORS[support],
                     cameras=cameras,
                 )
@@ -322,3 +330,21 @@ def _seconds_within_hour(hit: RetrievalHit) -> float:
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     """Clamp ``value`` into the ``[low, high]`` range for display/scoring."""
     return max(low, min(high, float(value)))
+
+
+def _display_score(
+    hit: "RetrievalHit",
+    mode: str,
+    max_rrf: float,
+) -> float:
+    """Return the display score for a hit under the given score_mode.
+
+    Falls back to rrf_normalized when the preferred field is unavailable
+    (e.g. cosine before a dense search, reranker in offline/placeholder mode).
+    """
+    if mode == "cosine" and hit.raw_score is not None:
+        return _clamp(hit.raw_score)
+    if mode == "reranker" and hit.rerank_score is not None:
+        return _clamp(hit.rerank_score)
+    # rrf_normalized (default) or fallback
+    return _clamp(hit.score / max_rrf if max_rrf > 0 else 0.0)

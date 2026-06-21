@@ -162,6 +162,15 @@ class RoutingConfig(BaseModel):
     model: str = "Qwen/Qwen3-VL-8B-Instruct"
 
 
+class UIConfig(BaseModel):
+    # Controls which score is shown in the dashboard's per-camera bar chart.
+    # rrf_normalized: RRF score normalised to [0,1] relative to the top moment.
+    # cosine:         Raw cosine similarity from Qdrant before RRF (always in [0,1]).
+    # reranker:       VLM-assessed relevance from the reranker, normalised to [0,1].
+    #                 Falls back to rrf_normalized when the reranker did not run.
+    score_mode: Literal["rrf_normalized", "cosine", "reranker"] = "rrf_normalized"
+
+
 class CastleRAGConfig(BaseModel):
     dataset: DatasetConfig = Field(default_factory=DatasetConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
@@ -172,6 +181,7 @@ class CastleRAGConfig(BaseModel):
     reranking: RerankingConfig = Field(default_factory=RerankingConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
     lora: LoRAConfig = Field(default_factory=LoRAConfig)
     slurm: SlurmConfig = Field(default_factory=SlurmConfig)
     version: str = "0.1.0"
