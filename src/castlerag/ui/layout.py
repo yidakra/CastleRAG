@@ -28,19 +28,27 @@ from castlerag.ui.youtube import YouTubeMirror
 
 _SCORE_MODE_TOOLTIP: dict[str, str] = {
     "rrf_normalized": (
-        "Relative ranking score. The top moment for this query always scores 1.0; "
-        "others are scaled proportionally by how consistently they ranked across "
-        "the BM25 lexical and dense vector search passes."
+        "RRF-normalised rank score (score_mode = rrf_normalized). "
+        "Each retrieval pass contributes 1 / (60 + rank) per document; scores "
+        "sum across BM25, dense transcript, and dense multimodal passes. "
+        "The raw RRF score is then divided by the top hit's score for this query, "
+        "so the best moment is always 1.0 and the rest are relative to it. "
+        "Not comparable across different queries."
     ),
     "cosine": (
-        "Cosine similarity between the query embedding and each clip or transcript "
-        "embedding (range 0–1). Scores above ~0.7 indicate a strong semantic match; "
-        "below ~0.4 is a weak one."
+        "Raw cosine similarity (score_mode = cosine). "
+        "Computed between the OmniEmbed query vector and each stored clip or "
+        "transcript embedding before rank fusion. Range [0, 1]: 1.0 = identical "
+        "embedding directions, 0.0 = orthogonal. "
+        "Values ≥ 0.7 typically indicate strong semantic match; ≤ 0.4 is weak. "
+        "Comparable across queries — not normalised per-query."
     ),
     "reranker": (
-        "VLM-assessed relevance score. The reranker model rates each evidence pack "
-        "0–4 on how well it supports the answer choices; that score is normalised "
-        "to 0–1 here. Falls back to the relative RRF score in offline mode."
+        "Reranker relevance score (score_mode = reranker). "
+        "Qwen3-VL-8B rates each evidence pack on two 0–4 Likert axes: "
+        "relevance to the question and per-choice support. "
+        "Final score = (0.7 × relevance + 0.3 × max_support) / 4, normalised to [0, 1]. "
+        "Falls back to RRF-normalised when the reranker did not run (offline mode)."
     ),
 }
 
@@ -181,7 +189,7 @@ def _viewer_column(score_mode: str = "rrf_normalized") -> html.Div:
                             dmc.Tooltip(
                                 label=tooltip_text,
                                 multiline=True,
-                                w=300,
+                                w=380,
                                 withArrow=True,
                                 position="top-start",
                                 children=dmc.Text(
