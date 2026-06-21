@@ -2,17 +2,84 @@
 
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 from castlerag.schemas import EvalQuestion, Prediction
 
+_LETTERS = ("a", "b", "c", "d")
+
+
+def _question_id_from_text(text: str) -> str:
+    """Stable short id derived from question text."""
+    return "castle_" + hashlib.sha1(text.strip().lower().encode()).hexdigest()[:8]
+
+
+def _shuffle_choices(
+    question: str, correct: str, distractors: List[str]
+) -> tuple[Dict[str, str], str]:
+    """Deterministically assign correct + 3 distractors to letters a–d.
+
+    Uses the question text hash to pick the position of the correct answer so
+    the assignment is stable across reruns but looks random across questions.
+    Returns (answers dict, correct_letter).
+    """
+    h = int(hashlib.sha1(question.strip().lower().encode()).hexdigest(), 16)
+    correct_idx = h % 4
+    others = list(distractors[:3])
+    answers: Dict[str, str] = {}
+    other_pos = 0
+    for i, letter in enumerate(_LETTERS):
+        if i == correct_idx:
+            answers[letter] = correct
+        else:
+            answers[letter] = others[other_pos]
+            other_pos += 1
+    return answers, _LETTERS[correct_idx]
+
+
+def load_questions_csv(path: Path) -> Dict[str, EvalQuestion]:
+    """Load questions from the CASTLE question-bank CSV.
+
+    Expected columns (from the CVPR challenge spreadsheet export):
+      Question, Answer, Anchor, Distractor 1, Distractor 2, Distractor 3,
+      Type, Day, Authored by, Verified By, Issue, Column 1
+
+    Each row is converted to an EvalQuestion with four shuffled answer choices
+    (a–d) and ground_truth set to the letter that holds the correct answer.
+    The shuffle is deterministic per question text so reruns are stable.
+    """
+    with path.open(newline="", encoding="utf-8-sig") as fh:
+        reader = csv.DictReader(fh)
+        questions: Dict[str, EvalQuestion] = {}
+        for row in reader:
+            question = (row.get("Question") or "").strip()
+            if not question:
+                continue
+            correct = (row.get("Answer") or "").strip()
+            distractors = [
+                (row.get("Distractor 1") or "").strip(),
+                (row.get("Distractor 2") or "").strip(),
+                (row.get("Distractor 3") or "").strip(),
+            ]
+            answers, gt = _shuffle_choices(question, correct, distractors)
+            qid = _question_id_from_text(question)
+            questions[qid] = EvalQuestion(
+                question_id=qid,
+                query=question,
+                answers=answers,
+                ground_truth=gt,  # type: ignore[arg-type]
+            )
+    return questions
+
 
 def load_questions(path: Path) -> Dict[str, EvalQuestion]:
-    """Load the official CASTLE question JSON.
+    """Load CASTLE questions from JSON or CSV (auto-detected by extension).
 
-    Expected format:
+    JSON format (official submission format):
       {
         "2026_q1": {
           "query": "...",
@@ -20,8 +87,12 @@ def load_questions(path: Path) -> Dict[str, EvalQuestion]:
         },
         ...
       }
+
+    CSV format: CASTLE CVPR challenge Question Bank spreadsheet export.
     """
-    raw: Dict[str, dict] = json.loads(path.read_text())
+    if Path(path).suffix.lower() == ".csv":
+        return load_questions_csv(Path(path))
+    raw: Dict[str, dict] = json.loads(Path(path).read_text())
     return {
         qid: EvalQuestion(
             question_id=qid,
@@ -57,19 +128,24 @@ def load_predictions(path: Path) -> Dict[str, Prediction]:
 def compute_accuracy(
     questions: Dict[str, EvalQuestion],
     predictions: Dict[str, Prediction],
-    answers_path: Path,
+    answers_path: Optional[Path] = None,
 ) -> float:
     """Exact-match accuracy over questions that have a ground-truth entry.
 
-    The denominator is the number of questions present in the answer key,
-    not the total number of questions, so partial answer keys produce a
-    meaningful score rather than artificially deflating accuracy.
+    The denominator is the number of graded questions, so partial answer keys
+    produce a meaningful score rather than artificially deflating accuracy.
+
+    Ground truth is resolved in order:
+    1. ``answers_path`` JSON (``{qid: letter}``) — official external key.
+    2. ``questions[qid].ground_truth`` — embedded by the CSV loader.
     """
-    answers: Dict[str, str] = json.loads(answers_path.read_text())
+    ext_answers: Dict[str, str] = (
+        json.loads(answers_path.read_text()) if answers_path is not None else {}
+    )
     correct = 0
     graded = 0
-    for qid in questions:
-        truth = answers.get(qid)
+    for qid, q in questions.items():
+        truth = ext_answers.get(qid) or q.ground_truth
         if truth is None:
             continue
         graded += 1

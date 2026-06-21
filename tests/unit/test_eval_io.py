@@ -14,6 +14,7 @@ from castlerag.eval.io import (
     export_submission,
     load_predictions,
     load_questions,
+    load_questions_csv,
     select_questions,
     write_evidence_traces,
     write_predictions,
@@ -631,3 +632,91 @@ def test_run_eval_unexpected_retrieval_error_is_not_reclassified(
         match="retrieval failed for question q1",
     ):
         run_eval(qs, out_dir=tmp_path / "outputs", pipeline=pipeline)
+
+
+# ---------------------------------------------------------------------------
+# CSV loader tests
+# ---------------------------------------------------------------------------
+
+_CSV_HEADER = "Question,Answer,Anchor,Distractor 1,Distractor 2,Distractor 3,Type,Day,Authored by,Verified By,Issue,Column 1\n"
+_CSV_ROW1 = "What did Allie eat?,Sausages,Day1 14:00,Pizza,Pasta,Soup,what,1,Luca,Werner,,\n"
+_CSV_ROW2 = "Where was Bjorn?,Kitchen,Day2 10:00,Meeting room,Living room,Garden,where,2,Klaus,Allie,,\n"
+
+
+def _write_csv(tmp_path: Path, content: str) -> Path:
+    p = tmp_path / "questions.csv"
+    p.write_text(content, encoding="utf-8")
+    return p
+
+
+def test_load_questions_csv_parses_rows(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1 + _CSV_ROW2)
+    qs = load_questions_csv(p)
+    assert len(qs) == 2
+
+
+def test_load_questions_csv_query_text(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions_csv(p)
+    q = next(iter(qs.values()))
+    assert q.query == "What did Allie eat?"
+
+
+def test_load_questions_csv_four_choices(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions_csv(p)
+    q = next(iter(qs.values()))
+    assert set(q.answers.keys()) == {"a", "b", "c", "d"}
+    assert set(q.answers.values()) == {"Sausages", "Pizza", "Pasta", "Soup"}
+
+
+def test_load_questions_csv_ground_truth_is_correct_answer(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions_csv(p)
+    q = next(iter(qs.values()))
+    assert q.ground_truth is not None
+    assert q.answers[q.ground_truth] == "Sausages"
+
+
+def test_load_questions_csv_shuffle_is_stable(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs1 = load_questions_csv(p)
+    qs2 = load_questions_csv(p)
+    q1 = next(iter(qs1.values()))
+    q2 = next(iter(qs2.values()))
+    assert q1.answers == q2.answers
+    assert q1.ground_truth == q2.ground_truth
+
+
+def test_load_questions_csv_skips_blank_rows(tmp_path: Path):
+    content = _CSV_HEADER + _CSV_ROW1 + ",,,,,,,,,,,\n" + _CSV_ROW2
+    p = _write_csv(tmp_path, content)
+    qs = load_questions_csv(p)
+    assert len(qs) == 2
+
+
+def test_load_questions_dispatches_csv(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions(p)
+    assert len(qs) == 1
+    q = next(iter(qs.values()))
+    assert q.answers[q.ground_truth] == "Sausages"
+
+
+def test_load_questions_csv_accuracy_with_perfect_predictions(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions_csv(p)
+    # Build a perfect predictions dict (predicted = ground_truth for every question)
+    perfect = {qid: Prediction(question_id=qid, predicted_answer=q.ground_truth) for qid, q in qs.items()}  # type: ignore[arg-type]
+    acc = compute_accuracy(qs, perfect, answers_path=None)
+    assert acc == 1.0
+
+
+def test_load_questions_csv_accuracy_with_wrong_predictions(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions_csv(p)
+    q = next(iter(qs.values()))
+    wrong_letter = next(letter for letter in ["a", "b", "c", "d"] if letter != q.ground_truth)
+    wrong = {qid: Prediction(question_id=qid, predicted_answer=wrong_letter) for qid in qs}  # type: ignore[arg-type]
+    acc = compute_accuracy(qs, wrong, answers_path=None)
+    assert acc == 0.0
