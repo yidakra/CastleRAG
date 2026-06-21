@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import os
-import urllib.error
 import urllib.request
 from typing import Any, Optional
 
@@ -31,17 +30,17 @@ class EngineUnavailable(RuntimeError):
 def _vllm_reachable(base_url: str, timeout: float = _PROBE_TIMEOUT_SECONDS) -> bool:
     """Return True if the vLLM/OpenAI server at ``base_url`` answers ``GET /models``.
 
-    A connection-level failure (refused/DNS/timeout) means the server is down, so we
-    fall back. Any HTTP response — including a non-2xx status — means a server *is*
-    listening, which is all this gate needs to confirm.
+    A connection-level failure (refused/DNS/timeout) means the server is down. A
+    non-2xx HTTP status (404/401/500) means *something* is listening but the model
+    API is not actually usable, so we also treat that as unreachable and fall back
+    to offline mode rather than deferring the failure to query time. Only a 2xx
+    response counts as live.
     """
     url = base_url.rstrip("/") + "/models"
     try:
         with urllib.request.urlopen(url, timeout=timeout):  # noqa: S310 - local infra URL
             return True
-    except urllib.error.HTTPError:
-        return True  # server responded (any status) -> it is up
-    except Exception:  # noqa: BLE001 - any connection failure means "unreachable"
+    except Exception:  # noqa: BLE001 - HTTPError or connection failure -> unreachable
         return False
 
 

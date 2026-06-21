@@ -40,6 +40,30 @@ def test_unreachable_without_require_live_still_offline(monkeypatch):
     assert isinstance(engine, PlaceholderEngine)
 
 
+def test_probe_treats_non_2xx_as_unreachable(monkeypatch):
+    # A server that responds but with a non-2xx status (e.g. 404) is listening
+    # yet not actually usable; the probe must report it as unreachable.
+    import urllib.error
+
+    def _raise_http_error(url, timeout):
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(ef.urllib.request, "urlopen", _raise_http_error)
+    assert ef._vllm_reachable("http://127.0.0.1:9/v1") is False
+
+
+def test_probe_treats_2xx_as_reachable(monkeypatch):
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(ef.urllib.request, "urlopen", lambda url, timeout: _Resp())
+    assert ef._vllm_reachable("http://127.0.0.1:9/v1") is True
+
+
 def test_engine_mode_reads_is_live_flag():
     assert ef.engine_mode(PlaceholderEngine()) == "offline"
 
