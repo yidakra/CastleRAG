@@ -184,16 +184,74 @@ def test_generate_answer_shuffle_maps_back_to_original_letter():
 
                     return _Resp()
 
+    # Supply real support + evidence for the target so the unsupported-fallback
+    # override does not fire; this test isolates the presented→original mapping.
     prediction = generate_answer(
         question=q,
         hints=hints,
-        evidence_rows=[],
-        support_priors={},
+        evidence_rows=[_make_hit()],
+        support_priors={
+            letter: (1.0 if letter == target_original else 0.0) for letter in "abcd"
+        },
         llm_client=_FixedReplyClient(),
         model="stub",
         shuffle_choices=True,
     )
     assert prediction.predicted_answer == target_original
+    assert prediction.is_supported is True
+
+
+def test_generate_answer_overrides_biased_guess_when_unsupported():
+    # Evidence was retrieved but the reranker credited no choice (all-zero
+    # priors). The LLM defaults to "a"; the pipeline must override that biased
+    # guess with a deterministic uniform pick and mark the answer unsupported.
+    client = _FakeChatClient("No choice is supported.\nFINAL_ANSWER: a")
+    zero = {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}
+    seen = set()
+    for i in range(64):
+        q = EvalQuestion(
+            question_id=f"q{i:04d}",
+            query="What brand is the fridge?",
+            answers={"a": "A", "b": "B", "c": "C", "d": "D"},
+        )
+        pred = generate_answer(
+            question=q,
+            hints=RouteHints(route="static_visual"),
+            evidence_rows=[_make_hit()],
+            support_priors=zero,
+            llm_client=client,
+        )
+        assert pred.is_supported is False
+        seen.add(pred.predicted_answer)
+    # Uniform across a/b/c/d — no longer a constant "a".
+    assert seen == {"a", "b", "c", "d"}
+
+
+def test_generate_answer_no_evidence_is_unsupported():
+    client = _FakeChatClient("Nothing was retrieved.\nFINAL_ANSWER: a")
+    pred = generate_answer(
+        question=_make_question(),
+        hints=RouteHints(route="static_visual"),
+        evidence_rows=[],
+        support_priors={"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0},
+        llm_client=client,
+    )
+    assert pred.is_supported is False
+    assert pred.confidence == 0.0  # _estimate_confidence is 0 with no evidence
+
+
+def test_generate_answer_keeps_llm_answer_when_supported():
+    # A choice has support → the answer is supported and the LLM letter stands.
+    client = _FakeChatClient("The cited clip supports walking.\nFINAL_ANSWER: d")
+    pred = generate_answer(
+        question=_make_question(),
+        hints=RouteHints(route="temporal"),
+        evidence_rows=[_make_hit()],
+        support_priors={"a": 0.1, "b": 0.1, "c": 0.0, "d": 0.9},
+        llm_client=client,
+    )
+    assert pred.predicted_answer == "d"
+    assert pred.is_supported is True
 
 
 def test_format_main_video_citation():

@@ -205,6 +205,7 @@ def run_eval(
                 ),
                 "support_priors": prediction.support_priors or support_priors,
                 "predicted_answer": prediction.predicted_answer,
+                "is_supported": prediction.is_supported,
             }
         )
 
