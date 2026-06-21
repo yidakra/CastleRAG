@@ -9,6 +9,7 @@ import pytest
 
 from castlerag.config import CastleRAGConfig
 from castlerag.eval.io import (
+    accuracy_breakdown,
     compute_accuracy,
     compute_diversity_metrics,
     export_submission,
@@ -136,6 +137,43 @@ def test_compute_accuracy_partial_answer_key(tmp_path: Path):
     ans_path = _write_answers(tmp_path, {"q1": "a"})
     acc = compute_accuracy(qs, preds, ans_path)
     assert acc == 1.0
+
+
+def test_accuracy_breakdown_returns_graded_denominator(tmp_path: Path):
+    """Breakdown reports (correct, graded), graded excluding ungraded questions."""
+    q_path = _write_questions(tmp_path, _QUESTIONS_RAW)
+    qs = load_questions(q_path)
+    preds = {"q1": Prediction(question_id="q1", predicted_answer="a")}
+    # Only q1 is in the answer key, so graded must be 1 (not 2) and correct 1.
+    ans_path = _write_answers(tmp_path, {"q1": "a"})
+    correct, graded = accuracy_breakdown(qs, preds, ans_path)
+    assert (correct, graded) == (1, 1)
+
+
+def test_load_questions_csv_disambiguates_id_collision(tmp_path: Path):
+    """Distinct questions that collide on question_id must both survive."""
+    import castlerag.eval.io as io_mod
+
+    # Force two different questions to hash to the same base id.
+    def _fixed_id(text: str) -> str:
+        return "castle_dupe"
+
+    orig = io_mod._question_id_from_text
+    io_mod._question_id_from_text = _fixed_id
+    try:
+        csv_path = tmp_path / "bank.csv"
+        csv_path.write_text(
+            "Question,Answer,Distractor 1,Distractor 2,Distractor 3\n"
+            "First question?,A1,B1,C1,D1\n"
+            "Second question?,A2,B2,C2,D2\n"
+        )
+        questions = load_questions_csv(csv_path)
+    finally:
+        io_mod._question_id_from_text = orig
+    # Both rows kept despite the colliding base id.
+    assert len(questions) == 2
+    queries = {q.query for q in questions.values()}
+    assert queries == {"First question?", "Second question?"}
 
 
 def test_load_predictions_rejects_bad_format(tmp_path: Path):

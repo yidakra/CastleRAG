@@ -29,10 +29,12 @@ def reciprocal_rank_fusion(
             if existing is None or hit.score > existing.score:
                 by_record[hit.record_id] = hit
             # Preserve the best raw cosine similarity seen for this record across
-            # all query variants and modality lanes.
+            # all query variants and modality lanes. Seed from the existing value
+            # (not 0.0) so a genuinely negative cosine is not clamped upward.
             if hit.raw_score is not None:
-                max_raw[hit.record_id] = max(
-                    max_raw.get(hit.record_id, 0.0), hit.raw_score
+                prev = max_raw.get(hit.record_id)
+                max_raw[hit.record_id] = (
+                    hit.raw_score if prev is None else max(prev, hit.raw_score)
                 )
 
     fused = []

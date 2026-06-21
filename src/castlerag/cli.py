@@ -601,10 +601,9 @@ def answer(
     console.print(f"  traces    : {result.output_paths.evidence_traces}")
     console.print(f"  submit    : {result.output_paths.submissions}")
     if result.accuracy is not None:
-        n_correct = int(round(result.accuracy * len(result.predictions)))
         console.print(
             f"  accuracy  : [green]{result.accuracy:.4f}[/green]"
-            f"  ({n_correct}/{len(result.predictions)})"
+            f"  ({result.n_correct}/{result.n_graded})"
         )
 
 
@@ -621,7 +620,11 @@ def eval_cmd(
     ),
 ) -> None:
     """Evaluate predictions against ground truth and export submission JSON."""
-    from castlerag.eval.io import compute_accuracy, export_submission, load_predictions
+    from castlerag.eval.io import (
+        accuracy_breakdown,
+        export_submission,
+        load_predictions,
+    )
 
     cfg = _resolve_config(config, False)
     questions = load_questions(questions_path)
@@ -635,15 +638,15 @@ def eval_cmd(
     has_gt = answers_path is not None or any(
         q.ground_truth is not None for q in questions.values()
     )
-    accuracy = (
-        compute_accuracy(questions, predictions, answers_path) if has_gt else None
-    )
+    accuracy = None
+    if has_gt:
+        n_correct, n_graded = accuracy_breakdown(questions, predictions, answers_path)
+        accuracy = n_correct / n_graded if n_graded > 0 else 0.0
 
     if accuracy is not None:
-        n_correct = int(round(accuracy * len(questions)))
         console.print(
             f"  accuracy : [green]{accuracy:.4f}[/green]  "
-            f"({n_correct}/{len(questions)})"
+            f"({n_correct}/{n_graded})"
         )
     else:
         console.print(
@@ -698,10 +701,9 @@ def smoke_test(
     console.print(f"  predicted : {len(result.predictions)} questions")
     console.print(f"  output    : {result.output_paths.predictions}")
     if result.accuracy is not None:
-        n_correct = int(round(result.accuracy * n))
         console.print(
             f"  accuracy  : [green]{result.accuracy:.4f}[/green]"
-            f"  ({n_correct}/{n})"
+            f"  ({result.n_correct}/{result.n_graded})"
         )
 
 

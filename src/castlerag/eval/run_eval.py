@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 from castlerag.config import CastleRAGConfig, load_config
 from castlerag.embed.omniembed import OmniEmbedClient
 from castlerag.eval.io import (
-    compute_accuracy,
+    accuracy_breakdown,
     compute_diversity_metrics,
     export_submission,
     select_questions,
@@ -69,6 +69,10 @@ class EvalRunResult:
     output_paths: EvalOutputPaths
     accuracy: Optional[float] = None
     diversity: Optional[Dict[str, Any]] = None
+    # Number of correctly-answered and ground-truth-graded questions. These let
+    # callers display ``n_correct/n_graded`` rather than guessing a denominator.
+    n_correct: Optional[int] = None
+    n_graded: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -251,11 +255,14 @@ def run_eval(
     # Compute accuracy from an explicit answer key, or fall back to embedded
     # ground_truth (populated by the CSV loader) when available.
     accuracy: Optional[float] = None
+    n_correct: Optional[int] = None
+    n_graded: Optional[int] = None
     has_gt = answers_path is not None or any(
         q.ground_truth is not None for q in selected.values()
     )
     if has_gt:
-        accuracy = compute_accuracy(selected, predictions, answers_path)
+        n_correct, n_graded = accuracy_breakdown(selected, predictions, answers_path)
+        accuracy = n_correct / n_graded if n_graded > 0 else 0.0
 
     outputs.metrics.parent.mkdir(parents=True, exist_ok=True)
     outputs.metrics.write_text(
@@ -284,6 +291,8 @@ def run_eval(
         output_paths=outputs,
         accuracy=accuracy,
         diversity=diversity,
+        n_correct=n_correct,
+        n_graded=n_graded,
     )
 
 

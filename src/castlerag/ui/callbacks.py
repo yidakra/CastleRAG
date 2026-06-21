@@ -495,7 +495,11 @@ def register_callbacks(
             is_refinement=False,
         )
         thread = [group]
-        moment = group["moments"][0]  # type: ignore[index]
+        moments = group["moments"]  # type: ignore[index]
+        if not moments:
+            # No evidence moments (retrieval failure edge case); nothing to focus.
+            raise PreventUpdate
+        moment = moments[0]
         focus = {"group_id": "g1", "moment_id": moment["moment_id"]}
         review = _pending_review(moment)
         iteration_store = {"claim": group["claim"]["text"], "iteration": 1}  # type: ignore[index]
@@ -546,8 +550,12 @@ def register_callbacks(
             is_refinement=True,
             refined_query=refined_query,
         )
+        moments = group["moments"]  # type: ignore[index]
+        if not moments:
+            # Refinement returned no evidence moments; leave the thread unchanged.
+            raise PreventUpdate
         thread.append(group)
-        moment = group["moments"][0]  # type: ignore[index]
+        moment = moments[0]
         focus = {"group_id": group["group_id"], "moment_id": moment["moment_id"]}
         review = _pending_review(moment)
         new_store = {"claim": claim, "iteration": new_iteration}

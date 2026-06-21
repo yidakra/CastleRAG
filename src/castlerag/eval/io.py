@@ -5,10 +5,13 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from castlerag.schemas import EvalQuestion, Prediction
+
+log = logging.getLogger("castlerag.eval")
 
 _LETTERS = ("a", "b", "c", "d")
 
@@ -67,6 +70,21 @@ def load_questions_csv(path: Path) -> Dict[str, EvalQuestion]:
             ]
             answers, gt = _shuffle_choices(question, correct, distractors)
             qid = _question_id_from_text(question)
+            existing = questions.get(qid)
+            if existing is not None:
+                if existing.query == question:
+                    # Same question text appears twice; the second row carries no
+                    # new information, so skip it rather than overwrite.
+                    continue
+                # Different text hashed to the same id (8-hex collision). Append a
+                # deterministic suffix so neither question is silently dropped.
+                base, n = qid, 2
+                while qid in questions:
+                    qid = f"{base}_{n}"
+                    n += 1
+                log.warning(
+                    "question_id collision on %s; disambiguated to %s", base, qid
+                )
             questions[qid] = EvalQuestion(
                 question_id=qid,
                 query=question,
@@ -125,15 +143,17 @@ def load_predictions(path: Path) -> Dict[str, Prediction]:
     return result
 
 
-def compute_accuracy(
+def accuracy_breakdown(
     questions: Dict[str, EvalQuestion],
     predictions: Dict[str, Prediction],
     answers_path: Optional[Path] = None,
-) -> float:
-    """Exact-match accuracy over questions that have a ground-truth entry.
+) -> Tuple[int, int]:
+    """Return ``(correct, graded)`` over questions with resolvable ground truth.
 
-    The denominator is the number of graded questions, so partial answer keys
-    produce a meaningful score rather than artificially deflating accuracy.
+    ``graded`` counts only questions that have a ground-truth entry, so callers
+    can report ``correct/graded`` instead of fabricating a denominator from the
+    total number of predictions or questions (which over-counts when the answer
+    key is partial).
 
     Ground truth is resolved in order:
     1. ``answers_path`` JSON (``{qid: letter}``) — official external key.
@@ -152,6 +172,20 @@ def compute_accuracy(
         pred = predictions.get(qid)
         if pred is not None and pred.predicted_answer == truth:
             correct += 1
+    return correct, graded
+
+
+def compute_accuracy(
+    questions: Dict[str, EvalQuestion],
+    predictions: Dict[str, Prediction],
+    answers_path: Optional[Path] = None,
+) -> float:
+    """Exact-match accuracy over questions that have a ground-truth entry.
+
+    The denominator is the number of graded questions, so partial answer keys
+    produce a meaningful score rather than artificially deflating accuracy.
+    """
+    correct, graded = accuracy_breakdown(questions, predictions, answers_path)
     return correct / graded if graded > 0 else 0.0
 
 
