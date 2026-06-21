@@ -46,3 +46,6 @@ logs/
 /report.out
 /report.synctex.gz
 .qdrant-initialized
+
+# Weights & Biases local run artifacts
+wandb/

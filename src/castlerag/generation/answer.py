@@ -250,9 +250,10 @@ def extract_answer(
     # Reject free-floating choice letters; generation must use FINAL_ANSWER.
     if _ANSWER_LETTER_RE.search(raw_text):
         return _fallback_answer(support_priors, question_id=question_id)
-    if support_priors:
-        return _fallback_answer(support_priors, question_id=question_id)
-    return "a"
+    # No FINAL_ANSWER, no abstain sentinel, no stray letter, no priors: route
+    # through the fallback so a supplied question_id yields a deterministic
+    # uniform pick instead of a constant "a" bias.
+    return _fallback_answer(support_priors, question_id=question_id)
 
 
 def _fallback_answer(
@@ -406,6 +407,15 @@ def generate_answer(
         raw_answer_text, prompt_priors, question_id=question.question_id
     )
     predicted_answer: AnswerChoice = presented_to_original[presented_answer]  # type: ignore[assignment]
+
+    # When nothing supports any choice — no evidence retrieved, or the reranker
+    # credited no choice with support — a forced MCQ answer is just a guess, and
+    # the LLM reliably defaults to "a". Override it with a deterministic uniform
+    # pick so the guess is unbiased, and record that the answer is unsupported.
+    is_supported = bool(rows) and max(support_priors.values(), default=0.0) > 0.0
+    if not is_supported:
+        predicted_answer = _fallback_answer({}, question_id=question.question_id)
+
     return Prediction(
         question_id=question.question_id,
         predicted_answer=predicted_answer,
@@ -413,6 +423,7 @@ def generate_answer(
         support_priors=support_priors or None,
         top_evidence_ids=[hit.record_id for hit in rows],
         raw_answer_text=raw_answer_text,
+        is_supported=is_supported,
         confidence=_estimate_confidence(
             answer=predicted_answer,
             support_priors=support_priors,
