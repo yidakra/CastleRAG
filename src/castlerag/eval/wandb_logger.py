@@ -26,6 +26,20 @@ def _wandb() -> Any:
         return None
 
 
+def _stringify_keys(value: Any) -> Any:
+    """Recursively coerce dict keys to ``str`` so wandb's summary encoder is safe.
+
+    wandb builds dotted summary paths by concatenating nested keys as strings; a
+    dict with int keys (e.g. the camera-count histogram) raises ``TypeError`` mid
+    encode. Lists/tuples are walked too; scalars pass through unchanged.
+    """
+    if isinstance(value, dict):
+        return {str(k): _stringify_keys(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_stringify_keys(v) for v in value]
+    return value
+
+
 def _flat_config(cfg: "CastleRAGConfig", n_questions: int) -> Dict[str, Any]:
     """Flatten the parts of cfg that are meaningful hyperparameters for a run."""
     return {
@@ -142,7 +156,11 @@ class WandbLogger:
         for k, v in (diversity or {}).items():
             summary[f"diversity/{k}"] = v
         for k, v in summary.items():
-            wandb.run.summary[k] = v  # type: ignore[union-attr]
+            # wandb's summary encoder builds dotted paths and concatenates each
+            # nested key onto the path as a string, so a nested dict with
+            # non-string keys (e.g. diversity's int-keyed camera_count_distribution)
+            # crashes it. Coerce keys to str before handing the value over.
+            wandb.run.summary[k] = _stringify_keys(v)  # type: ignore[union-attr]
 
     def log_artifacts(self, paths: List[Path]) -> None:
         if not self._active:

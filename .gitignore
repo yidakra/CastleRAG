@@ -46,3 +46,6 @@ logs/
 /report.out
 /report.synctex.gz
 .qdrant-initialized
+
+# W&B local run artifacts
+wandb/
