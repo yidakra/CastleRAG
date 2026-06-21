@@ -47,7 +47,8 @@ _SCORE_MODE_TOOLTIP: dict[str, str] = {
         "Reranker relevance score (score_mode = reranker). "
         "Qwen3-VL-8B rates each evidence pack on two 0–4 Likert axes: "
         "relevance to the question and per-choice support. "
-        "Final score = (0.7 × relevance + 0.3 × max_support) / 4, normalised to [0, 1]. "
+        "Final score = (0.7 × relevance + 0.3 × max_support) / 4, "
+        "normalised to [0, 1]. "
         "Falls back to RRF-normalised when the reranker did not run (offline mode)."
     ),
 }

@@ -208,7 +208,11 @@ def run_eval(
 
     from castlerag.eval.wandb_logger import WandbLogger
 
-    wb = WandbLogger(cfg, n_questions=len(selected)) if (use_wandb or cfg.wandb.enabled) else None
+    wb = (
+        WandbLogger(cfg, n_questions=len(selected))
+        if (use_wandb or cfg.wandb.enabled)
+        else None
+    )
 
     predictions: Dict[str, Prediction] = {}
     traces: List[dict] = []

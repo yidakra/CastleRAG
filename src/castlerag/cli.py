@@ -563,7 +563,9 @@ def retrieve(
 
 @app.command()
 def answer(
-    questions_path: Path = typer.Argument(..., help="Official CASTLE questions JSON or CSV"),
+    questions_path: Path = typer.Argument(
+        ..., help="Official CASTLE questions JSON or CSV"
+    ),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     snellius: bool = typer.Option(False, "--snellius"),
     question_id: Optional[str] = typer.Option(
@@ -614,7 +616,9 @@ def eval_cmd(
         None, "--answers", help="Ground-truth answer key JSON (not needed for CSV)"
     ),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
-    wandb: bool = typer.Option(False, "--wandb", help="Log results to Weights & Biases"),
+    wandb: bool = typer.Option(
+        False, "--wandb", help="Log results to Weights & Biases"
+    ),
 ) -> None:
     """Evaluate predictions against ground truth and export submission JSON."""
     from castlerag.eval.io import compute_accuracy, export_submission, load_predictions
@@ -631,7 +635,9 @@ def eval_cmd(
     has_gt = answers_path is not None or any(
         q.ground_truth is not None for q in questions.values()
     )
-    accuracy = compute_accuracy(questions, predictions, answers_path) if has_gt else None
+    accuracy = (
+        compute_accuracy(questions, predictions, answers_path) if has_gt else None
+    )
 
     if accuracy is not None:
         n_correct = int(round(accuracy * len(questions)))

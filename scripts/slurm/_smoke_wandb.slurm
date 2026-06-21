@@ -17,7 +17,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=120G
 #SBATCH --gres=gpu:2
-#SBATCH --time=00:45:00
+#SBATCH --time=01:45:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.out
 
@@ -25,7 +25,8 @@ set -euo pipefail
 
 CONF="configs/snellius_me.yaml"
 SC="/scratch-shared/${USER}"
-QFILE="data/smoke_day1.csv"          # 40 day-1 questions w/ ground truth; --n 5 runs first 5
+QFILE="data/smoke_day1.csv"          # 40 day-1 questions w/ ground truth
+N="${N:-5}"                          # how many to run; override via `sbatch --export=ALL,N=40`
 COLL="castle_multimodal_v1"
 export HF_HOME="${SC}/hf_cache"
 export HF_HUB_OFFLINE=1
@@ -94,8 +95,8 @@ export OMNIEMBED_BASE_URL="http://localhost:8200/v1"   # live query embeddings
 export VLLM_BASE_URL="http://localhost:8201/v1"        # rerank + generation
 # NOTE: OMNIEMBED_QUERY_CACHE intentionally UNSET so fresh questions embed live.
 
-echo "[smoke] === smoke-test --wandb (n=5) ==="
-castlerag smoke-test "${QFILE}" --n 5 --wandb --config "${CONF}"
+echo "[smoke] === smoke-test --wandb (n=${N}) ==="
+castlerag smoke-test "${QFILE}" --n "${N}" --wandb --config "${CONF}"
 
 echo "[smoke] === predictions ==="
 find "${SC}/castle_outputs/smoke_test" -name 'predictions*.json' -exec sh -c 'echo "file: $1"; cat "$1"' _ {} \; 2>/dev/null

@@ -164,7 +164,9 @@ class RagEngine:
             reverse=True,
         )[:_MAX_MOMENTS]
 
-        score_mode: str = getattr(getattr(self.cfg, "ui", None), "score_mode", "rrf_normalized")
+        score_mode: str = getattr(
+            getattr(self.cfg, "ui", None), "score_mode", "rrf_normalized"
+        )
         # Normalisation denominator for rrf_normalized mode: best RRF score across
         # all moments so the top moment always displays 1.0.
         max_rrf = max(
@@ -201,7 +203,11 @@ class RagEngine:
             best.is_best = True
 
             agg = round(_display_score(anchor, score_mode, max_rrf), 2)
-            score_label = {"rrf_normalized": "rel", "cosine": "cos", "reranker": "rnk"}.get(score_mode, "match")
+            score_label = {
+                "rrf_normalized": "rel",
+                "cosine": "cos",
+                "reranker": "rnk",
+            }.get(score_mode, "match")
             minute = int(start // 60)
             moments.append(
                 EvidenceMoment(

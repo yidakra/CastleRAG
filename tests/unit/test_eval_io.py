@@ -638,9 +638,17 @@ def test_run_eval_unexpected_retrieval_error_is_not_reclassified(
 # CSV loader tests
 # ---------------------------------------------------------------------------
 
-_CSV_HEADER = "Question,Answer,Anchor,Distractor 1,Distractor 2,Distractor 3,Type,Day,Authored by,Verified By,Issue,Column 1\n"
-_CSV_ROW1 = "What did Allie eat?,Sausages,Day1 14:00,Pizza,Pasta,Soup,what,1,Luca,Werner,,\n"
-_CSV_ROW2 = "Where was Bjorn?,Kitchen,Day2 10:00,Meeting room,Living room,Garden,where,2,Klaus,Allie,,\n"
+_CSV_HEADER = (
+    "Question,Answer,Anchor,Distractor 1,Distractor 2,Distractor 3,"
+    "Type,Day,Authored by,Verified By,Issue,Column 1\n"
+)
+_CSV_ROW1 = (
+    "What did Allie eat?,Sausages,Day1 14:00,Pizza,Pasta,Soup,what,1,Luca,Werner,,\n"
+)
+_CSV_ROW2 = (
+    "Where was Bjorn?,Kitchen,Day2 10:00,Meeting room,Living room,Garden,"
+    "where,2,Klaus,Allie,,\n"
+)
 
 
 def _write_csv(tmp_path: Path, content: str) -> Path:
@@ -707,7 +715,10 @@ def test_load_questions_csv_accuracy_with_perfect_predictions(tmp_path: Path):
     p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
     qs = load_questions_csv(p)
     # Build a perfect predictions dict (predicted = ground_truth for every question)
-    perfect = {qid: Prediction(question_id=qid, predicted_answer=q.ground_truth) for qid, q in qs.items()}  # type: ignore[arg-type]
+    perfect = {
+        qid: Prediction(question_id=qid, predicted_answer=q.ground_truth)  # type: ignore[arg-type]
+        for qid, q in qs.items()
+    }
     acc = compute_accuracy(qs, perfect, answers_path=None)
     assert acc == 1.0
 
@@ -716,8 +727,13 @@ def test_load_questions_csv_accuracy_with_wrong_predictions(tmp_path: Path):
     p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
     qs = load_questions_csv(p)
     q = next(iter(qs.values()))
-    wrong_letter = next(letter for letter in ["a", "b", "c", "d"] if letter != q.ground_truth)
-    wrong = {qid: Prediction(question_id=qid, predicted_answer=wrong_letter) for qid in qs}  # type: ignore[arg-type]
+    wrong_letter = next(
+        letter for letter in ["a", "b", "c", "d"] if letter != q.ground_truth
+    )
+    wrong = {
+        qid: Prediction(question_id=qid, predicted_answer=wrong_letter)  # type: ignore[arg-type]
+        for qid in qs
+    }
     acc = compute_accuracy(qs, wrong, answers_path=None)
     assert acc == 0.0
 

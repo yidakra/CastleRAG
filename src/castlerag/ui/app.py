@@ -49,6 +49,7 @@ def build_app(
     # Read score_mode from engine config when live, else load it from base.yaml so
     # offline mode still honours whatever is set in the config file.
     import os
+
     from castlerag.config import load_config
     cfg = getattr(engine, "cfg", None)
     if cfg is None:
