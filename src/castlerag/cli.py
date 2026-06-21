@@ -563,13 +563,14 @@ def retrieve(
 
 @app.command()
 def answer(
-    questions_path: Path = typer.Argument(..., help="Official CASTLE questions JSON"),
+    questions_path: Path = typer.Argument(..., help="Official CASTLE questions JSON or CSV"),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     snellius: bool = typer.Option(False, "--snellius"),
     question_id: Optional[str] = typer.Option(
         None, "--id", help="Run only this question id"
     ),
     out: Optional[Path] = typer.Option(None, "--out", help="Output predictions path"),
+    wandb: bool = typer.Option(False, "--wandb", help="Log run to Weights & Biases"),
 ) -> None:
     """Run full retrieve → rerank → generate pipeline on CASTLE questions."""
     cfg = _resolve_config(config, snellius)
@@ -579,6 +580,8 @@ def answer(
     console.print(f"  questions : {questions_path}")
     console.print(f"  model     : {cfg.generation.model}")
     console.print(f"  output    : {out_path}")
+    if wandb:
+        console.print("  wandb     : [cyan]enabled[/cyan]")
     questions = load_questions(questions_path)
     try:
         result = run_eval(
@@ -586,6 +589,7 @@ def answer(
             config_path=override,
             question_ids=[question_id] if question_id else None,
             predictions_path=out_path,
+            use_wandb=wandb,
         )
     except (PipelineDependencyError, NotImplementedError, ValueError, KeyError) as exc:
         console.print(f"[red]{exc}[/red]")
@@ -594,16 +598,23 @@ def answer(
     console.print(f"  predicted : {len(result.predictions)} questions")
     console.print(f"  traces    : {result.output_paths.evidence_traces}")
     console.print(f"  submit    : {result.output_paths.submissions}")
+    if result.accuracy is not None:
+        n_correct = int(round(result.accuracy * len(result.predictions)))
+        console.print(
+            f"  accuracy  : [green]{result.accuracy:.4f}[/green]"
+            f"  ({n_correct}/{len(result.predictions)})"
+        )
 
 
 @app.command(name="eval")
 def eval_cmd(
-    questions_path: Path = typer.Argument(..., help="Official CASTLE questions JSON"),
+    questions_path: Path = typer.Argument(..., help="CASTLE questions JSON or CSV"),
     predictions_path: Path = typer.Argument(..., help="Predictions JSON"),
     answers_path: Optional[Path] = typer.Option(
-        None, "--answers", help="Ground-truth answer key JSON"
+        None, "--answers", help="Ground-truth answer key JSON (not needed for CSV)"
     ),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    wandb: bool = typer.Option(False, "--wandb", help="Log results to Weights & Biases"),
 ) -> None:
     """Evaluate predictions against ground truth and export submission JSON."""
     from castlerag.eval.io import compute_accuracy, export_submission, load_predictions
@@ -616,8 +627,13 @@ def eval_cmd(
         f"{len(questions)} questions, {len(predictions)} predictions"
     )
 
-    if answers_path:
-        accuracy = compute_accuracy(questions, predictions, answers_path)
+    # Resolve accuracy: explicit answer key beats embedded ground_truth (from CSV).
+    has_gt = answers_path is not None or any(
+        q.ground_truth is not None for q in questions.values()
+    )
+    accuracy = compute_accuracy(questions, predictions, answers_path) if has_gt else None
+
+    if accuracy is not None:
         n_correct = int(round(accuracy * len(questions)))
         console.print(
             f"  accuracy : [green]{accuracy:.4f}[/green]  "
@@ -632,6 +648,15 @@ def eval_cmd(
     sub_path.parent.mkdir(parents=True, exist_ok=True)
     export_submission(predictions, sub_path)
     console.print(f"  submission written to [cyan]{sub_path}[/cyan]")
+
+    if wandb or cfg.wandb.enabled:
+        from castlerag.eval.wandb_logger import WandbLogger
+
+        wb = WandbLogger(cfg, n_questions=len(questions))
+        wb.log_summary(accuracy, diversity=None, n_questions=len(questions))
+        wb.log_artifacts([sub_path, predictions_path])
+        wb.finish()
+        console.print("  wandb     : [cyan]run logged[/cyan]")
 
 
 @app.command(name="smoke-test")

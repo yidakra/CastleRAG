@@ -720,3 +720,21 @@ def test_load_questions_csv_accuracy_with_wrong_predictions(tmp_path: Path):
     wrong = {qid: Prediction(question_id=qid, predicted_answer=wrong_letter) for qid in qs}  # type: ignore[arg-type]
     acc = compute_accuracy(qs, wrong, answers_path=None)
     assert acc == 0.0
+
+
+# ---------------------------------------------------------------------------
+# WandbLogger no-op tests (wandb not installed in CI)
+# ---------------------------------------------------------------------------
+
+def test_wandb_logger_noop_when_not_installed(monkeypatch):
+    """WandbLogger must be a silent no-op when wandb is absent."""
+    import castlerag.eval.wandb_logger as wl
+    monkeypatch.setattr(wl, "_wandb", lambda: None)
+    from castlerag.config import CastleRAGConfig
+    cfg = CastleRAGConfig()
+    logger = wl.WandbLogger(cfg, n_questions=5)
+    assert not logger._active
+    # All methods must be callable without error when inactive
+    logger.log_summary(0.5, {"mean_cameras": 2.0}, 5)
+    logger.log_artifacts([Path("/nonexistent/file.json")])
+    logger.finish()

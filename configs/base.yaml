@@ -106,6 +106,12 @@ ui:
   #                 rrf_normalized when the reranker did not run (offline mode).
   score_mode: "reranker"  # rrf_normalized | cosine | reranker
 
+wandb:
+  enabled: false          # set to true or pass --wandb to castlerag answer/eval
+  project: "castlerag"
+  entity: ""              # your W&B username or team; leave blank to use default
+  run_name: ""            # auto-generated if blank
+
 # BLOCKED: do not enable until a CASTLE QA train/val split is explicitly found
 lora:
   enabled: false

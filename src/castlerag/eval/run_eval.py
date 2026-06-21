@@ -181,6 +181,7 @@ def run_eval(
     question_ids: Optional[Iterable[str]] = None,
     max_questions: Optional[int] = None,
     pipeline: Optional[EvalPipeline] = None,
+    use_wandb: bool = False,
 ) -> EvalRunResult:
     """Run the full prediction loop and write output files.
 
@@ -204,6 +205,10 @@ def run_eval(
         predictions_path=predictions_path,
     )
     active_pipeline = pipeline or _build_default_pipeline(cfg)
+
+    from castlerag.eval.wandb_logger import WandbLogger
+
+    wb = WandbLogger(cfg, n_questions=len(selected)) if (use_wandb or cfg.wandb.enabled) else None
 
     predictions: Dict[str, Prediction] = {}
     traces: List[dict] = []
@@ -230,6 +235,8 @@ def run_eval(
                 "predicted_answer": result.prediction.predicted_answer,
             }
         )
+        if wb is not None:
+            wb.log_question(question, result)
 
     write_predictions(predictions, outputs.predictions)
     write_evidence_traces(traces, outputs.evidence_traces)
@@ -237,8 +244,13 @@ def run_eval(
 
     diversity = compute_diversity_metrics(traces)
 
+    # Compute accuracy from an explicit answer key, or fall back to embedded
+    # ground_truth (populated by the CSV loader) when available.
     accuracy: Optional[float] = None
-    if answers_path is not None:
+    has_gt = answers_path is not None or any(
+        q.ground_truth is not None for q in selected.values()
+    )
+    if has_gt:
         accuracy = compute_accuracy(selected, predictions, answers_path)
 
     outputs.metrics.parent.mkdir(parents=True, exist_ok=True)
@@ -254,6 +266,13 @@ def run_eval(
             indent=2,
         )
     )
+
+    if wb is not None:
+        wb.log_summary(accuracy, diversity, len(selected))
+        wb.log_artifacts(
+            [outputs.predictions, outputs.submissions, outputs.evidence_traces]
+        )
+        wb.finish()
 
     return EvalRunResult(
         predictions=predictions,

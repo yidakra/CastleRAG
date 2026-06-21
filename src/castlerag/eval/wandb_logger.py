@@ -1,0 +1,164 @@
+"""Optional Weights & Biases logging for CastleRAG eval runs.
+
+Importing this module is always safe — if ``wandb`` is not installed the
+logger is a no-op and nothing is logged.  Enable logging by setting
+``cfg.wandb.enabled = true`` in config or passing ``use_wandb=True`` to
+``run_eval``.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from castlerag.config import CastleRAGConfig
+    from castlerag.eval.run_eval import QuestionResult
+    from castlerag.schemas import EvalQuestion
+
+
+def _wandb() -> Any:
+    try:
+        import wandb  # type: ignore[import]
+
+        return wandb
+    except ImportError:
+        return None
+
+
+def _flat_config(cfg: "CastleRAGConfig", n_questions: int) -> Dict[str, Any]:
+    """Flatten the parts of cfg that are meaningful hyperparameters for a run."""
+    return {
+        "model/generation": cfg.generation.model,
+        "model/reranker": cfg.reranking.model,
+        "retrieval/rrf_k": cfg.retrieval.rrf_k,
+        "retrieval/transcript_top_k": cfg.retrieval.transcript_top_k,
+        "retrieval/max_evidence_rows": cfg.retrieval.max_evidence_rows,
+        "reranking/top_k": cfg.reranking.top_k,
+        "reranking/min_relevance": cfg.reranking.min_relevance,
+        "reranking/relevance_weight": cfg.reranking.relevance_weight,
+        "ui/score_mode": cfg.ui.score_mode,
+        "n_questions": n_questions,
+    }
+
+
+class WandbLogger:
+    """Thin wrapper around wandb for CastleRAG eval runs.
+
+    All public methods are no-ops when wandb is not installed or the run
+    failed to initialise.
+    """
+
+    def __init__(
+        self,
+        cfg: "CastleRAGConfig",
+        n_questions: int,
+        run_name: Optional[str] = None,
+    ) -> None:
+        w = _wandb()
+        if w is None:
+            self._active = False
+            return
+
+        entity = cfg.wandb.entity or None
+        name = run_name or cfg.wandb.run_name or None
+        try:
+            self._run = w.init(
+                project=cfg.wandb.project,
+                entity=entity,
+                name=name,
+                config=_flat_config(cfg, n_questions),
+                reinit=True,
+            )
+            self._table = w.Table(
+                columns=[
+                    "question_id",
+                    "query",
+                    "predicted",
+                    "ground_truth",
+                    "correct",
+                    "route",
+                    "n_evidence_cameras",
+                ]
+            )
+            self._active = True
+            self._n_correct = 0
+            self._n_graded = 0
+        except Exception:  # pragma: no cover
+            self._active = False
+
+    # ------------------------------------------------------------------
+
+    def log_question(
+        self,
+        question: "EvalQuestion",
+        result: "QuestionResult",
+    ) -> None:
+        if not self._active:
+            return
+        import wandb  # type: ignore[import]
+
+        gt = question.ground_truth
+        predicted = result.prediction.predicted_answer
+        is_correct = (predicted == gt) if gt is not None else None
+        n_cameras = len(
+            {h.camera_id for h in result.evidence_rows if h.camera_id is not None}
+        )
+        self._table.add_data(
+            question.question_id,
+            question.query,
+            predicted,
+            gt,
+            is_correct,
+            result.hints.route,
+            n_cameras,
+        )
+        log_dict: Dict[str, Any] = {
+            "question/route": result.hints.route,
+            "question/n_evidence_cameras": n_cameras,
+            "question/n_retrieved": len(result.retrieved),
+        }
+        if is_correct is not None:
+            self._n_graded += 1
+            if is_correct:
+                self._n_correct += 1
+            log_dict["accuracy/running"] = self._n_correct / self._n_graded
+        wandb.log(log_dict)
+
+    def log_summary(
+        self,
+        accuracy: Optional[float],
+        diversity: Optional[Dict[str, Any]],
+        n_questions: int,
+    ) -> None:
+        if not self._active:
+            return
+        import wandb  # type: ignore[import]
+
+        wandb.log({"predictions": self._table})
+        summary: Dict[str, Any] = {"n_questions": n_questions}
+        if accuracy is not None:
+            summary["accuracy"] = accuracy
+        for k, v in (diversity or {}).items():
+            summary[f"diversity/{k}"] = v
+        for k, v in summary.items():
+            wandb.run.summary[k] = v  # type: ignore[union-attr]
+
+    def log_artifacts(self, paths: List[Path]) -> None:
+        if not self._active:
+            return
+        import wandb  # type: ignore[import]
+
+        artifact = wandb.Artifact("eval_outputs", type="eval")
+        for p in paths:
+            if p.exists():
+                artifact.add_file(str(p))
+        wandb.run.log_artifact(artifact)  # type: ignore[union-attr]
+
+    def finish(self) -> None:
+        if not self._active:
+            return
+        import wandb  # type: ignore[import]
+
+        wandb.finish()
+        self._active = False

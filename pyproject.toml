@@ -47,6 +47,10 @@ ui = [
     "dash-mantine-components>=2.0",
     "plotly>=5.20",
 ]
+# Experiment tracking (optional — gracefully skipped when not installed)
+tracking = [
+    "wandb>=0.17",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/castlerag"]

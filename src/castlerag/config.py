@@ -162,6 +162,13 @@ class RoutingConfig(BaseModel):
     model: str = "Qwen/Qwen3-VL-8B-Instruct"
 
 
+class WandbConfig(BaseModel):
+    enabled: bool = False
+    project: str = "castlerag"
+    entity: str = ""
+    run_name: str = ""
+
+
 class UIConfig(BaseModel):
     # Controls which score is shown in the dashboard's per-camera bar chart.
     # rrf_normalized: RRF score normalised to [0,1] relative to the top moment.
@@ -182,6 +189,7 @@ class CastleRAGConfig(BaseModel):
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
+    wandb: WandbConfig = Field(default_factory=WandbConfig)
     lora: LoRAConfig = Field(default_factory=LoRAConfig)
     slurm: SlurmConfig = Field(default_factory=SlurmConfig)
     version: str = "0.1.0"
