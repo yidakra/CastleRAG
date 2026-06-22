@@ -15,6 +15,7 @@ from rich.console import Console
 from castlerag.config import CastleRAGConfig, load_config
 from castlerag.embed.omniembed import OmniEmbedClient
 from castlerag.eval import PipelineDependencyError, load_questions, run_eval
+from castlerag.eval.run_eval import _omniembed_base_url
 from castlerag.index import get_client, load_bm25_index
 from castlerag.index.pipeline import (
     build_bm25_artifact,
@@ -410,7 +411,7 @@ def embed(
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
-        vllm_base_url=_vllm_base_url(),
+        vllm_base_url=_omniembed_base_url(cfg),
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
@@ -486,7 +487,7 @@ def index(
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
-        vllm_base_url=_vllm_base_url(),
+        vllm_base_url=_omniembed_base_url(cfg),
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
@@ -539,7 +540,7 @@ def retrieve(
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
-        vllm_base_url=_vllm_base_url(),
+        vllm_base_url=_omniembed_base_url(cfg),
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )

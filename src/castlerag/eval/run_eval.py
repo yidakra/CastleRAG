@@ -334,7 +334,7 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
-        vllm_base_url=_omniembed_base_url(),
+        vllm_base_url=_omniembed_base_url(cfg),
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
@@ -505,15 +505,22 @@ def _vllm_base_url() -> Optional[str]:
     return os.getenv("VLLM_BASE_URL")
 
 
-def _omniembed_base_url() -> Optional[str]:
+def _omniembed_base_url(cfg: Optional[CastleRAGConfig] = None) -> Optional[str]:
     """Return the base URL the OmniEmbed embeddings client should connect to.
 
-    Falls back to ``VLLM_BASE_URL`` so existing single-endpoint / query-cache
-    setups keep working unchanged.  Set ``OMNIEMBED_BASE_URL`` when embeddings and
-    generation are served by *separate* endpoints — e.g. the live UI, where
-    OmniEmbed runs on ``:8200`` and the Qwen3-VL chat model on ``:8201``.
+    Resolution order (issue #54):
+      1. ``OMNIEMBED_BASE_URL`` env var — explicit per-run override.
+      2. ``cfg.embedding.base_url`` — declared endpoint for two-endpoint
+         deployments (UI / eval / answer), so the embed client never depends on
+         remembering an env var.
+      3. ``VLLM_BASE_URL`` — back-compat fallback for single-endpoint / query-
+         cache setups where embeddings and generation share one server.
+
+    Without (1) or (2), a two-endpoint run would POST query embeddings to the
+    generation server and 404 on any query-cache miss.
     """
-    return os.getenv("OMNIEMBED_BASE_URL") or _vllm_base_url()
+    cfg_url = cfg.embedding.base_url if cfg is not None else None
+    return os.getenv("OMNIEMBED_BASE_URL") or cfg_url or _vllm_base_url()
 
 
 def _prepare_default_runtime(

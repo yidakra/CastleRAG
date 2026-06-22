@@ -71,6 +71,13 @@ class EmbeddingConfig(BaseModel):
     cache_dir: str = "data/derived/embeddings"
     vllm_tensor_parallel: int = 1
     vllm_gpu_memory_utilization: float = 0.90
+    # Base URL of the OmniEmbed embeddings server. Set this in two-endpoint
+    # deployments (UI / eval / answer) where embeddings are served separately
+    # from generation — e.g. OmniEmbed on :8200 and the Qwen3-VL chat model on
+    # :8201 — so query embeddings never get POSTed to the generation server
+    # (which 404s). When None, the runtime falls back to OMNIEMBED_BASE_URL then
+    # VLLM_BASE_URL, preserving single-endpoint setups. See issue #54.
+    base_url: Optional[str] = None
 
 
 class QdrantConfig(BaseModel):
