@@ -1,0 +1,402 @@
+{
+  "castle_8c5a13a1": {
+    "query": "During the first day workshop opening presentations, where was the notebook computer placed?",
+    "answers": {
+      "a": "On a folding ladder",
+      "b": "On a high chair brought from the kitchen",
+      "c": "On a wooden chair brought from the dining table",
+      "d": "On an ottoman chair"
+    },
+    "ground_truth": "b"
+  },
+  "castle_8662efd1": {
+    "query": "How many duck sculptures are on the top shelf to the right of the fireplace?",
+    "answers": {
+      "a": "3",
+      "b": "4",
+      "c": "6",
+      "d": "5"
+    },
+    "ground_truth": "d"
+  },
+  "castle_dc302ff6": {
+    "query": "How many eggs did Cathal put into the rice pudding?",
+    "answers": {
+      "a": "1",
+      "b": "2",
+      "c": "4",
+      "d": "3"
+    },
+    "ground_truth": "c"
+  },
+  "castle_6ce8724e": {
+    "query": "How many oranges were used to make the mulled wine?",
+    "answers": {
+      "a": "3",
+      "b": "4",
+      "c": "6",
+      "d": "5"
+    },
+    "ground_truth": "b"
+  },
+  "castle_bc5851b0": {
+    "query": "How much did Cathal spend on the four buzzers for the happy quiz?",
+    "answers": {
+      "a": "4 EUR",
+      "b": "9 EUR",
+      "c": "12 EUR",
+      "d": "16 EUR"
+    },
+    "ground_truth": "b"
+  },
+  "castle_614a9dd8": {
+    "query": "In which cupboard did Werner store the liquid measuring cup?",
+    "answers": {
+      "a": "The lower cupboard, to the left of the dishwasher.",
+      "b": "The upper cupboard, above the coffee machine.",
+      "c": "The cupboard next to the fridge.",
+      "d": "The lower cupboard, opposite the dishwasher."
+    },
+    "ground_truth": "d"
+  },
+  "castle_49e93b61": {
+    "query": "What alcohol percentage did the rum have that went into the mulled wine?",
+    "answers": {
+      "a": "60%",
+      "b": "65%",
+      "c": "70%",
+      "d": "80%"
+    },
+    "ground_truth": "a"
+  },
+  "castle_1b492021": {
+    "query": "What are Onanong and Tien doing when Allie is playing \"Twinkle Twinkle Little Star\" on the guitar?",
+    "answers": {
+      "a": "Unloading the dishwasher",
+      "b": "Playing the sea battle game",
+      "c": "Putting up the Christmas Tree",
+      "d": "Eating breakfast"
+    },
+    "ground_truth": "c"
+  },
+  "castle_20ca18d3": {
+    "query": "What brand is the fridge in the kitchen?",
+    "answers": {
+      "a": "Whirlpool",
+      "b": "Bosch",
+      "c": "Samsung",
+      "d": "Liebherr"
+    },
+    "ground_truth": "c"
+  },
+  "castle_5327d2d1": {
+    "query": "What brand of tea was available?",
+    "answers": {
+      "a": "Lyons",
+      "b": "Bewley's",
+      "c": "Barry's",
+      "d": "Punjana"
+    },
+    "ground_truth": "c"
+  },
+  "castle_c9483376": {
+    "query": "What colour was the rim of Werner's plate during breakfast on the first day?",
+    "answers": {
+      "a": "Green",
+      "b": "Yellow",
+      "c": "Gray",
+      "d": "White"
+    },
+    "ground_truth": "b"
+  },
+  "castle_b73fb1b1": {
+    "query": "What conference were many of the participants involved in organising in the upcoming October?",
+    "answers": {
+      "a": "CIKM",
+      "b": "ECIR",
+      "c": "ACM MM",
+      "d": "IEEE ICME"
+    },
+    "ground_truth": "c"
+  },
+  "castle_a193be1c": {
+    "query": "What did Bjorn shout out to see in the distance when he was on the patio with Klaus, Stevan, and Werner?",
+    "answers": {
+      "a": "Sheep",
+      "b": "Water",
+      "c": "Cathal",
+      "d": "Boat"
+    },
+    "ground_truth": "a"
+  },
+  "castle_52db5810": {
+    "query": "What did Cathal tell Stevan his heart rate was when he was making coffee?",
+    "answers": {
+      "a": "112",
+      "b": "87",
+      "c": "78",
+      "d": "92"
+    },
+    "ground_truth": "b"
+  },
+  "castle_f2aea868": {
+    "query": "What family name is on the coat of arms in the reading area?",
+    "answers": {
+      "a": "Keogh",
+      "b": "Healy",
+      "c": "O'Neill",
+      "d": "Salmon"
+    },
+    "ground_truth": "a"
+  },
+  "castle_2fd8aa98": {
+    "query": "What game did Bjorn suggest to play with the cameras?",
+    "answers": {
+      "a": "Hide and Seek",
+      "b": "Chicken",
+      "c": "Freeze Tag",
+      "d": "Red Light, Green Light"
+    },
+    "ground_truth": "b"
+  },
+  "castle_5ddc0f11": {
+    "query": "What is on the back of Werner's t-shirt on the first day?",
+    "answers": {
+      "a": "ABTG",
+      "b": "KATG",
+      "c": "KBTG",
+      "d": "RBTG"
+    },
+    "ground_truth": "c"
+  },
+  "castle_5413e5b3": {
+    "query": "What is the capacity of the external batteries powering the wearable cameras?",
+    "answers": {
+      "a": "10000mAh",
+      "b": "5000mAh",
+      "c": "30000mAh",
+      "d": "20000mAh"
+    },
+    "ground_truth": "d"
+  },
+  "castle_a0307658": {
+    "query": "What item did Bao give to Stevan, which was then passed to Luca in the kitchen?",
+    "answers": {
+      "a": "A travel plug",
+      "b": "A ball",
+      "c": "A camera",
+      "d": "A meal list"
+    },
+    "ground_truth": "a"
+  },
+  "castle_f2d6e8b0": {
+    "query": "What medium did Allie use for her painting of a Christmas tree and a vase of flowers?",
+    "answers": {
+      "a": "Oil Paint",
+      "b": "Acrylic Paint",
+      "c": "Colored Pencils",
+      "d": "Water Colors"
+    },
+    "ground_truth": "d"
+  },
+  "castle_676af966": {
+    "query": "What organisation's logo is on Werner's apron?",
+    "answers": {
+      "a": "W3C",
+      "b": "ACM",
+      "c": "IEEE",
+      "d": "Wikimedia"
+    },
+    "ground_truth": "a"
+  },
+  "castle_7ce492a2": {
+    "query": "What time did Allie and Linh plan to leave on Saturday at first?",
+    "answers": {
+      "a": "10 am",
+      "b": "5 am",
+      "c": "7 am",
+      "d": "5 pm"
+    },
+    "ground_truth": "b"
+  },
+  "castle_e4d38b25": {
+    "query": "What was Florian using the pot to smash?",
+    "answers": {
+      "a": "Cashews",
+      "b": "Peanuts",
+      "c": "Pork chops",
+      "d": "Chicken fillet"
+    },
+    "ground_truth": "b"
+  },
+  "castle_8e749334": {
+    "query": "What was for lunch on the first day?",
+    "answers": {
+      "a": "Risotto",
+      "b": "Lasagna",
+      "c": "Curry",
+      "d": "Glazed Ham"
+    },
+    "ground_truth": "a"
+  },
+  "castle_331ee6d8": {
+    "query": "What was not part of breakfast on the first day?",
+    "answers": {
+      "a": "Sausages",
+      "b": "Bacon",
+      "c": "Fried Eggs",
+      "d": "Mushrooms"
+    },
+    "ground_truth": "c"
+  },
+  "castle_75bf87cf": {
+    "query": "What was the brand of model airplane that was sitting on the table while people were building a tower with the wooden blocks?",
+    "answers": {
+      "a": "Revell",
+      "b": "Tamina",
+      "c": "SuperFly",
+      "d": "Airfix"
+    },
+    "ground_truth": "d"
+  },
+  "castle_4b0253f3": {
+    "query": "What was the first category in the happy quiz?",
+    "answers": {
+      "a": "Electronics",
+      "b": "Sport",
+      "c": "World Capitals",
+      "d": "K-Pop"
+    },
+    "ground_truth": "b"
+  },
+  "castle_5a95a00d": {
+    "query": "When did Cathal want rösti?",
+    "answers": {
+      "a": "Wednesday",
+      "b": "Tuesday",
+      "c": "Thursday",
+      "d": "Friday"
+    },
+    "ground_truth": "c"
+  },
+  "castle_5376a89f": {
+    "query": "When was the first one of the two pineapples cut?",
+    "answers": {
+      "a": "Day 1 8 pm",
+      "b": "Day 1 6 pm",
+      "c": "Day 1 7 pm",
+      "d": "Day 2 8 am"
+    },
+    "ground_truth": "a"
+  },
+  "castle_95fef82c": {
+    "query": "Which operating system was planned to be installed on the spare laptop?",
+    "answers": {
+      "a": "Ubuntu",
+      "b": "Fedora",
+      "c": "Windows",
+      "d": "MacOS"
+    },
+    "ground_truth": "a"
+  },
+  "castle_76fe9e82": {
+    "query": "Who brought a non-working camera to Luca to fix on the first day?",
+    "answers": {
+      "a": "Florian",
+      "b": "Onanong",
+      "c": "Werner",
+      "d": "Tien"
+    },
+    "ground_truth": "d"
+  },
+  "castle_e8c60b6b": {
+    "query": "Who brought the coffee pot to the table for breakfast on the first day?",
+    "answers": {
+      "a": "Klaus",
+      "b": "Allie",
+      "c": "Werner",
+      "d": "Stevan"
+    },
+    "ground_truth": "c"
+  },
+  "castle_6254be54": {
+    "query": "Who dealt first in the first game of poker?",
+    "answers": {
+      "a": "Onanong",
+      "b": "Cathal",
+      "c": "Florian",
+      "d": "Linh"
+    },
+    "ground_truth": "c"
+  },
+  "castle_3b504813": {
+    "query": "Who gave the first presentation for the workshop on the first day?",
+    "answers": {
+      "a": "Cathal",
+      "b": "Klaus",
+      "c": "Luca",
+      "d": "Bjorn"
+    },
+    "ground_truth": "a"
+  },
+  "castle_d0ccc2a2": {
+    "query": "Who helped Luca with the eggs in the kitchen while Onanong was playing guitar?",
+    "answers": {
+      "a": "Allie",
+      "b": "Cathal",
+      "c": "Stevan",
+      "d": "Tien"
+    },
+    "ground_truth": "c"
+  },
+  "castle_d469babe": {
+    "query": "Who made the joke about “avoiding content ID matches” during the Happy Quiz on the first day?",
+    "answers": {
+      "a": "Cathal",
+      "b": "Allie",
+      "c": "Florian",
+      "d": "Bjorn"
+    },
+    "ground_truth": "c"
+  },
+  "castle_28aaa960": {
+    "query": "Who was driving Cathal's car on the morning of the first day?",
+    "answers": {
+      "a": "Bao",
+      "b": "Florian",
+      "c": "Allie",
+      "d": "Stevan"
+    },
+    "ground_truth": "c"
+  },
+  "castle_60f6fe3e": {
+    "query": "Who was the first person to unfold the green poker mat?",
+    "answers": {
+      "a": "Cathal",
+      "b": "Stevan",
+      "c": "Allie",
+      "d": "Onanong"
+    },
+    "ground_truth": "d"
+  },
+  "castle_76d6e79b": {
+    "query": "Who was the second person to present slides at the workshop opening on the first day?",
+    "answers": {
+      "a": "Cathal",
+      "b": "Luca",
+      "c": "Klaus",
+      "d": "Werner"
+    },
+    "ground_truth": "c"
+  },
+  "castle_4c7d1a89": {
+    "query": "Who won the first round of UNO?",
+    "answers": {
+      "a": "Allie",
+      "b": "Bjorn",
+      "c": "Klaus",
+      "d": "Tien"
+    },
+    "ground_truth": "c"
+  }
+}

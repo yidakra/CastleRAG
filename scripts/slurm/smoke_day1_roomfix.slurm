@@ -26,7 +26,7 @@ set -euo pipefail
 
 CONF="configs/snellius_me.yaml"
 SC="/scratch-shared/${USER}"
-QFILE="data/smoke_day1.csv"
+QFILE="data/smoke_day1_questions.json"
 NQ=40
 COLL="castle_multimodal_v1"
 export HF_HOME="${SC}/hf_cache"
@@ -104,20 +104,28 @@ echo
 # --- issue #50 summary: zero-evidence (is_supported=False) breakdown ---
 echo "[smoke] === issue #50 summary (zero-evidence questions) ==="
 PRED=$(find "${OUT}" -name 'predictions*.json' | head -1)
-python3 - "$PRED" <<'PY'
+python3 - "$PRED" "${QFILE}" <<'PY'
 import json, sys
 try:
     preds = json.load(open(sys.argv[1]))
 except Exception as e:
     print("could not read predictions:", e); sys.exit(0)
+qtext = {}
+try:
+    qtext = {k: v.get("query", "") for k, v in json.load(open(sys.argv[2])).items()}
+except Exception:
+    pass
 items = list(preds.values()) if isinstance(preds, dict) else preds
 unsupported = [p for p in items if isinstance(p, dict) and p.get("is_supported") is False]
 print(f"total predictions      : {len(items)}")
 print(f"zero-evidence (is_supported=False): {len(unsupported)}  "
       f"(baseline #50 was 8/40)")
 for p in unsupported:
-    print(f"  - {p.get('question_id')}  predicted={p.get('predicted_answer')}  "
+    qid = p.get("question_id")
+    print(f"  - {qid}  predicted={p.get('predicted_answer')}  "
           f"priors={p.get('support_priors')}")
+    if qtext.get(qid):
+        print(f"      Q: {qtext[qid]}")
 PY
 
 echo "[smoke] DONE $(date -Iseconds)"
