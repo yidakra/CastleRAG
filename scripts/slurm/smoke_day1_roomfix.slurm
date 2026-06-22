@@ -95,8 +95,9 @@ fi
 # 8201), so a live query-embed on a cache MISS would POST /v1/embeddings to the
 # gen server and 404. Precomputing every query variant against OmniEmbed (8200)
 # gives 100% cache hits, matching the designed full_day1 flow. Written to a
-# smoke-specific file so the existing query_cache.npz is untouched.
-SMOKE_CACHE="${SC}/smoke_day1_query_cache.npz"
+# smoke-specific, job-unique file so the existing query_cache.npz is untouched
+# and concurrent smoke jobs cannot clobber each other's cache.
+SMOKE_CACHE="${SC}/smoke_day1_query_cache_${SLURM_JOB_ID}.npz"
 echo "[smoke] === precompute query cache (${NQ} questions) ==="
 OMNIEMBED_URL="http://localhost:8200/v1" \
   python scripts/precompute_queries.py "${QFILE}" \
@@ -116,7 +117,12 @@ echo
 
 # --- issue #50 summary: zero-evidence (is_supported=False) breakdown ---
 echo "[smoke] === issue #50 summary (zero-evidence questions) ==="
-PRED=$(find "${OUT}" -name 'predictions*.json' | head -1)
+# smoke-test writes a deterministic predictions.json; read it directly rather
+# than `find | head -1`, which could pick a stale artifact from an earlier run.
+PRED="${OUT}/predictions.json"
+if [ ! -f "${PRED}" ]; then
+  echo "[smoke] ABORT: missing predictions artifact at ${PRED}"; exit 2
+fi
 python3 - "$PRED" "${QFILE}" <<'PY'
 import json, sys
 try:
