@@ -494,6 +494,27 @@ def _needs_refinement(review: Dict[str, Dict[str, str]]) -> bool:
     )
 
 
+def _rejected_cameras(
+    thread: Optional[List[Dict[str, object]]],
+    current_review: Optional[Dict[str, Dict[str, str]]] = None,
+) -> List[str]:
+    """Camera ids the reviewer rejected anywhere on this thread.
+
+    Accumulates across every frozen iteration plus the in-flight review, so a
+    camera rejected once stays excluded from all later refine iterations.
+    """
+    rejected: set = set()
+    for group in thread or []:
+        for _moment_id, review in (group.get("reviews") or {}).items():  # type: ignore[union-attr]
+            for camera_id, info in (review or {}).items():
+                if isinstance(info, dict) and info.get("state") == "rejected":
+                    rejected.add(camera_id)
+    for camera_id, info in (current_review or {}).items():
+        if isinstance(info, dict) and info.get("state") == "rejected":
+            rejected.add(camera_id)
+    return sorted(rejected)
+
+
 def _is_live_group(thread: List[Dict[str, object]], group_id: str) -> bool:
     """Return True when ``group_id`` is the latest (editable) iteration.
 
@@ -758,7 +779,12 @@ def register_callbacks(
 
         new_iteration = current_iteration + 1
         seq = int(store.get("next_seq", len(thread) + 1) or (len(thread) + 1))
-        result = engine.refine(str(claim), refined_query, new_iteration)
+        result = engine.refine(
+            str(claim),
+            refined_query,
+            new_iteration,
+            exclude_cameras=_rejected_cameras(thread, review),
+        )
         group = _serialize_group(
             result,
             group_id=f"g{seq}",

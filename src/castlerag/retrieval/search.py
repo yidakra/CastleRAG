@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
@@ -77,6 +77,14 @@ def retrieve(
         room_hint=hints.room,
         top_k=retrieval_cfg.transcript_top_k,
     )
+    # The dense lanes hard-exclude rejected cameras server-side, but BM25 runs
+    # locally and is fused in via RRF — so drop excluded cameras here too, or
+    # they leak back through the transcript lane.
+    if hints.exclude_cameras:
+        _excluded = set(hints.exclude_cameras)
+        transcript_bm25 = [
+            hit for hit in transcript_bm25 if hit.camera_id not in _excluded
+        ]
     query_vectors = np.asarray(
         embed_client.embed_texts(query_variants), dtype=np.float32
     )
@@ -96,6 +104,7 @@ def retrieve(
             day=hints.day,
             participant_id=hints.participant,
             room=hints.room,
+            exclude_camera_ids=hints.exclude_cameras,
         )
         for query_vector in query_vectors
     ]
@@ -126,6 +135,7 @@ def retrieve(
                 day=hints.day,
                 participant_id=hints.participant,
                 room=hints.room,
+                exclude_camera_ids=hints.exclude_cameras,
             )
             if hits:
                 hits = _apply_score_thresholds(
@@ -184,6 +194,7 @@ def _dense_search(
     time_range_start_ms: Optional[int] = None,
     time_range_end_ms: Optional[int] = None,
     has_speech: Optional[bool] = None,
+    exclude_camera_ids: Optional[Sequence[str]] = None,
 ) -> List[RetrievalHit]:
     """Run one filtered dense Qdrant search and normalize the results."""
     query_filter = build_filter(
@@ -196,6 +207,7 @@ def _dense_search(
         time_range_start_ms=time_range_start_ms,
         time_range_end_ms=time_range_end_ms,
         has_speech=has_speech,
+        exclude_camera_ids=exclude_camera_ids,
     )
     response = qdrant_client.query_points(
         collection_name=collection_name,
