@@ -17,6 +17,10 @@ preprocessing:
   chunks_dir:    "/scratch-shared/$USER/castle_derived/chunks"
 embedding:
   cache_dir: "/scratch-shared/$USER/castle_derived/embeddings"
+  # OmniEmbed runs on :8200 in the two-endpoint Snellius setup (gen on :8201).
+  # Declaring it here keeps query embeddings off the generation server on a
+  # query-cache miss, instead of relying on an OMNIEMBED_BASE_URL export. (#54)
+  base_url: "http://localhost:8200/v1"
 qdrant:
   host: "localhost"
   port: 6333

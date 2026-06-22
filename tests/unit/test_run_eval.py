@@ -639,6 +639,36 @@ class TestOmniEmbedBaseUrl:
         monkeypatch.delenv("VLLM_BASE_URL", raising=False)
         assert _omniembed_base_url() is None
 
+    def test_config_base_url_used_over_vllm_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Two-endpoint setup with no OMNIEMBED_BASE_URL export: the config's
+        # declared embed endpoint must win over the VLLM_BASE_URL (gen) fallback
+        # so query embeds never 404 on the generation server. (#54)
+        monkeypatch.delenv("OMNIEMBED_BASE_URL", raising=False)
+        monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8201/v1")
+        cfg = SimpleNamespace(
+            embedding=SimpleNamespace(base_url="http://localhost:8200/v1")
+        )
+        assert _omniembed_base_url(cfg) == "http://localhost:8200/v1"
+
+    def test_dedicated_env_overrides_config_base_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("OMNIEMBED_BASE_URL", "http://localhost:9000/v1")
+        cfg = SimpleNamespace(
+            embedding=SimpleNamespace(base_url="http://localhost:8200/v1")
+        )
+        assert _omniembed_base_url(cfg) == "http://localhost:9000/v1"
+
+    def test_config_base_url_none_falls_back_to_vllm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.delenv("OMNIEMBED_BASE_URL", raising=False)
+        monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8201/v1")
+        cfg = SimpleNamespace(embedding=SimpleNamespace(base_url=None))
+        assert _omniembed_base_url(cfg) == "http://localhost:8201/v1"
+
 
 # ---------------------------------------------------------------------------
 # _build_vllm_chat_client
