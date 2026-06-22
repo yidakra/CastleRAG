@@ -436,7 +436,8 @@ def _support_priors(rng: random.Random) -> Dict[str, float]:
 
 
 # Verdicts that mark a camera angle as a weak / unconvincing perspective.
-_WEAK_VERDICTS = {"flagged", "rejected"}
+_FLAGGED_VERDICTS = {"flagged"}
+_REJECTED_VERDICTS = {"rejected"}
 
 # Deterministic per-verdict phrasing for the offline justification draft.
 _JUSTIFICATION_TEMPLATE = {
@@ -478,16 +479,22 @@ def compose_refined_query(claim: str, reviews: Dict[str, Dict[str, str]]) -> str
     """
     claim = (claim or "the claim").strip().rstrip(".")
     notes = []
-    weak = []
+    flagged = []
+    rejected = []
+
     for camera_id, info in reviews.items():
         justification = (info.get("justification") or "").strip()
         if justification:
             notes.append(f"{camera_id}: {justification}")
-        if info.get("state") in _WEAK_VERDICTS:
-            weak.append(camera_id)
+        if info.get("state") in _FLAGGED_VERDICTS:
+            flagged.append(camera_id)
+        if info.get("state") in _REJECTED_VERDICTS:
+            rejected.append(camera_id)
     query = f"Re-examine whether {claim}."
     if notes:
         query += " Reviewer notes — " + "; ".join(notes) + "."
-    if weak:
-        query += " Find a clearer angle for " + ", ".join(weak) + "."
+    if flagged:
+        query += " Find a clearer angle for " + ", ".join(flagged) + "."
+    if rejected:
+        query += " Ignore " + ", ".join(rejected) + " from this search."
     return query
