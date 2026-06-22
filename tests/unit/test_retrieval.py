@@ -242,6 +242,46 @@ def test_retrieve_fuses_transcript_and_multimodal_hits():
     assert len(hits) <= 50
 
 
+def test_retrieve_excludes_rejected_cameras_from_bm25_lane():
+    # Regression: dense lanes hard-exclude via must_not server-side, but the
+    # BM25 transcript lane is fused locally — excluded cameras must be dropped
+    # there too, or they leak back through RRF (PR #56 review finding).
+    class FakeBM25:
+        def get_scores(self, tokens: list[str]) -> np.ndarray:
+            return np.asarray([3.0, 1.0], dtype=np.float32)
+
+    class FakeEmbedClient:
+        def embed_texts(self, texts: list[str]) -> np.ndarray:
+            return np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+
+    class EmptyQdrant:
+        # Dense lanes return nothing, isolating the BM25 transcript lane.
+        def query_points(self, **kwargs):
+            return SimpleNamespace(points=[])
+
+    bm25_bundle = SimpleNamespace(bm25=FakeBM25(), windows=_windows())  # both "Allie"
+    cfg = SimpleNamespace(
+        transcript_top_k=30, event_summary_top_k=20, video_top_k=20,
+        photo_top_k=16, aux_video_top_k=8, heartrate_top_k=8, gaze_top_k=8,
+        thermal_top_k=8, rrf_k=60, max_candidate_videos=4, frames_per_candidate=32,
+        max_aux_images=16, max_evidence_rows=50, modality_score_thresholds={},
+    )
+
+    def _run(exclude: tuple) -> list:
+        hints = route_question(_question().query, _question().answers)
+        hints.exclude_cameras = exclude
+        return retrieve(
+            question=_question(), hints=hints, qdrant_client=EmptyQdrant(),
+            collection_name="castle_test", bm25_index=bm25_bundle,
+            embed_client=FakeEmbedClient(), retrieval_cfg=cfg,
+        )
+
+    # Without exclusion the BM25 "Allie" windows surface through the lane...
+    assert any(h.camera_id == "Allie" for h in _run(()))
+    # ...and excluding "Allie" drops them from the fused transcript lane.
+    assert all(h.camera_id != "Allie" for h in _run(("Allie",)))
+
+
 def test_retrieve_consumes_router_budget_profile_without_reparsing():
     class FakeBM25:
         def get_scores(self, tokens: list[str]) -> np.ndarray:

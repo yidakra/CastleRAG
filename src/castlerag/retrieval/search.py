@@ -77,6 +77,14 @@ def retrieve(
         room_hint=hints.room,
         top_k=retrieval_cfg.transcript_top_k,
     )
+    # The dense lanes hard-exclude rejected cameras server-side, but BM25 runs
+    # locally and is fused in via RRF — so drop excluded cameras here too, or
+    # they leak back through the transcript lane.
+    if hints.exclude_cameras:
+        _excluded = set(hints.exclude_cameras)
+        transcript_bm25 = [
+            hit for hit in transcript_bm25 if hit.camera_id not in _excluded
+        ]
     query_vectors = np.asarray(
         embed_client.embed_texts(query_variants), dtype=np.float32
     )
