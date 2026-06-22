@@ -90,9 +90,22 @@ if [ "${PTS}" -lt 25000 ]; then
   echo "[smoke] ABORT: collection has ${PTS} points (<25000); index looks altered. Not running."; exit 2
 fi
 
+# --- pre-warm the query cache for THIS question set (OmniEmbed @ 8200) ---
+# The eval embed client is pointed at VLLM_BASE_URL (the Qwen3-VL gen server on
+# 8201), so a live query-embed on a cache MISS would POST /v1/embeddings to the
+# gen server and 404. Precomputing every query variant against OmniEmbed (8200)
+# gives 100% cache hits, matching the designed full_day1 flow. Written to a
+# smoke-specific file so the existing query_cache.npz is untouched.
+SMOKE_CACHE="${SC}/smoke_day1_query_cache.npz"
+echo "[smoke] === precompute query cache (${NQ} questions) ==="
+OMNIEMBED_URL="http://localhost:8200/v1" \
+  python scripts/precompute_queries.py "${QFILE}" \
+    --model Tevatron/OmniEmbed-v0.1-multivent \
+    --out "${SMOKE_CACHE}"
+
 # --- 40-question day-1 smoke eval (retrieve -> rerank -> generate) ---
 export VLLM_BASE_URL="http://localhost:8201/v1"
-export OMNIEMBED_QUERY_CACHE="${SC}/castle_derived/embeddings/query_cache.npz"
+export OMNIEMBED_QUERY_CACHE="${SMOKE_CACHE}"
 echo "[smoke] === smoke-test (${NQ} questions, ${QFILE}) ==="
 castlerag smoke-test "${QFILE}" --n "${NQ}" --config "${CONF}"
 
