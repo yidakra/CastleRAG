@@ -362,6 +362,27 @@ def test_build_filter_camera_id():
     assert "camera_id" in keys
 
 
+def test_build_filter_exclude_camera_ids_adds_must_not():
+    f = build_filter(day="day1", exclude_camera_ids=["Kitchen", "Allie"])
+    assert f is not None
+    assert [c.key for c in f.must] == ["day"]
+    assert [c.match.value for c in f.must_not] == ["Kitchen", "Allie"]
+
+
+def test_build_filter_only_exclude_returns_must_not_only():
+    f = build_filter(exclude_camera_ids=["Kitchen"])
+    assert f is not None
+    assert f.must is None
+    assert len(f.must_not) == 1
+
+
+def test_build_filter_empty_exclude_is_noop():
+    # An empty exclusion must not create a filter on its own (keeps eval path
+    # unfiltered when no cameras were rejected).
+    assert build_filter(exclude_camera_ids=[]) is None
+    assert build_filter(exclude_camera_ids=None) is None
+
+
 def test_build_filter_participant_id():
     f = build_filter(participant_id="Bjorn")
     assert f is not None

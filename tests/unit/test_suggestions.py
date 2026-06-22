@@ -97,6 +97,22 @@ def test_suggest_refined_query_text_includes_weak_cameras():
     assert "Luca" in user and "Klaus" in user  # weak angles surfaced
 
 
+def test_suggest_refined_query_text_separates_rejected_from_flagged():
+    # The LLM-path query must steer toward flagged angles but AWAY from rejected
+    # ones (not lump both into "needs a clearer view").
+    client = FakeClient("refined")
+    reviews = {
+        "Luca": {"state": "rejected", "justification": "occluded"},
+        "Klaus": {"state": "flagged", "justification": "blurry"},
+    }
+    suggest_refined_query_text("X did Y", reviews, llm_client=client, model="m")
+    user = client.calls[0]["messages"][1]["content"]
+    clearer_line = next(ln for ln in user.splitlines() if "clearer view" in ln)
+    rejected_line = next(ln for ln in user.splitlines() if "rejected" in ln.lower())
+    assert "Klaus" in clearer_line and "Luca" not in clearer_line
+    assert "Luca" in rejected_line and "Klaus" not in rejected_line
+
+
 def test_suggestions_reject_non_openai_client():
     with pytest.raises(TypeError):
         suggest_justification_text(

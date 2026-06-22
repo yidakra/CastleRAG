@@ -24,7 +24,7 @@ import hashlib
 import random
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Protocol, Tuple
+from typing import Dict, List, Optional, Protocol, Sequence, Tuple
 
 from castlerag.routing.question_router import route_question
 
@@ -172,9 +172,17 @@ class ChatEngine(Protocol):
         ...
 
     def refine(
-        self, claim: str, refined_query: str, iteration: int
+        self,
+        claim: str,
+        refined_query: str,
+        iteration: int,
+        exclude_cameras: Sequence[str] = (),
     ) -> ChatTurnResult:
-        """Re-run retrieval for the same ``claim`` with a sharper query."""
+        """Re-run retrieval for the same ``claim`` with a sharper query.
+
+        ``exclude_cameras`` are angles the reviewer rejected; the live engine
+        hard-excludes them from retrieval, the placeholder ignores them.
+        """
         ...
 
     def suggest_justification(
@@ -254,9 +262,17 @@ class PlaceholderEngine:
         )
 
     def refine(
-        self, claim: str, refined_query: str, iteration: int
+        self,
+        claim: str,
+        refined_query: str,
+        iteration: int,
+        exclude_cameras: Sequence[str] = (),
     ) -> ChatTurnResult:
-        """Re-run retrieval for ``claim``; support climbs as iterations rise."""
+        """Re-run retrieval for ``claim``; support climbs as iterations rise.
+
+        The placeholder fabricates results, so ``exclude_cameras`` is accepted
+        for protocol parity but not applied.
+        """
         rng = random.Random(_seed(f"{claim}|{refined_query}|{iteration}"))
         support = (
             SupportLevel.SUPPORTED if iteration >= 3 else SupportLevel.PARTIAL

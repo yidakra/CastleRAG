@@ -17,7 +17,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from castlerag.config import CastleRAGConfig, load_config
 from castlerag.embed.omniembed import OmniEmbedClient
@@ -117,12 +117,17 @@ def run_question(
     pipeline: EvalPipeline,
     cfg: CastleRAGConfig,
     question: EvalQuestion,
+    exclude_cameras: Sequence[str] = (),
 ) -> QuestionResult:
     """Run one question through route -> retrieve -> rerank -> generate.
 
     Returns the prediction together with the retrieval hits, reranked evidence,
     and support priors so callers (the eval loop and the UI ``RagEngine``) can
     both reuse the exact same per-question path.
+
+    ``exclude_cameras`` hard-excludes those camera ids from dense retrieval (the
+    UI refine loop passes the angles the reviewer rejected); empty on the eval
+    path, so benchmark behaviour is unchanged.
     """
     try:
         hints = pipeline.route(question.query, question.answers)
@@ -132,6 +137,9 @@ def run_question(
         raise _stage_error("routing", question.question_id, exc) from exc
     except Exception as exc:
         raise _stage_failure_error("routing", question.question_id, exc) from exc
+
+    if exclude_cameras:
+        hints.exclude_cameras = tuple(exclude_cameras)
 
     try:
         retrieved = pipeline.retrieve(question, hints)

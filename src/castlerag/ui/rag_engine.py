@@ -18,7 +18,7 @@ import hashlib
 import logging
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from castlerag.schemas import EvalQuestion, Prediction, RetrievalHit
 from castlerag.ui.chat import (
@@ -86,7 +86,10 @@ class RagEngine:
     # -- public protocol ----------------------------------------------------
 
     def answer(
-        self, question: str, choices: Optional[Dict[str, str]] = None
+        self,
+        question: str,
+        choices: Optional[Dict[str, str]] = None,
+        exclude_cameras: Sequence[str] = (),
     ) -> ChatTurnResult:
         """Answer a question with the real pipeline and adapt to the UI model."""
         from castlerag.eval.run_eval import run_question
@@ -101,7 +104,9 @@ class RagEngine:
             query=question,
             answers=resolved,
         )
-        result = run_question(self.pipeline, self.cfg, eval_q)
+        result = run_question(
+            self.pipeline, self.cfg, eval_q, exclude_cameras=exclude_cameras
+        )
         claim = self._synthesize_claim(
             result.prediction,
             result.support_priors,
@@ -129,14 +134,23 @@ class RagEngine:
         )
 
     def refine(
-        self, claim: str, refined_query: str, iteration: int
+        self,
+        claim: str,
+        refined_query: str,
+        iteration: int,
+        exclude_cameras: Sequence[str] = (),
     ) -> ChatTurnResult:
         """Re-run retrieval for the same claim with a sharper query.
 
         Support is recomputed from the fresh retrieval and is *not* guaranteed to
         climb monotonically — that honestly reflects what real retrieval returns.
+
+        ``exclude_cameras`` are the angles the reviewer rejected; they are
+        hard-excluded from this iteration's retrieval (must_not filter).
         """
-        result = self.answer(refined_query, choices=None)
+        result = self.answer(
+            refined_query, choices=None, exclude_cameras=exclude_cameras
+        )
         support = result.claim.support if result.claim else SupportLevel.PARTIAL
         result.claim = Claim(text=claim, support=support)
         result.moments = result.moments[:1]

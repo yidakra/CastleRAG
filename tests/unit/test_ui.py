@@ -285,3 +285,26 @@ def test_viewer_outputs_match_their_output_specs():
     assert any(isinstance(o, go.Figure) for o in out)  # evidence figure present
     # All cameras pending -> the Submit button stays hidden (last output).
     assert out[-1] is True
+
+
+def test_rejected_cameras_accumulates_across_thread():
+    from castlerag.ui.callbacks import _rejected_cameras
+
+    # Two frozen iterations: Kitchen rejected in iter 1, Living2 in iter 2.
+    thread = [
+        {"reviews": {"m1": {"Kitchen": {"state": "rejected"},
+                            "Allie": {"state": "confirmed"}}}},
+        {"reviews": {"m2": {"Living2": {"state": "rejected"},
+                            "Bjorn": {"state": "flagged"}}}},
+    ]
+    # In-flight review on the current moment rejects Reading.
+    current = {"Reading": {"state": "rejected"}, "Cathal": {"state": "pending"}}
+    assert _rejected_cameras(thread, current) == ["Kitchen", "Living2", "Reading"]
+
+
+def test_rejected_cameras_empty_when_none_rejected():
+    from castlerag.ui.callbacks import _rejected_cameras
+
+    thread = [{"reviews": {"m1": {"Allie": {"state": "confirmed"}}}}]
+    assert _rejected_cameras(thread, {"Bjorn": {"state": "flagged"}}) == []
+    assert _rejected_cameras(None, None) == []

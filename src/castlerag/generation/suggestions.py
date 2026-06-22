@@ -27,7 +27,11 @@ _VERDICT_PHRASE = {
     "flagged": "is INCONCLUSIVE for (needs a clearer angle on)",
     "rejected": "does NOT support",
 }
-_WEAK_STATES = {"flagged", "rejected"}
+# Flagged angles need a clearer view (seek more); rejected angles are ruled out
+# (steer away). Kept separate so the refined query excludes rather than re-seeks
+# rejected cameras — mirrors compose_refined_query in ui/chat.py.
+_FLAGGED_STATES = {"flagged"}
+_REJECTED_STATES = {"rejected"}
 
 
 def _complete(
@@ -123,28 +127,34 @@ def suggest_refined_query_text(
 ) -> str:
     """Draft a refined retrieval query from the per-camera verdicts/notes."""
     lines = []
-    weak = []
+    flagged = []
+    rejected = []
     for camera_id, info in reviews.items():
         state = info.get("state", "pending")
         note = (info.get("justification") or "").strip()
         phrase = _VERDICT_PHRASE.get(state, "reviewed")
         lines.append(f"- {camera_id}: {phrase}" + (f" — {note}" if note else ""))
-        if state in _WEAK_STATES:
-            weak.append(camera_id)
+        if state in _FLAGGED_STATES:
+            flagged.append(camera_id)
+        elif state in _REJECTED_STATES:
+            rejected.append(camera_id)
     verdict_block = "\n".join(lines) if lines else "- (no verdicts)"
-    weak_block = ", ".join(weak) if weak else "none"
+    flagged_block = ", ".join(flagged) if flagged else "none"
+    rejected_block = ", ".join(rejected) if rejected else "none"
 
     system = (
         "You compose a single refined retrieval query for a multi-camera "
-        "investigation. Restate the claim and fold in the reviewer's feedback, "
-        "steering retrieval toward stronger evidence for the angles that were "
-        "flagged or rejected. Return 1-2 sentences only — the query text, no "
-        "preamble or quotes."
+        "investigation. Restate the claim and fold in the reviewer's feedback: "
+        "steer retrieval toward stronger evidence for the FLAGGED angles (which "
+        "need a clearer view), and steer AWAY from the REJECTED angles (which the "
+        "reviewer ruled out — do not seek further evidence from them). Return 1-2 "
+        "sentences only — the query text, no preamble or quotes."
     )
     user = (
         f"Claim under review: {claim}\n"
         f"Per-camera reviewer verdicts:\n{verdict_block}\n"
-        f"Angles needing a clearer view: {weak_block}\n\n"
+        f"Angles needing a clearer view (seek more): {flagged_block}\n"
+        f"Angles rejected (exclude from the search): {rejected_block}\n\n"
         "Refined query:"
     )
     messages = [
