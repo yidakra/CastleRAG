@@ -96,6 +96,16 @@ def _serialize_group(
                         cam.day, cam.camera_id, cam.hour, cam.start_seconds
                     )
                 ),
+                # Click-out to the canonical YouTube watch page (seeked), so a
+                # viewer that hits the cross-site bot gate on the iframe can
+                # still see the clip in their signed-in YouTube tab.
+                "watch_url": (
+                    None
+                    if mirror.is_placeholder(cam.day, cam.camera_id, cam.hour)
+                    else mirror.watch_url(
+                        cam.day, cam.camera_id, cam.hour, cam.start_seconds
+                    )
+                ),
             }
             for cam in moment.cameras
         ]
@@ -322,10 +332,14 @@ def _render_camera_grid(moment: Dict[str, object]) -> List[dmc.Card]:
         is_best = bool(cam["is_best"])
         embed_url = cam.get("embed_url")  # type: ignore[union-attr]
         if embed_url:
+            # referrerpolicy=strict-origin gives YouTube a usable Referer (the
+            # bare origin) instead of the full tunnel URL, slightly nudging the
+            # cross-site cookie/anti-bot heuristics in the embed's favour.
             inner: object = html.Iframe(
                 src=str(embed_url),
                 className="camera-frame",
                 allow="encrypted-media; picture-in-picture",
+                referrerPolicy="strict-origin",
             )
         else:
             inner = dmc.Center(
@@ -345,6 +359,30 @@ def _render_camera_grid(moment: Dict[str, object]) -> List[dmc.Card]:
             media_children.append(
                 dmc.Badge("best", color="indigo", size="xs", className="best-badge")
             )
+        # "Open on YouTube" fallback — useful when a tunneled deployment hits
+        # the cross-site bot gate on the embed. None when the mirror has no
+        # upload for this triple (the tile already shows a no-footage message).
+        watch_url = cam.get("watch_url")  # type: ignore[union-attr]
+        header_children: List[object] = [
+            dmc.Text(str(cam["camera_id"]), size="sm", fw=600),
+            dmc.Text(
+                f"{float(cam['match_score']):.2f}",
+                size="sm",
+                c="dimmed",
+                ff="monospace",
+            ),
+        ]
+        if watch_url:
+            header_children.insert(
+                1,
+                html.A(
+                    "open ↗",
+                    href=str(watch_url),
+                    target="_blank",
+                    rel="noopener noreferrer",
+                    className="camera-watch-link",
+                ),
+            )
         tiles.append(
             dmc.Card(
                 className="camera-tile best" if is_best else "camera-tile",
@@ -356,15 +394,7 @@ def _render_camera_grid(moment: Dict[str, object]) -> List[dmc.Card]:
                     dmc.Group(
                         justify="space-between",
                         mt=6,
-                        children=[
-                            dmc.Text(str(cam["camera_id"]), size="sm", fw=600),
-                            dmc.Text(
-                                f"{float(cam['match_score']):.2f}",
-                                size="sm",
-                                c="dimmed",
-                                ff="monospace",
-                            ),
-                        ],
+                        children=header_children,
                     ),
                 ],
             )

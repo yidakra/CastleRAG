@@ -127,10 +127,18 @@ fi
 
 UI_LOG="${LOG_DIR}/ui.log"
 echo "[vps] launching castlerag ui on :${UI_PORT} (log: ${UI_LOG})"
+# CASTLERAG_UI_YOUTUBE_EMBED_HOST: swap the YouTube embed host from the privacy
+# `youtube-nocookie.com` default to plain `youtube.com`.  Tunneled demos
+# (Cloudflare quick-tunnel, ngrok, etc.) often hit YouTube's "Sign in to
+# confirm you're not a bot" gate on nocookie embeds because that host is
+# cookie-blind by design — even a signed-in visitor looks anonymous to it.
+# youtube.com gives the iframe a chance to carry the YouTube cookie when the
+# browser allows third-party cookies for youtube.com.
 CASTLERAG_CONFIG="${CONF}" \
 OMNIEMBED_BASE_URL="http://localhost:${EMB_PORT}/v1" \
 VLLM_BASE_URL="http://localhost:${GEN_PORT}/v1" \
 CASTLERAG_UI_BASIC_AUTH="${CASTLERAG_UI_BASIC_AUTH}" \
+CASTLERAG_UI_YOUTUBE_EMBED_HOST="${CASTLERAG_UI_YOUTUBE_EMBED_HOST:-https://www.youtube.com}" \
     nohup "${VENV}/bin/castlerag" ui \
     --host 0.0.0.0 --port "${UI_PORT}" --require-live --config "${CONF}" \
     > "${UI_LOG}" 2>&1 &
