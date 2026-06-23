@@ -792,6 +792,7 @@ def test_bootstrap_collection_returns_client():
     from unittest.mock import MagicMock, patch
 
     mock_client = MagicMock()
+    mock_client.collection_exists.return_value = False  # fresh -> create path
     with patch("castlerag.index.qdrant.get_client", return_value=mock_client):
         result = bootstrap_collection(
             host="localhost",
@@ -807,3 +808,39 @@ def test_bootstrap_collection_returns_client():
         + len(_BOOL_INDEX_FIELDS)
     )
     assert mock_client.create_payload_index.call_count == total_expected
+
+
+def test_bootstrap_collection_skips_create_when_collection_exists():
+    """An existing collection (recreate=False) is upserted into, not recreated."""
+    from unittest.mock import MagicMock, patch
+
+    mock_client = MagicMock()
+    mock_client.collection_exists.return_value = True
+    with patch("castlerag.index.qdrant.get_client", return_value=mock_client):
+        result = bootstrap_collection(
+            host="localhost",
+            port=6333,
+            collection_name="castle",
+            vector_size=128,
+        )
+    assert result is mock_client
+    mock_client.create_collection.assert_not_called()  # incremental upsert, no wipe
+    mock_client.create_payload_index.assert_not_called()  # indexes already exist
+
+
+def test_bootstrap_collection_recreate_drops_and_creates():
+    """recreate=True deletes then creates, regardless of prior existence."""
+    from unittest.mock import MagicMock, patch
+
+    mock_client = MagicMock()
+    mock_client.collection_exists.return_value = True
+    with patch("castlerag.index.qdrant.get_client", return_value=mock_client):
+        bootstrap_collection(
+            host="localhost",
+            port=6333,
+            collection_name="castle",
+            vector_size=128,
+            recreate=True,
+        )
+    mock_client.delete_collection.assert_called_once()
+    mock_client.create_collection.assert_called_once()
