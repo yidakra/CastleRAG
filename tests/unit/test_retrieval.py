@@ -580,3 +580,67 @@ def test_route_priority_fallback_for_unknown_source_type():
     result = _collapse_hits([hit], hints, retrieval_cfg)
     assert len(result) == 1
     assert result[0].source_type == "aux_unknown"
+
+
+def test_retrieve_does_not_hard_filter_dense_search_by_room():
+    """Regression for issue #50: the router's room hint must not become a hard
+    Qdrant filter. Ego clips/windows carry room=None (only fixed cameras set
+    it), so filtering dense retrieval by hints.room zeroes out all ego evidence
+    in ego scope. Room must stay a soft signal (BM25 + reranker) only."""
+
+    class FakeBM25:
+        def get_scores(self, tokens: list[str]) -> np.ndarray:
+            return np.asarray([0.0, 0.0], dtype=np.float32)
+
+    class FakeEmbedClient:
+        def embed_texts(self, texts: list[str]) -> np.ndarray:
+            return np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+
+    class FakeQdrantClient:
+        def __init__(self) -> None:
+            self.filter_keys: list[set[str]] = []
+
+        def query_points(self, **kwargs):
+            self.filter_keys.append(
+                {condition.key for condition in kwargs["query_filter"].must}
+            )
+            return SimpleNamespace(points=[])
+
+    question = EvalQuestion(
+        question_id="q_fridge",
+        query="What brand is the fridge in the kitchen?",
+        answers={"a": "Samsung", "b": "Whirlpool", "c": "Bosch", "d": "Liebherr"},
+    )
+    hints = route_question(question.query, question.answers)
+    # The router DID extract the room hint...
+    assert hints.room == "Kitchen"
+
+    retrieval_cfg = SimpleNamespace(
+        transcript_top_k=30,
+        event_summary_top_k=20,
+        video_top_k=20,
+        photo_top_k=16,
+        aux_video_top_k=8,
+        heartrate_top_k=8,
+        gaze_top_k=8,
+        thermal_top_k=8,
+        rrf_k=60,
+        max_candidate_videos=4,
+        frames_per_candidate=32,
+        max_aux_images=16,
+        max_evidence_rows=50,
+        modality_score_thresholds={},
+    )
+    qdrant = FakeQdrantClient()
+    retrieve(
+        question=question,
+        hints=hints,
+        qdrant_client=qdrant,
+        collection_name="castle_test",
+        bm25_index=SimpleNamespace(bm25=FakeBM25(), windows=_windows()),
+        embed_client=FakeEmbedClient(),
+        retrieval_cfg=retrieval_cfg,
+    )
+    # ...but no dense search filtered on room.
+    assert qdrant.filter_keys  # dense searches actually ran
+    assert all("room" not in keys for keys in qdrant.filter_keys)

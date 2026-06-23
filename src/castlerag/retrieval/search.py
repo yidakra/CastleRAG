@@ -103,7 +103,11 @@ def retrieve(
             modality="text",
             day=hints.day,
             participant_id=hints.participant,
-            room=hints.room,
+            # room is deliberately NOT a hard dense filter: ego clips/windows
+            # carry room=None (only fixed cameras set it), so filtering dense
+            # retrieval by hints.room zeroes out all ego evidence in ego scope
+            # (issue #50). Room stays a soft signal via BM25 (room_hint above)
+            # and the reranker.
             exclude_camera_ids=hints.exclude_cameras,
         )
         for query_vector in query_vectors
@@ -134,7 +138,8 @@ def retrieve(
                 modality=modality,
                 day=hints.day,
                 participant_id=hints.participant,
-                room=hints.room,
+                # room intentionally omitted as a hard filter; see transcript
+                # lane above and issue #50.
                 exclude_camera_ids=hints.exclude_cameras,
             )
             if hits:
