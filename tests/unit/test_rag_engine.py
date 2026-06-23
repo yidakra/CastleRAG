@@ -600,6 +600,60 @@ def test_cotemporal_cameras_excludes_rejected():
     assert {c.camera_id for c in cams} == {"Allie", "Cathal"}
 
 
+def test_cotemporal_cameras_query_scored_are_scored_not_sync():
+    """With a query vector, synchronized angles get real scores (no '0.00 sync')."""
+    eng = _build_cotemporal_engine()
+    cams = eng._cotemporal_cameras(
+        "day1", 1_700_000_000_000, query_vector=[1.0, 0.0, 0.0, 0.0]
+    )
+    assert {c.camera_id for c in cams} == {"Allie", "Bjorn", "Cathal"}
+    assert all(not c.is_context for c in cams)  # scored, not blind sync fillers
+    assert all(c.match_score > 0 for c in cams)  # real relevance scores
+
+
+def test_hits_to_moments_ranks_by_rerank_not_rrf():
+    """The focused moment is the high-rerank bucket, even if its RRF is lower."""
+    eng = _engine()  # no pipeline -> co-temporal empty, roster padding fills
+    # Bucket A: high RRF (0.9) but low rerank (0.3). Bucket B: low RRF, high rerank.
+    a = _clip_hit("Allie", 0.9, hour=12, start=120.0).model_copy(
+        update={"rerank_score": 0.30}
+    )
+    b = _clip_hit("Bjorn", 0.5, hour=13, start=200.0).model_copy(
+        update={"rerank_score": 0.90}
+    )
+    moments = eng._hits_to_moments([a, b], SupportLevel.PARTIAL)
+    assert len(moments) == 2
+    # Bjorn's bucket (higher rerank) is focused first despite lower RRF.
+    assert moments[0].cameras[0].camera_id == "Bjorn"
+    assert moments[1].cameras[0].camera_id == "Allie"
+
+
+def test_stamp_rerank_scores_copies_from_rerank_result():
+    from types import SimpleNamespace
+
+    eng = _engine()
+    row = _clip_hit("Allie", 0.5)  # rerank_score is None
+    reranked = _clip_hit("Allie", 0.5).model_copy(update={"rerank_score": 0.8})
+    stamped = eng._stamp_rerank_scores([row], SimpleNamespace(evidence_rows=[reranked]))
+    assert stamped[0].rerank_score == 0.8
+
+
+def test_embed_query_uses_pipeline_client_else_none():
+    from types import SimpleNamespace
+
+    class _Embed:
+        def embed_texts(self, texts):
+            import numpy as np
+
+            return np.array([[0.1, 0.2, 0.3]], dtype="float32")
+
+    eng = RagEngine(cfg=None, pipeline=SimpleNamespace(embed_client=_Embed()))
+    vec = eng._embed_query("hi")
+    assert vec is not None and len(vec) == 3
+    # No embed client -> None (offline/injected pipelines keep working).
+    assert RagEngine(cfg=None, pipeline=SimpleNamespace())._embed_query("hi") is None
+
+
 def test_refine_reruns_retrieval_with_refined_query_and_exclusions():
     """Refinement re-runs the search (answer) with the refined query + exclusions.
 

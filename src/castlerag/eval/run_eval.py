@@ -104,6 +104,9 @@ class EvalPipeline:
     # path and in injected test pipelines, which never touch it.
     qdrant_client: Any = None
     collection_name: Optional[str] = None
+    # Optional embed client so the UI can score those synchronized angles by
+    # relevance to the question (query-scored co-temporal cameras). None offline.
+    embed_client: Any = None
 
 
 @dataclass(frozen=True)
@@ -446,6 +449,7 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
         generate=_generate,
         qdrant_client=qdrant_client,
         collection_name=cfg.qdrant.collection,
+        embed_client=embed_client,
     )
 
 

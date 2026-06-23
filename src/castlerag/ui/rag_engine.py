@@ -146,14 +146,22 @@ class RagEngine:
                 )
             ),
         )
-        moments = self._hits_to_moments(result.evidence_rows, claim.support) or [
-            self._no_evidence_moment(claim.support)
-        ]
+        # Stamp the reranker's normalised relevance onto the displayed rows so
+        # moments rank by reranked relevance (the evidence the answer is built on),
+        # not raw RRF — otherwise the focused moment can be an unrelated, higher-RRF
+        # bucket. Then query-score the synchronized angles via the same query vector.
+        evidence_rows = self._stamp_rerank_scores(
+            result.evidence_rows, result.rerank_result
+        )
+        query_vector = self._embed_query(question)
+        moments = self._hits_to_moments(
+            evidence_rows, claim.support, query_vector=query_vector
+        ) or [self._no_evidence_moment(claim.support)]
         return ChatTurnResult(
             answer_text=answer_text,
             route=result.hints.route,
             support_priors=result.support_priors,
-            evidence=self._hits_to_evidence_refs(result.evidence_rows),
+            evidence=self._hits_to_evidence_refs(evidence_rows),
             # Free-form questions have no choice; the stub "a" is not a real pick.
             predicted_choice=(
                 result.prediction.predicted_answer if is_mcq else None
@@ -347,6 +355,43 @@ class RagEngine:
         ]
         return max(cosines) if cosines else 0.0
 
+    def _stamp_rerank_scores(
+        self, evidence_rows: List[RetrievalHit], rerank_result: Any
+    ) -> List[RetrievalHit]:
+        """Copy the reranker's normalised [0,1] scores onto the displayed rows.
+
+        run_eval's evidence flattening drops ``rerank_score`` (it stays only on
+        ``rerank_result.evidence_rows``), so moments would otherwise rank by raw
+        RRF. Map by ``record_id`` and stamp; rows with no match keep what they had.
+        """
+        scores = {
+            r.record_id: r.rerank_score
+            for r in (getattr(rerank_result, "evidence_rows", None) or [])
+            if r.rerank_score is not None
+        }
+        if not scores:
+            return evidence_rows
+        return [
+            row.model_copy(update={"rerank_score": scores[row.record_id]})
+            if row.record_id in scores and row.rerank_score is None
+            else row
+            for row in evidence_rows
+        ]
+
+    def _embed_query(self, text: str) -> Optional[List[float]]:
+        """Embed the question for query-scoring synchronized angles; None if no
+        embed client (offline/injected pipelines) or on failure."""
+        embed = getattr(self.pipeline, "embed_client", None)
+        if embed is None:
+            return None
+        try:
+            vectors = embed.embed_texts([text])
+            if vectors is not None and len(vectors):
+                return list(vectors[0])
+        except Exception as exc:  # never break a moment on an embed hiccup
+            log.warning("query embedding for synchronized angles failed (%s)", exc)
+        return None
+
     def _no_evidence_moment(self, support: SupportLevel) -> EvidenceMoment:
         """Explicit placeholder moment when retrieval returns no timestamped hits.
 
@@ -368,9 +413,18 @@ class RagEngine:
         )
 
     def _hits_to_moments(
-        self, hits: List[RetrievalHit], support: SupportLevel
+        self,
+        hits: List[RetrievalHit],
+        support: SupportLevel,
+        query_vector: Optional[List[float]] = None,
     ) -> List[EvidenceMoment]:
-        """Cluster hits into synchronized 3-camera moments, ranked by score."""
+        """Cluster hits into synchronized 3-camera moments, ranked by relevance.
+
+        Buckets rank by reranked relevance (``rerank_score``) when available, so
+        the focused moment is the evidence the answer is built on, not the bucket
+        with the highest raw RRF. ``query_vector`` (when given) lets the
+        synchronized-angle fill score the co-temporal cameras by relevance.
+        """
         buckets: "OrderedDict[Tuple[str, int, int], List[RetrievalHit]]" = OrderedDict()
         for hit in hits:
             if not hit.camera_id or not hit.day:
@@ -381,10 +435,15 @@ class RagEngine:
         if not buckets:
             return []
 
+        def _bucket_relevance(rows: List[RetrievalHit]) -> float:
+            # Prefer the reranker's relevance; fall back to RRF when unstamped.
+            return max(
+                (h.rerank_score if h.rerank_score is not None else h.score)
+                for h in rows
+            )
+
         ranked_buckets = sorted(
-            buckets.values(),
-            key=lambda rows: max(h.score for h in rows),
-            reverse=True,
+            buckets.values(), key=_bucket_relevance, reverse=True
         )[:_MAX_MOMENTS]
 
         score_mode: str = getattr(
@@ -424,7 +483,7 @@ class RagEngine:
                 for cam, hit in list(by_camera.items())[:_FIXED_CAMERA_COUNT]
             ]
             cameras = self._fill_synchronized_cameras(
-                real, day, hour, start, anchor.absolute_start
+                real, day, hour, start, anchor.absolute_start, query_vector
             )
             best = max(cameras, key=lambda c: c.match_score)
             best.is_best = True
@@ -458,19 +517,24 @@ class RagEngine:
         hour: int,
         start: float,
         abs_start_ms: Optional[int],
+        query_vector: Optional[List[float]] = None,
     ) -> List[CameraAngle]:
         """Fill a moment's camera slots with the angles actually rolling then.
 
         The scored retrieval hits (``real``) lead; remaining slots are filled
-        with the OTHER cameras rolling at this timestamp, fetched from the index
-        (marked ``is_context`` — synchronized, not a semantic match). Only when no
-        co-temporal data is available (offline / no Qdrant) do we fall back to the
-        old ego-roster padding so the tiles still render.
+        with the OTHER cameras rolling at this timestamp, fetched from the index.
+        With a ``query_vector`` they are scored by relevance to the question (real
+        match scores); without one they are ``is_context`` fillers (the "sync"
+        tile). Only when no co-temporal data is available (offline / no Qdrant) do
+        we fall back to the old ego-roster padding so the tiles still render.
         """
         cameras = list(real[:_FIXED_CAMERA_COUNT])
         present = {cam.camera_id for cam in cameras}
         if len(cameras) < _FIXED_CAMERA_COUNT:
-            for cam in self._cotemporal_cameras(day, abs_start_ms, exclude=present):
+            cotemporal = self._cotemporal_cameras(
+                day, abs_start_ms, exclude=present, query_vector=query_vector
+            )
+            for cam in cotemporal:
                 if len(cameras) >= _FIXED_CAMERA_COUNT:
                     break
                 if cam.camera_id in present:
@@ -489,69 +553,116 @@ class RagEngine:
         abs_start_ms: Optional[int],
         *,
         exclude: Any = (),
+        query_vector: Optional[List[float]] = None,
         window_ms: int = 45_000,
         limit: int = 128,
     ) -> List[CameraAngle]:
         """Cameras whose clips overlap ``abs_start_ms`` on ``day`` (from the index).
 
-        Returns the synchronized angles for a moment — every camera rolling at
-        that timestamp — so rejecting one just drops it and the next angle takes
-        the slot, all without leaving the moment. ``exclude`` drops named cameras
-        (those already shown, or rejected by the reviewer). Empty when there is no
-        Qdrant handle (injected/offline pipelines) or the lookup fails.
+        The synchronized angles for a moment — every camera rolling at that
+        timestamp. With ``query_vector`` they are ranked/scored by relevance to
+        the question (a time-windowed dense search), so the most relevant angle
+        can win "best" instead of being a blind ``0.00`` filler; without it they
+        are unscored ``is_context`` ("sync") tiles. ``exclude`` drops named cameras
+        (already shown, or rejected). Empty when there is no Qdrant handle
+        (injected/offline pipelines) or the lookup fails.
         """
         client = getattr(self.pipeline, "qdrant_client", None)
         collection = getattr(self.pipeline, "collection_name", None)
         if client is None or collection is None or not day or abs_start_ms is None:
             return []
-        from castlerag.retrieval.filters import build_filter
-
-        query_filter = build_filter(
-            day=day,
-            source_type="main_clip",
-            time_range_start_ms=abs_start_ms - window_ms,
-            time_range_end_ms=abs_start_ms + window_ms,
-            exclude_camera_ids=tuple(exclude) or None,
-        )
-        try:
-            points, _ = client.scroll(
-                collection_name=collection,
-                scroll_filter=query_filter,
-                limit=limit,
-                with_payload=True,
-                with_vectors=False,
-            )
-        except Exception as exc:  # never break a moment on an index hiccup
-            log.warning("co-temporal camera lookup failed (%s)", exc)
-            return []
+        start_ms = abs_start_ms - window_ms
+        end_ms = abs_start_ms + window_ms
+        exclude_ids = tuple(exclude) or None
 
         by_cam: "OrderedDict[str, CameraAngle]" = OrderedDict()
-        for point in points:
-            payload = dict(getattr(point, "payload", {}) or {})
-            cam = payload.get("camera_id")
-            if not cam or cam in by_cam:
-                continue
-            by_cam[cam] = CameraAngle(
-                camera_id=str(cam),
-                day=str(payload.get("day") or day),
-                hour=int(payload.get("hour") or 0),
-                start_seconds=float(payload.get("start_seconds") or 0.0),
-                match_score=0.0,
-                is_best=False,
-                is_context=True,
-                evidence_text=(
-                    payload.get("transcript_text")
-                    or payload.get("event_summary")
-                    or payload.get("ocr_text")
-                    or None
-                ),
+        if query_vector is not None:
+            # Query-scored: a time-windowed dense search ranks the co-temporal
+            # cameras by relevance to the question; Qdrant returns the cosine score.
+            from castlerag.retrieval.search import _dense_search
+
+            try:
+                hits = _dense_search(
+                    qdrant_client=client,
+                    collection_name=collection,
+                    query_vector=query_vector,
+                    limit=limit,
+                    source_type="main_clip",
+                    modality="video",
+                    day=day,
+                    time_range_start_ms=start_ms,
+                    time_range_end_ms=end_ms,
+                    exclude_camera_ids=exclude_ids,
+                )
+            except Exception as exc:  # never break a moment on an index hiccup
+                log.warning("co-temporal dense search failed (%s)", exc)
+                hits = []
+            for hit in hits:  # already ordered by score, highest first
+                cam = hit.camera_id
+                if not cam or cam in by_cam:
+                    continue
+                by_cam[cam] = CameraAngle(
+                    camera_id=str(cam),
+                    day=hit.day or day,
+                    hour=_hour_of(hit),
+                    start_seconds=_seconds_within_hour(hit),
+                    match_score=round(_clamp(hit.score), 4),
+                    is_best=False,
+                    is_context=False,  # scored, not a blind sync filler
+                    evidence_text=_hit_evidence_text(hit),
+                )
+        else:
+            from castlerag.retrieval.filters import build_filter
+
+            query_filter = build_filter(
+                day=day,
+                source_type="main_clip",
+                time_range_start_ms=start_ms,
+                time_range_end_ms=end_ms,
+                exclude_camera_ids=exclude_ids,
             )
-        # Prefer angles the UI can actually embed: a camera in the index but not
-        # mirrored at this (day, hour) — e.g. Bao — otherwise wins a slot and
-        # renders a "no footage" tile. Stable sort keeps the index order within
-        # each group, so mirror-less cameras only appear if nothing else fills.
+            try:
+                points, _ = client.scroll(
+                    collection_name=collection,
+                    scroll_filter=query_filter,
+                    limit=limit,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+            except Exception as exc:  # never break a moment on an index hiccup
+                log.warning("co-temporal camera lookup failed (%s)", exc)
+                return []
+            for point in points:
+                payload = dict(getattr(point, "payload", {}) or {})
+                cam = payload.get("camera_id")
+                if not cam or cam in by_cam:
+                    continue
+                by_cam[cam] = CameraAngle(
+                    camera_id=str(cam),
+                    day=str(payload.get("day") or day),
+                    hour=int(payload.get("hour") or 0),
+                    start_seconds=float(payload.get("start_seconds") or 0.0),
+                    match_score=0.0,
+                    is_best=False,
+                    is_context=True,
+                    evidence_text=(
+                        payload.get("transcript_text")
+                        or payload.get("event_summary")
+                        or payload.get("ocr_text")
+                        or None
+                    ),
+                )
+
+        # Prefer angles the UI can actually embed (a camera in the index but not
+        # mirrored at this (day, hour) — e.g. Bao — otherwise renders a "no
+        # footage" tile), then by relevance. Stable sort keeps within-group order.
         cameras = list(by_cam.values())
-        cameras.sort(key=lambda c: not self._has_embed(c.day, c.camera_id, c.hour))
+        cameras.sort(
+            key=lambda c: (
+                not self._has_embed(c.day, c.camera_id, c.hour),
+                -c.match_score,
+            )
+        )
         return cameras
 
     def _has_embed(self, day: str, camera: str, hour: int) -> bool:
