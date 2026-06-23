@@ -52,12 +52,41 @@ body {
     border-radius: 3px;
 }
 
-/* ---- two-column body ---- */
+/* ---- two-column body (split bar resizes the left column) ---- */
 .app-body {
     display: grid;
-    grid-template-columns: 344px minmax(0, 1fr);
-    gap: 16px;
+    /* left width is a CSS var so assets/splitter.js can drag it; middle track is
+       the gutter; right takes the rest. */
+    grid-template-columns: var(--thread-w, 344px) 10px minmax(0, 1fr);
+    gap: 6px;
     align-items: start;
+}
+
+/* ---- draggable splitter ---- */
+.app-gutter {
+    align-self: stretch;          /* fill the grid row's height */
+    cursor: col-resize;
+    position: relative;
+    border-radius: 6px;
+    touch-action: none;
+    user-select: none;
+}
+.app-gutter::before {             /* the visible grip line */
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--border-strong);
+    border-radius: 2px;
+    transition: background 0.12s ease, width 0.12s ease;
+}
+.app-gutter:hover::before,
+.app-gutter.dragging::before {
+    background: var(--accent);
+    width: 4px;
 }
 
 /* ---- left: thread column ---- */
@@ -235,4 +264,5 @@ body {
 @media (max-width: 900px) {
     .app-body { grid-template-columns: 1fr; }
     .thread-col { height: 70vh; max-height: 70vh; }
+    .app-gutter { display: none; }  /* single column -> no splitter */
 }

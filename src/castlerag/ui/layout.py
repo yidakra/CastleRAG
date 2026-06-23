@@ -283,7 +283,18 @@ def build_layout(
             _top_bar(mode),
             html.Div(
                 className="app-body",
-                children=[_thread_column(), _viewer_column(score_mode)],
+                children=[
+                    _thread_column(),
+                    # Draggable splitter between the chat and the evidence viewer;
+                    # assets/splitter.js drives the resize, assets/styles.css the
+                    # look.
+                    html.Div(
+                        className="app-gutter",
+                        id="app-gutter",
+                        title="Drag to resize",
+                    ),
+                    _viewer_column(score_mode),
+                ],
             ),
             dcc.Store(id="thread-store", data=[]),
             dcc.Store(id="focus-store", data={}),
