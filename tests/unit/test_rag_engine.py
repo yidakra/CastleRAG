@@ -9,7 +9,7 @@ from typing import Any, List
 import pytest
 
 from castlerag.schemas import RetrievalHit
-from castlerag.ui.chat import PlaceholderEngine, SupportLevel
+from castlerag.ui.chat import ChatTurnResult, Claim, PlaceholderEngine, SupportLevel
 from castlerag.ui.rag_engine import RagEngine
 
 # ---------------------------------------------------------------------------
@@ -513,6 +513,107 @@ def test_build_engine_falls_back_when_vllm_unreachable(monkeypatch):
     engine = engine_factory.build_engine(YouTubeMirror.from_csv())
     assert isinstance(engine, PlaceholderEngine)
     assert engine_factory.engine_mode(engine) == "offline"
+
+
+def _build_cotemporal_engine() -> RagEngine:
+    """Engine whose pipeline exposes an in-memory Qdrant with 3 synced clips."""
+    qm = pytest.importorskip("qdrant_client.http.models")
+    from types import SimpleNamespace
+
+    from qdrant_client import QdrantClient
+
+    from castlerag.index.qdrant import build_point_batches, upsert_batch
+    from castlerag.schemas import ClipRecord
+
+    base = 1_700_000_000_000
+    clips = [
+        ClipRecord(
+            clip_id=f"day1_{cam}_12_0004",
+            parent_source_id=f"v_{cam}",
+            source_type="main_clip",
+            modality="video",
+            day="day1",
+            hour=12,
+            camera_id=cam,
+            camera_type="ego",
+            room="Kitchen",
+            start_seconds=120.0,
+            end_seconds=150.0,
+            absolute_start=base,
+            absolute_end=base + 30_000,
+            source_video_path=f"/d/{cam}/12.mp4",
+            event_summary=f"{cam} in the kitchen",
+        )
+        for cam in ("Allie", "Bjorn", "Cathal")
+    ]
+    client = QdrantClient(":memory:")
+    client.create_collection(
+        collection_name="t",
+        vectors_config=qm.VectorParams(size=4, distance=qm.Distance.COSINE),
+    )
+    rows = build_point_batches(clips, model_version="t", model_name="t")
+    upsert_batch(
+        client=client,
+        collection_name="t",
+        point_ids=[r.point_id for r in rows],
+        vectors=[[1.0, 0.0, 0.0, 0.0]] * len(rows),
+        payloads=[r.model_dump(exclude_none=True) for r in rows],
+    )
+    pipeline = SimpleNamespace(qdrant_client=client, collection_name="t")
+    return RagEngine(cfg=None, pipeline=pipeline, ego_cameras=("Allie", "Bjorn"))
+
+
+def test_cotemporal_cameras_returns_all_angles_at_timestamp():
+    eng = _build_cotemporal_engine()
+    cams = eng._cotemporal_cameras("day1", 1_700_000_000_000)
+    assert {c.camera_id for c in cams} == {"Allie", "Bjorn", "Cathal"}
+    assert all(c.is_context for c in cams)  # synchronized, not semantic matches
+
+
+def test_cotemporal_cameras_excludes_rejected():
+    eng = _build_cotemporal_engine()
+    cams = eng._cotemporal_cameras("day1", 1_700_000_000_000, exclude=("Bjorn",))
+    assert {c.camera_id for c in cams} == {"Allie", "Cathal"}
+
+
+def test_refine_in_scene_keeps_timestamp_and_swaps_rejected_camera():
+    """With an anchor, refine stays on the moment and drops the rejected angle."""
+    eng = _build_cotemporal_engine()
+    result = eng.refine(
+        "Cathal baked the cookies",
+        "ignored when anchored",
+        iteration=2,
+        exclude_cameras=("Bjorn",),
+        anchor=("day1", 1_700_000_000_000),
+    )
+    assert len(result.moments) == 1
+    moment = result.moments[0]
+    cams = {c.camera_id for c in moment.cameras}
+    assert "Bjorn" not in cams and cams <= {"Allie", "Cathal"}
+    assert moment.absolute_start_ms == 1_700_000_000_000  # same scene
+    assert result.claim is not None and result.claim.text == "Cathal baked the cookies"
+
+
+def test_refine_falls_back_to_global_search_without_anchor():
+    """No anchor -> the old fresh-search path (engine.answer) is used."""
+    captured = {}
+
+    eng = _build_cotemporal_engine()
+
+    def _fake_answer(question, choices=None, exclude_cameras=()):  # noqa: ANN001
+        captured["question"] = question
+        return ChatTurnResult(
+            answer_text="x",
+            route=None,
+            support_priors={},
+            is_placeholder=False,
+            claim=Claim(text="x", support=SupportLevel.PARTIAL),
+            moments=[eng._no_evidence_moment(SupportLevel.PARTIAL)],
+        )
+
+    eng.answer = _fake_answer  # type: ignore[method-assign]
+    eng.refine("claim", "the refined query", iteration=2, anchor=None)
+    assert captured["question"] == "the refined query"
 
 
 def test_pad_cameras_emits_distinct_ids_with_empty_roster():

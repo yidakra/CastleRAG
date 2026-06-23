@@ -99,6 +99,11 @@ class EvalPipeline:
     generate: Callable[
         [EvalQuestion, RouteHints, List[RetrievalHit], Dict[str, float]], Prediction
     ]
+    # Optional direct Qdrant handle so the UI can fetch the cameras rolling at a
+    # given timestamp (synchronized angles / in-scene refine). None on the eval
+    # path and in injected test pipelines, which never touch it.
+    qdrant_client: Any = None
+    collection_name: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -439,6 +444,8 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
         retrieve=_retrieve,
         rerank=_rerank,
         generate=_generate,
+        qdrant_client=qdrant_client,
+        collection_name=cfg.qdrant.collection,
     )
 
 

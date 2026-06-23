@@ -84,6 +84,9 @@ def _serialize_group(
                 "start_seconds": cam.start_seconds,
                 "match_score": cam.match_score,
                 "is_best": cam.is_best,
+                # A synchronized angle pulled in by timestamp (not a semantic
+                # match) — the tile shows "sync" rather than a 0.00 score.
+                "is_context": getattr(cam, "is_context", False),
                 # Retrieved evidence snippet for this camera (None offline), used
                 # to ground LLM justification suggestions in the review UI.
                 "evidence_text": getattr(cam, "evidence_text", None),
@@ -121,6 +124,8 @@ def _serialize_group(
                 "aggregate_score": moment.aggregate_score,
                 "score_caption": moment.score_caption,
                 "dot_color": moment.dot_color,
+                # Epoch-ms anchor so a rejected angle can be swapped in-scene.
+                "absolute_start_ms": getattr(moment, "absolute_start_ms", None),
                 "cameras": cameras,
             }
         )
@@ -159,6 +164,25 @@ def _find_moment(
     return next(
         (m for m in group["moments"] if m["moment_id"] == moment_id), None  # type: ignore[index]
     )
+
+
+def _moment_anchor(
+    group: Dict[str, object], moment_id: str
+) -> Optional[tuple]:
+    """Return ``(day, absolute_start_ms)`` for a moment, for in-scene refine.
+
+    ``None`` when the moment is missing or carries no absolute time (so the
+    engine falls back to a fresh global search).
+    """
+    moment = _find_moment(group, moment_id)
+    if not moment:
+        return None
+    abs_ms = moment.get("absolute_start_ms")  # type: ignore[union-attr]
+    if abs_ms is None:
+        return None
+    cameras = moment.get("cameras") or []  # type: ignore[union-attr]
+    day = cameras[0]["day"] if cameras else None  # type: ignore[index]
+    return (day, abs_ms)
 
 
 def _pending_review(moment: Dict[str, object]) -> Dict[str, Dict[str, str]]:
@@ -378,10 +402,18 @@ def _render_camera_grid(moment: Dict[str, object]) -> List[dmc.Card]:
         # the cross-site bot gate on the embed. None when the mirror has no
         # upload for this triple (the tile already shows a no-footage message).
         watch_url = cam.get("watch_url")  # type: ignore[union-attr]
+        # Co-temporally pulled-in angles (no semantic score against this query)
+        # render "sync" instead of a 0.00 score so the UI doesn't pretend they
+        # were ranked.
+        score_label = (
+            "sync"
+            if cam.get("is_context")
+            else f"{float(cam['match_score']):.2f}"
+        )
         header_children: List[object] = [
             dmc.Text(str(cam["camera_id"]), size="sm", fw=600),
             dmc.Text(
-                f"{float(cam['match_score']):.2f}",
+                score_label,
                 size="sm",
                 c="dimmed",
                 ff="monospace",
@@ -824,11 +856,15 @@ def register_callbacks(
 
         new_iteration = current_iteration + 1
         seq = int(store.get("next_seq", len(thread) + 1) or (len(thread) + 1))
+        # Anchor the refine on the moment under review so a rejected angle is
+        # swapped in-scene (same timestamp) rather than teleporting to a new one.
+        anchor = _moment_anchor(current, str(moment_id)) if moment_id else None
         result = engine.refine(
             str(claim),
             refined_query,
             new_iteration,
             exclude_cameras=_rejected_cameras(thread, review),
+            anchor=anchor,
         )
         group = _serialize_group(
             result,

@@ -101,6 +101,10 @@ class CameraAngle:
     # Retrieved evidence snippet (transcript / event summary / OCR) for this
     # angle; None offline. Grounds LLM justification suggestions in the review UI.
     evidence_text: Optional[str] = None
+    # True for a synchronized angle pulled in by timestamp (rolling at this
+    # moment) rather than by semantic match — it has no meaningful match score,
+    # so the tile shows a "sync" marker instead of a misleading 0.00.
+    is_context: bool = False
 
 
 @dataclass
@@ -115,6 +119,10 @@ class EvidenceMoment:
     score_caption: str
     dot_color: str
     cameras: List[CameraAngle] = field(default_factory=list)
+    # Epoch-ms of the anchor hit, so the UI can re-fetch the cameras rolling at
+    # this same timestamp when an angle is rejected (in-scene refine). None when
+    # the anchor carried no absolute time.
+    absolute_start_ms: Optional[int] = None
 
     def best_camera(self) -> CameraAngle:
         """Return the best-matching camera (or the first if none flagged)."""
@@ -177,11 +185,14 @@ class ChatEngine(Protocol):
         refined_query: str,
         iteration: int,
         exclude_cameras: Sequence[str] = (),
+        anchor: Optional[Tuple[Optional[str], Optional[int]]] = None,
     ) -> ChatTurnResult:
         """Re-run retrieval for the same ``claim`` with a sharper query.
 
         ``exclude_cameras`` are angles the reviewer rejected; the live engine
         hard-excludes them from retrieval, the placeholder ignores them.
+        ``anchor`` is the focused moment's ``(day, absolute_start_ms)`` so the
+        live engine can swap a rejected angle in-scene instead of teleporting.
         """
         ...
 
@@ -270,11 +281,12 @@ class PlaceholderEngine:
         refined_query: str,
         iteration: int,
         exclude_cameras: Sequence[str] = (),
+        anchor: Optional[Tuple[Optional[str], Optional[int]]] = None,
     ) -> ChatTurnResult:
         """Re-run retrieval for ``claim``; support climbs as iterations rise.
 
-        The placeholder fabricates results, so ``exclude_cameras`` is accepted
-        for protocol parity but not applied.
+        The placeholder fabricates results, so ``exclude_cameras`` and ``anchor``
+        are accepted for protocol parity but not applied.
         """
         rng = random.Random(_seed(f"{claim}|{refined_query}|{iteration}"))
         support = (

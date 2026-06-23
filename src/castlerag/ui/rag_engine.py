@@ -165,15 +165,35 @@ class RagEngine:
         refined_query: str,
         iteration: int,
         exclude_cameras: Sequence[str] = (),
+        anchor: Optional[Tuple[Optional[str], Optional[int]]] = None,
     ) -> ChatTurnResult:
-        """Re-run retrieval for the same claim with a sharper query.
+        """Refine the focused moment, hard-excluding the rejected angles.
 
-        Support is recomputed from the fresh retrieval and is *not* guaranteed to
-        climb monotonically — that honestly reflects what real retrieval returns.
+        When ``anchor`` (the focused moment's ``(day, absolute_start_ms)``) is
+        given and the index still has other cameras rolling at that timestamp,
+        STAY ON THE SAME MOMENT and just swap the rejected angle(s) out — no
+        teleport to a different scene. Only when there is no anchor, or no
+        co-temporal camera remains after exclusion, fall back to a fresh global
+        search for ``refined_query``.
 
         ``exclude_cameras`` are the angles the reviewer rejected; they are
-        hard-excluded from this iteration's retrieval (must_not filter).
+        hard-excluded either way (must_not filter / scroll exclusion).
         """
+        if anchor is not None:
+            day, abs_start_ms = anchor
+            moment = self._inscene_moment(day, abs_start_ms, exclude_cameras)
+            if moment is not None:
+                return ChatTurnResult(
+                    answer_text=claim,  # same scene -> same answer/claim
+                    route=None,
+                    support_priors={},
+                    evidence=[],
+                    predicted_choice=None,
+                    is_placeholder=False,
+                    claim=Claim(text=claim, support=SupportLevel.PARTIAL),
+                    moments=[moment],
+                )
+
         result = self.answer(
             refined_query, choices=None, exclude_cameras=exclude_cameras
         )
@@ -181,6 +201,38 @@ class RagEngine:
         result.claim = Claim(text=claim, support=support)
         result.moments = result.moments[:1]
         return result
+
+    def _inscene_moment(
+        self,
+        day: Optional[str],
+        abs_start_ms: Optional[int],
+        exclude_cameras: Sequence[str],
+    ) -> Optional[EvidenceMoment]:
+        """Rebuild the focused moment from the cameras still rolling at its time.
+
+        Returns ``None`` (caller falls back to a global search) when the index is
+        unreachable or every co-temporal camera was excluded.
+        """
+        cameras = self._cotemporal_cameras(
+            day, abs_start_ms, exclude=tuple(exclude_cameras)
+        )
+        if not cameras:
+            return None
+        cameras = cameras[:_FIXED_CAMERA_COUNT]
+        cameras[0].is_best = True
+        hour = cameras[0].hour
+        minute = int(cameras[0].start_seconds // 60)
+        return EvidenceMoment(
+            moment_id="m0",
+            clock_label=f"{hour:02d}:{minute:02d}",
+            place_label="Scene",
+            camera_count=len(cameras),
+            aggregate_score=0.0,
+            score_caption="synchronized angles",
+            dot_color=_DOT_COLORS[SupportLevel.PARTIAL],
+            cameras=cameras,
+            absolute_start_ms=abs_start_ms,
+        )
 
     # -- review suggestions -------------------------------------------------
 
@@ -413,7 +465,9 @@ class RagEngine:
                 )
                 for cam, hit in list(by_camera.items())[:_FIXED_CAMERA_COUNT]
             ]
-            cameras = self._pad_cameras(real, day, hour, start)
+            cameras = self._fill_synchronized_cameras(
+                real, day, hour, start, anchor.absolute_start
+            )
             best = max(cameras, key=lambda c: c.match_score)
             best.is_best = True
 
@@ -429,14 +483,112 @@ class RagEngine:
                     moment_id=f"m{index}",
                     clock_label=f"{hour:02d}:{minute:02d}",
                     place_label=anchor.room or "Scene",
-                    camera_count=_FIXED_CAMERA_COUNT,
+                    camera_count=len(cameras),
                     aggregate_score=agg,
                     score_caption=f"{score_label} {agg:.2f}",
                     dot_color=_DOT_COLORS[support],
                     cameras=cameras,
+                    absolute_start_ms=anchor.absolute_start,
                 )
             )
         return moments
+
+    def _fill_synchronized_cameras(
+        self,
+        real: List[CameraAngle],
+        day: str,
+        hour: int,
+        start: float,
+        abs_start_ms: Optional[int],
+    ) -> List[CameraAngle]:
+        """Fill a moment's camera slots with the angles actually rolling then.
+
+        The scored retrieval hits (``real``) lead; remaining slots are filled
+        with the OTHER cameras rolling at this timestamp, fetched from the index
+        (marked ``is_context`` — synchronized, not a semantic match). Only when no
+        co-temporal data is available (offline / no Qdrant) do we fall back to the
+        old ego-roster padding so the tiles still render.
+        """
+        cameras = list(real[:_FIXED_CAMERA_COUNT])
+        present = {cam.camera_id for cam in cameras}
+        if len(cameras) < _FIXED_CAMERA_COUNT:
+            for cam in self._cotemporal_cameras(day, abs_start_ms, exclude=present):
+                if len(cameras) >= _FIXED_CAMERA_COUNT:
+                    break
+                if cam.camera_id in present:
+                    continue
+                present.add(cam.camera_id)
+                cameras.append(cam)
+        if len(cameras) < _FIXED_CAMERA_COUNT:
+            # No (or too few) co-temporal cameras from the index — keep the UI
+            # contract with deterministic roster padding.
+            cameras = self._pad_cameras(cameras, day, hour, start)
+        return cameras
+
+    def _cotemporal_cameras(
+        self,
+        day: Optional[str],
+        abs_start_ms: Optional[int],
+        *,
+        exclude: Any = (),
+        window_ms: int = 45_000,
+        limit: int = 128,
+    ) -> List[CameraAngle]:
+        """Cameras whose clips overlap ``abs_start_ms`` on ``day`` (from the index).
+
+        Returns the synchronized angles for a moment — every camera rolling at
+        that timestamp — so rejecting one just drops it and the next angle takes
+        the slot, all without leaving the moment. ``exclude`` drops named cameras
+        (those already shown, or rejected by the reviewer). Empty when there is no
+        Qdrant handle (injected/offline pipelines) or the lookup fails.
+        """
+        client = getattr(self.pipeline, "qdrant_client", None)
+        collection = getattr(self.pipeline, "collection_name", None)
+        if client is None or collection is None or not day or abs_start_ms is None:
+            return []
+        from castlerag.retrieval.filters import build_filter
+
+        query_filter = build_filter(
+            day=day,
+            source_type="main_clip",
+            time_range_start_ms=abs_start_ms - window_ms,
+            time_range_end_ms=abs_start_ms + window_ms,
+            exclude_camera_ids=tuple(exclude) or None,
+        )
+        try:
+            points, _ = client.scroll(
+                collection_name=collection,
+                scroll_filter=query_filter,
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as exc:  # never break a moment on an index hiccup
+            log.warning("co-temporal camera lookup failed (%s)", exc)
+            return []
+
+        by_cam: "OrderedDict[str, CameraAngle]" = OrderedDict()
+        for point in points:
+            payload = dict(getattr(point, "payload", {}) or {})
+            cam = payload.get("camera_id")
+            if not cam or cam in by_cam:
+                continue
+            by_cam[cam] = CameraAngle(
+                camera_id=str(cam),
+                day=str(payload.get("day") or day),
+                hour=int(payload.get("hour") or 0),
+                start_seconds=float(payload.get("start_seconds") or 0.0),
+                match_score=0.0,
+                is_best=False,
+                is_context=True,
+                evidence_text=(
+                    payload.get("transcript_text")
+                    or payload.get("event_summary")
+                    or payload.get("ocr_text")
+                    or None
+                ),
+            )
+        return list(by_cam.values())
 
     def _pad_cameras(
         self,
