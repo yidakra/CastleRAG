@@ -141,6 +141,49 @@ def test_synthesize_claim_free_form_uses_evidence_not_dummy_priors():
     assert claim.text == "Bjorn cooks porridge."
 
 
+def test_synthesize_claim_free_form_uses_explicit_support_score():
+    """Free-form support comes from the reranker score, not the (None) rows."""
+    from castlerag.schemas import Prediction
+
+    pred = Prediction(
+        question_id="q", predicted_answer="a", raw_answer_text="Cathal taught guitar."
+    )
+    # The displayed rows carry NO rerank_score (the real bug); a strong explicit
+    # support_score must still drive SUPPORTED rather than collapsing to 0.0.
+    rows = [_clip_hit("Cathal", 0.5)]  # rerank_score is None on these
+    claim = _engine()._synthesize_claim(
+        pred,
+        {},
+        {key: "" for key in "abcd"},
+        is_mcq=False,
+        question="What did Cathal teach Allie?",
+        evidence_rows=rows,
+        freeform_answer="Cathal taught Allie the guitar.",
+        support_score=0.75,
+    )
+    assert claim.support is SupportLevel.SUPPORTED
+
+
+def test_freeform_support_score_reads_reranked_not_displayed_rows():
+    """The score comes off rerank_result.evidence_rows, which are stamped."""
+    from types import SimpleNamespace
+
+    # Rows shown to the UI have no rerank_score; the reranked rows do.
+    displayed = [_clip_hit("Cathal", 0.5)]
+    reranked = [_clip_hit("Cathal", 0.5).model_copy(update={"rerank_score": 0.75})]
+    rr = SimpleNamespace(evidence_rows=reranked)
+    assert _engine()._freeform_support_score(rr, displayed) == pytest.approx(0.75)
+
+
+def test_freeform_support_score_falls_back_to_cosine_when_no_rerank():
+    """With no kept reranked evidence, fall back to the best dense cosine."""
+    from types import SimpleNamespace
+
+    displayed = [_clip_hit("Cathal", 0.5).model_copy(update={"raw_score": 0.42})]
+    rr = SimpleNamespace(evidence_rows=[])
+    assert _engine()._freeform_support_score(rr, displayed) == pytest.approx(0.42)
+
+
 def test_no_evidence_moment_keeps_focus_contract():
     """A no-hit query still yields a focusable, clearly-labelled moment."""
     moment = _engine()._no_evidence_moment(SupportLevel.UNSUPPORTED)

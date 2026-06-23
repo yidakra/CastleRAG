@@ -134,6 +134,13 @@ class RagEngine:
             question=question,
             evidence_rows=result.evidence_rows,
             freeform_answer=freeform_answer,
+            support_score=(
+                None
+                if is_mcq
+                else self._freeform_support_score(
+                    result.rerank_result, result.evidence_rows
+                )
+            ),
         )
         moments = self._hits_to_moments(result.evidence_rows, claim.support) or [
             self._no_evidence_moment(claim.support)
@@ -261,6 +268,7 @@ class RagEngine:
         question: str = "",
         evidence_rows: Optional[List[RetrievalHit]] = None,
         freeform_answer: Optional[str] = None,
+        support_score: Optional[float] = None,
     ) -> Claim:
         """Derive the claim under review and its support level.
 
@@ -280,8 +288,13 @@ class RagEngine:
             text = (
                 freeform_answer or prediction.raw_answer_text or question or ""
             ).strip() or ("The retrieved footage")
-            rows = evidence_rows or []
-            score = max((h.rerank_score or 0.0 for h in rows), default=0.0)
+            if support_score is not None:
+                # Caller supplies the reranker's normalised evidence strength
+                # (the rows handed to the UI carry no rerank_score themselves).
+                score = support_score
+            else:
+                rows = evidence_rows or []
+                score = max((h.rerank_score or 0.0 for h in rows), default=0.0)
         if score >= _SUPPORTED_AT:
             support = SupportLevel.SUPPORTED
         elif score >= _PARTIAL_AT:
@@ -289,6 +302,28 @@ class RagEngine:
         else:
             support = SupportLevel.UNSUPPORTED
         return Claim(text=text, support=support)
+
+    def _freeform_support_score(
+        self,
+        rerank_result: Any,
+        evidence_rows: Optional[List[RetrievalHit]],
+    ) -> float:
+        """Evidence strength for an open question's claim, in [0, 1].
+
+        The rows the UI displays carry no ``rerank_score`` (run_eval's flattening
+        does not stamp it), so reading it off them always yielded 0.0 — every
+        open answer was labelled UNSUPPORTED. Use the reranker's own normalised
+        evidence scores instead; if the reranker kept nothing, fall back to the
+        strongest dense cosine so a grounded dense-only answer isn't mislabelled.
+        """
+        reranked = getattr(rerank_result, "evidence_rows", None) or []
+        scores = [r.rerank_score for r in reranked if r.rerank_score is not None]
+        if scores:
+            return max(scores)
+        cosines = [
+            h.raw_score for h in (evidence_rows or []) if h.raw_score is not None
+        ]
+        return max(cosines) if cosines else 0.0
 
     def _no_evidence_moment(self, support: SupportLevel) -> EvidenceMoment:
         """Explicit placeholder moment when retrieval returns no timestamped hits.
