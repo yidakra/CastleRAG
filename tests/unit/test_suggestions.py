@@ -179,6 +179,27 @@ def test_placeholder_engine_suggestions_are_deterministic():
     assert "Bjorn" in q
 
 
+def test_strip_parentheticals_cleans_query_text():
+    from castlerag.ui.chat import strip_parentheticals
+
+    assert (
+        strip_parentheticals("Find the guitar (camera Cathal) at noon.")
+        == "Find the guitar at noon."
+    )
+    assert strip_parentheticals("Seek X (a) and Y (b).") == "Seek X and Y."
+    assert strip_parentheticals("no parens here") == "no parens here"
+
+
+def test_refined_query_box_has_no_parentheticals():
+    """The drafted refined query (what fills the box) carries no '(...)' asides."""
+    eng = PlaceholderEngine()
+    # A justification with a parenthetical aside flows into the template draft.
+    reviews = {"Bjorn": {"state": "flagged", "justification": "blurry (left edge)"}}
+    q = eng.suggest_refined_query("the claim", reviews)
+    assert "(" not in q and ")" not in q
+    assert "Bjorn" in q
+
+
 # --- RagEngine fallback (no live infra) ------------------------------------
 
 

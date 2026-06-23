@@ -272,6 +272,7 @@ class RagEngine:
         carried in ``claim``.
         """
         from castlerag.generation.suggestions import suggest_refined_query_text
+        from castlerag.ui.chat import strip_parentheticals
 
         try:
             text = suggest_refined_query_text(
@@ -281,10 +282,12 @@ class RagEngine:
                 question=question,
                 model=self._gen_model(),
             )
-            return text or compose_refined_query(claim, reviews, question=question)
+            drafted = text or compose_refined_query(claim, reviews, question=question)
         except Exception as exc:
             log.warning("suggest_refined_query fell back to template (%s)", exc)
-            return compose_refined_query(claim, reviews, question=question)
+            drafted = compose_refined_query(claim, reviews, question=question)
+        # Drop parenthetical asides so the editable query box reads as clean prose.
+        return strip_parentheticals(drafted)
 
     # -- adapters -----------------------------------------------------------
 

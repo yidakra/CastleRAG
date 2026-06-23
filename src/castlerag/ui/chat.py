@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Protocol, Sequence, Tuple
@@ -29,6 +30,24 @@ from typing import Dict, List, Optional, Protocol, Sequence, Tuple
 from castlerag.routing.question_router import route_question
 
 _CHOICES = ("a", "b", "c", "d")
+
+# Strips a parenthetical aside "(...)" (and the space before it) from query text.
+_PARENTHETICAL_RE = re.compile(r"\s*\([^()]*\)")
+
+
+def strip_parentheticals(text: str) -> str:
+    """Remove '(...)' asides from a refined-query string and tidy the spacing.
+
+    The drafted query (LLM or template) sometimes carries parenthetical notes
+    that read as clutter in the editable query box; this keeps the box — and the
+    retrieval query it becomes — clean prose.
+    """
+    if not text:
+        return text
+    cleaned = _PARENTHETICAL_RE.sub("", text)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = re.sub(r"\s+([.,;:?!])", r"\1", cleaned)
+    return cleaned.strip()
 
 # The three synchronized cameras the evidence viewer shows per moment.  All are
 # real CASTLE egocentric streams, so the YouTube mirror resolves each of them at
@@ -337,7 +356,9 @@ class PlaceholderEngine:
         question: Optional[str] = None,
     ) -> str:
         """Offline refined-query draft — the deterministic template."""
-        return compose_refined_query(claim, reviews, question=question)
+        return strip_parentheticals(
+            compose_refined_query(claim, reviews, question=question)
+        )
 
     # -- internals ----------------------------------------------------------
 
