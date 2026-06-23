@@ -49,3 +49,7 @@ logs/
 
 # W&B local run artifacts
 wandb/
+
+# VPS demo deployment — local-only files, never commit
+.vps_basic_auth_password
+configs/vps_local.yaml

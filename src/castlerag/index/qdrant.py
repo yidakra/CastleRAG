@@ -10,6 +10,7 @@ Payload indexes (for server-side filtering):
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List
 
 from castlerag.embed.omniembed import make_point_id
@@ -47,14 +48,21 @@ _BOOL_INDEX_FIELDS = [
 
 
 def get_client(host: str = "localhost", port: int = 6333) -> Any:
-    """Return an initialised qdrant_client.QdrantClient."""
+    """Return an initialised qdrant_client.QdrantClient.
+
+    Default httpx-level timeout is bumped from the qdrant-client default of 5s
+    so a cold-cache on-disk HNSW segment (~5–10s on the first hit per
+    process / after a container restart) can warm up without bailing. Override
+    via the ``QDRANT_CLIENT_TIMEOUT`` env var (seconds).
+    """
     try:
         from qdrant_client import QdrantClient
     except ImportError as e:
         raise ImportError(
             "qdrant-client not installed; run: pip install qdrant-client"
         ) from e
-    return QdrantClient(host=host, port=port)
+    timeout = float(os.getenv("QDRANT_CLIENT_TIMEOUT", "60"))
+    return QdrantClient(host=host, port=port, timeout=timeout)
 
 
 def create_collection(
