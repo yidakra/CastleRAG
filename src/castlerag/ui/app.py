@@ -70,7 +70,43 @@ def build_app(
         forceColorScheme="light",
     )
     register_callbacks(app, engine, mirror)
+    _install_basic_auth(app)
     return app
+
+
+def _install_basic_auth(app: "Dash") -> None:
+    """Gate the whole dashboard behind HTTP Basic Auth when configured.
+
+    Reads ``CASTLERAG_UI_BASIC_AUTH="user:password"``. Intended for public
+    exposure (e.g. a cloudflared tunnel for a demo) so the live GPU backend
+    isn't open to anyone with the link. Unset by default, so local and
+    SSH-tunnel use is unchanged. Stdlib only — no extra dependency, works on the
+    offline compute nodes the live UI runs on.
+    """
+    import hmac
+    import os
+
+    cred = os.getenv("CASTLERAG_UI_BASIC_AUTH", "").strip()
+    if not cred or ":" not in cred:
+        return
+    user, _, password = cred.partition(":")
+
+    from flask import Response, request
+
+    @app.server.before_request  # type: ignore[union-attr]
+    def _require_basic_auth():
+        auth = request.authorization
+        if (
+            auth is not None
+            and hmac.compare_digest(auth.username or "", user)
+            and hmac.compare_digest(auth.password or "", password)
+        ):
+            return None
+        return Response(
+            "Authentication required.",
+            401,
+            {"WWW-Authenticate": 'Basic realm="CastleRAG demo"'},
+        )
 
 
 def run(

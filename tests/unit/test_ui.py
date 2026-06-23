@@ -308,3 +308,37 @@ def test_rejected_cameras_empty_when_none_rejected():
     thread = [{"reviews": {"m1": {"Allie": {"state": "confirmed"}}}}]
     assert _rejected_cameras(thread, {"Bjorn": {"state": "flagged"}}) == []
     assert _rejected_cameras(None, None) == []
+
+
+def test_basic_auth_gates_requests_when_env_set(monkeypatch):
+    monkeypatch.setenv("CASTLERAG_UI_BASIC_AUTH", "demo:secret")
+    from dash import Dash, html
+
+    from castlerag.ui.app import _install_basic_auth
+
+    app = Dash(__name__)
+    app.layout = html.Div("ok")
+    _install_basic_auth(app)
+    client = app.server.test_client()
+    assert client.get("/").status_code == 401  # no creds -> challenged
+    import base64
+
+    token = base64.b64encode(b"demo:secret").decode()
+    ok = client.get("/", headers={"Authorization": f"Basic {token}"})
+    assert ok.status_code != 401  # correct creds pass the gate
+    bad = base64.b64encode(b"demo:wrong").decode()
+    assert client.get(
+        "/", headers={"Authorization": f"Basic {bad}"}
+    ).status_code == 401
+
+
+def test_basic_auth_absent_when_env_unset(monkeypatch):
+    monkeypatch.delenv("CASTLERAG_UI_BASIC_AUTH", raising=False)
+    from dash import Dash, html
+
+    from castlerag.ui.app import _install_basic_auth
+
+    app = Dash(__name__)
+    app.layout = html.Div("ok")
+    _install_basic_auth(app)
+    assert app.server.test_client().get("/").status_code != 401  # no gate
