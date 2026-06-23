@@ -117,5 +117,62 @@ EOF
 # Bind 0.0.0.0 so the login node can forward the tunnel to this compute node.
 # --require-live: fail loudly with the exact missing dependency instead of
 # silently serving the offline demo (the whole point of this job).
-exec castlerag ui --host 0.0.0.0 --port "${UI_PORT}" \
-    --require-live --config "${CONF}"
+#
+# PUBLIC_TUNNEL=1 (opt-in, e.g. for a demo): also expose the UI on a public
+# cloudflared quick-tunnel URL so attendees who can't SSH in can reach it.
+# Requires CASTLERAG_UI_BASIC_AUTH=user:pass — the app gates every request, so
+# the live GPU backend isn't open to anyone with the link.
+if [ "${PUBLIC_TUNNEL:-0}" != "1" ]; then
+    exec castlerag ui --host 0.0.0.0 --port "${UI_PORT}" \
+        --require-live --config "${CONF}"
+fi
+
+if [ -z "${CASTLERAG_UI_BASIC_AUTH:-}" ]; then
+    echo "[ui] ABORT: PUBLIC_TUNNEL=1 needs CASTLERAG_UI_BASIC_AUTH=user:pass"
+    echo "[ui]        (refusing to expose the live backend with no auth)."
+    exit 2
+fi
+CFBIN="${CLOUDFLARED:-${HOME}/cloudflared}"
+if [ ! -x "${CFBIN}" ]; then
+    echo "[ui] ABORT: cloudflared not found/executable at ${CFBIN} (set CLOUDFLARED=...)."
+    exit 2
+fi
+
+# UI in the background so cloudflared can run alongside it.
+castlerag ui --host 0.0.0.0 --port "${UI_PORT}" --require-live --config "${CONF}" &
+UI_PID=$!
+trap 'kill $EMB_PID $GEN_PID $QPID $UI_PID ${CF_PID:-} 2>/dev/null' EXIT
+
+# Readiness check must send the basic-auth creds (every route is gated now).
+for i in $(seq 1 90); do
+    curl -sf -u "${CASTLERAG_UI_BASIC_AUTH}" "http://localhost:${UI_PORT}/" >/dev/null 2>&1 \
+        && { echo "[ui] dashboard ready ($((i*2))s)"; break; }
+    kill -0 "$UI_PID" 2>/dev/null || { echo "[ui] ERROR: UI process died"; exit 1; }
+    sleep 2
+done
+
+# --protocol http2: compute nodes firewall QUIC/UDP-7844; TCP/443 reaches the edge.
+CF_LOG="logs/ui_cloudflared_${SLURM_JOB_ID}.log"
+"${CFBIN}" tunnel --no-autoupdate --protocol http2 \
+    --url "http://localhost:${UI_PORT}" > "${CF_LOG}" 2>&1 &
+CF_PID=$!
+PUBURL=""
+for i in $(seq 1 45); do
+    PUBURL=$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "${CF_LOG}" 2>/dev/null | head -1 || true)
+    [ -n "${PUBURL}" ] && break
+    kill -0 "$CF_PID" 2>/dev/null || { echo "[ui] cloudflared exited early; log:"; tail -20 "${CF_LOG}"; break; }
+    sleep 2
+done
+
+cat <<EOF
+
+[ui] ============================================================
+[ui]  PUBLIC DEMO URL : ${PUBURL:-<not ready yet — see ${CF_LOG}>}
+[ui]  basic-auth user : ${CASTLERAG_UI_BASIC_AUTH%%:*}  (share the password out-of-band)
+[ui]  Public for the life of this job — scancel ${SLURM_JOB_ID} to tear it down.
+[ui]  Quick tunnels have no uptime guarantee and the URL changes each run.
+[ui] ============================================================
+
+EOF
+
+wait "$UI_PID"
