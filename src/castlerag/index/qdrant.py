@@ -50,10 +50,12 @@ _BOOL_INDEX_FIELDS = [
 def get_client(host: str = "localhost", port: int = 6333) -> Any:
     """Return an initialised qdrant_client.QdrantClient.
 
-    Default httpx-level timeout is bumped from the qdrant-client default of 5s
-    so a cold-cache on-disk HNSW segment (~5–10s on the first hit per
-    process / after a container restart) can warm up without bailing. Override
-    via the ``QDRANT_CLIENT_TIMEOUT`` env var (seconds).
+    The httpx-level timeout is bumped from the qdrant-client default of 5s, which
+    is too short for two on-disk cases: a cold-cache HNSW segment warming up on
+    the first query per process / after a container restart (~5–10s), and batched
+    upserts into an on-disk collection on slower scratch/disk (which otherwise
+    raise ``ResponseHandlingException: timed out``). Override via the
+    ``QDRANT_CLIENT_TIMEOUT`` env var (seconds) — e.g. raise it for bulk indexing.
     """
     try:
         from qdrant_client import QdrantClient
@@ -167,6 +169,18 @@ def upsert_batch(
     client.upsert(collection_name=collection_name, points=points, wait=True)
 
 
+def _collection_exists(client: Any, collection_name: str) -> bool:
+    """Return True if the collection already exists (version-tolerant)."""
+    try:
+        return bool(client.collection_exists(collection_name))
+    except Exception:  # older clients lack collection_exists
+        try:
+            client.get_collection(collection_name)
+            return True
+        except Exception:
+            return False
+
+
 def bootstrap_collection(
     host: str,
     port: int,
@@ -180,8 +194,21 @@ def bootstrap_collection(
 
     This is the single entry point called by the `index` CLI command and
     the index_qdrant.slurm job.
+
+    When the collection already exists and ``recreate`` is False, skip creation
+    (and the payload indexes, which already exist) and return the client for an
+    incremental upsert — points are added or overwritten by id, so prior days /
+    cameras are preserved. This is what makes ``index --day N`` additive instead
+    of failing with "Collection already exists".
     """
     client = get_client(host, port)
+    if not recreate and _collection_exists(client, collection_name):
+        log.info(
+            "Collection %s already exists; upserting incrementally "
+            "(existing points preserved, same-id points overwritten).",
+            collection_name,
+        )
+        return client
     create_collection(
         client,
         collection_name,
