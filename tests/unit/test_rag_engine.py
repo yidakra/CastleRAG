@@ -600,44 +600,42 @@ def test_cotemporal_cameras_excludes_rejected():
     assert {c.camera_id for c in cams} == {"Allie", "Cathal"}
 
 
-def test_refine_in_scene_keeps_timestamp_and_swaps_rejected_camera():
-    """With an anchor, refine stays on the moment and drops the rejected angle."""
-    eng = _build_cotemporal_engine()
-    result = eng.refine(
-        "Cathal baked the cookies",
-        "ignored when anchored",
-        iteration=2,
-        exclude_cameras=("Bjorn",),
-        anchor=("day1", 1_700_000_000_000),
-    )
-    assert len(result.moments) == 1
-    moment = result.moments[0]
-    cams = {c.camera_id for c in moment.cameras}
-    assert "Bjorn" not in cams and cams <= {"Allie", "Cathal"}
-    assert moment.absolute_start_ms == 1_700_000_000_000  # same scene
-    assert result.claim is not None and result.claim.text == "Cathal baked the cookies"
+def test_refine_reruns_retrieval_with_refined_query_and_exclusions():
+    """Refinement re-runs the search (answer) with the refined query + exclusions.
 
-
-def test_refine_falls_back_to_global_search_without_anchor():
-    """No anchor -> the old fresh-search path (engine.answer) is used."""
+    Refinement is a retrieval re-run, NOT a camera swap: refine must call answer
+    with the refined query and the rejected cameras, even when an anchor is given
+    (the old in-scene path froze the answer at zero confidence — regression guard).
+    """
     captured = {}
 
     eng = _build_cotemporal_engine()
 
     def _fake_answer(question, choices=None, exclude_cameras=()):  # noqa: ANN001
         captured["question"] = question
+        captured["exclude"] = tuple(exclude_cameras)
         return ChatTurnResult(
-            answer_text="x",
+            answer_text="a brand new answer",
             route=None,
             support_priors={},
             is_placeholder=False,
-            claim=Claim(text="x", support=SupportLevel.PARTIAL),
-            moments=[eng._no_evidence_moment(SupportLevel.PARTIAL)],
+            claim=Claim(text="a brand new answer", support=SupportLevel.SUPPORTED),
+            moments=[eng._no_evidence_moment(SupportLevel.SUPPORTED)],
         )
 
     eng.answer = _fake_answer  # type: ignore[method-assign]
-    eng.refine("claim", "the refined query", iteration=2, anchor=None)
+    result = eng.refine(
+        "the OLD claim",
+        "the refined query",
+        iteration=2,
+        exclude_cameras=("Bjorn",),
+        anchor=("day1", 1_700_000_000_000),  # ignored now — must NOT short-circuit
+    )
     assert captured["question"] == "the refined query"
+    assert captured["exclude"] == ("Bjorn",)
+    # The new answer flows through unchanged — not frozen to the old claim.
+    assert result.answer_text == "a brand new answer"
+    assert result.claim is not None and result.claim.text == "a brand new answer"
 
 
 def test_pad_cameras_emits_distinct_ids_with_empty_roster():

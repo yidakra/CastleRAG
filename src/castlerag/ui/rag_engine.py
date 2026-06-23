@@ -171,72 +171,26 @@ class RagEngine:
         exclude_cameras: Sequence[str] = (),
         anchor: Optional[Tuple[Optional[str], Optional[int]]] = None,
     ) -> ChatTurnResult:
-        """Refine the focused moment, hard-excluding the rejected angles.
+        """Run a real retrieval/generation pass for the refined query.
 
-        When ``anchor`` (the focused moment's ``(day, absolute_start_ms)``) is
-        given and the index still has other cameras rolling at that timestamp,
-        STAY ON THE SAME MOMENT and just swap the rejected angle(s) out — no
-        teleport to a different scene. Only when there is no anchor, or no
-        co-temporal camera remains after exclusion, fall back to a fresh global
-        search for ``refined_query``.
+        Rejected cameras are hard-excluded, but refinement must not simply stay
+        on the same timestamp with zero scores. The user's feedback should affect
+        a new retrieval pass and allow the answer/claim to change.
 
-        ``exclude_cameras`` are the angles the reviewer rejected; they are
-        hard-excluded either way (must_not filter / scroll exclusion).
+        ``anchor`` is accepted for protocol/backwards compatibility but no longer
+        used: the previous "stay on the same moment" behaviour froze the answer
+        to the prior claim and rendered zero-confidence angles (refinement no-op).
         """
-        if anchor is not None:
-            day, abs_start_ms = anchor
-            moment = self._inscene_moment(day, abs_start_ms, exclude_cameras)
-            if moment is not None:
-                return ChatTurnResult(
-                    answer_text=claim,  # same scene -> same answer/claim
-                    route=None,
-                    support_priors={},
-                    evidence=[],
-                    predicted_choice=None,
-                    is_placeholder=False,
-                    claim=Claim(text=claim, support=SupportLevel.PARTIAL),
-                    moments=[moment],
-                )
-
         result = self.answer(
-            refined_query, choices=None, exclude_cameras=exclude_cameras
+            refined_query,
+            choices=None,
+            exclude_cameras=exclude_cameras,
         )
-        support = result.claim.support if result.claim else SupportLevel.PARTIAL
-        result.claim = Claim(text=claim, support=support)
-        result.moments = result.moments[:1]
+
+        if result.claim is None:
+            result.claim = Claim(text=claim, support=SupportLevel.PARTIAL)
+
         return result
-
-    def _inscene_moment(
-        self,
-        day: Optional[str],
-        abs_start_ms: Optional[int],
-        exclude_cameras: Sequence[str],
-    ) -> Optional[EvidenceMoment]:
-        """Rebuild the focused moment from the cameras still rolling at its time.
-
-        Returns ``None`` (caller falls back to a global search) when the index is
-        unreachable or every co-temporal camera was excluded.
-        """
-        cameras = self._cotemporal_cameras(
-            day, abs_start_ms, exclude=tuple(exclude_cameras)
-        )
-        if not cameras:
-            return None
-        cameras = cameras[:_FIXED_CAMERA_COUNT]
-        cameras[0].is_best = True
-        hour = cameras[0].hour
-        minute = int(cameras[0].start_seconds // 60)
-        return EvidenceMoment(
-            moment_id="m0",
-            clock_label=f"{hour:02d}:{minute:02d}",
-            place_label="Scene",
-            camera_count=len(cameras),
-            aggregate_score=0.0,
-            score_caption="synchronized angles",
-            dot_color=_DOT_COLORS[SupportLevel.PARTIAL],
-            cameras=cameras,
-            absolute_start_ms=abs_start_ms,
-        )
 
     # -- review suggestions -------------------------------------------------
 
