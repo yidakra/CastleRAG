@@ -38,6 +38,19 @@ fi
 
 mkdir -p "${DEST}"
 
+# --- preflight: fail before writing if DEST can't hold the source (+1 GB) ---
+# Sized from the uncompressed sources (chunks compress, so this over-estimates,
+# which is the safe direction). Aborts up front instead of dying mid-tar and
+# leaving corrupt partials on a near-full home quota.
+NEED_KB=$(du -sk "${DERIVED}/chunks" "${EMB}" "${QSTORE}" 2>/dev/null | awk '{s+=$1} END{print s+0}')
+NEED_KB=$(( NEED_KB + 1048576 ))                       # +1 GB margin
+AVAIL_KB=$(df -Pk "${DEST}" | awk 'NR==2 {print $4}')
+echo "[archive] space: need ~$(( NEED_KB / 1048576 )) GB, free $(( ${AVAIL_KB:-0} / 1048576 )) GB at $(dirname "${DEST}")"
+if [ "${AVAIL_KB:-0}" -lt "${NEED_KB}" ]; then
+  echo "[archive] ABORT: insufficient space (need ~$(( NEED_KB / 1048576 )) GB). Pass a DEST_DIR on a larger filesystem."
+  exit 2
+fi
+
 # --- 1/3: chunk records (JSON; compress well) ---
 echo "[archive] 1/3 chunks (day1) ..."
 tar -C "${DERIVED}" -czf "${DEST}/chunks_day1.tar.gz" chunks
@@ -75,12 +88,15 @@ Contents:
 - qdrant_storage.tar   — Qdrant storage for collection ${COLL}
 
 ## Restore to scratch
+Run these from THIS archive directory (where the tars and SHA256SUMS live):
+
+    cd <this archive directory>
+    sha256sum -c SHA256SUMS                 # verify integrity first
     SC="/scratch-shared/\$USER"
     mkdir -p "\$SC/castle_derived/embeddings" "\$SC/qdrant_storage"
     tar -C "\$SC/castle_derived"            -xzf chunks_day1.tar.gz
     tar -C "\$SC/castle_derived/embeddings" -xf  embeddings_day1.tar
     tar -C "\$SC/qdrant_storage"            -xf  qdrant_storage.tar
-    sha256sum -c SHA256SUMS    # verify integrity
 
 After restore, ui_live.slurm / smoke / eval boot Qdrant against the restored
 storage (collection ${COLL}) with the fixed cameras already indexed — no
