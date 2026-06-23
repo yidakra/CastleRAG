@@ -97,6 +97,24 @@ def test_suggest_refined_query_text_includes_weak_cameras():
     assert "Luca" in user and "Klaus" in user  # weak angles surfaced
 
 
+def test_suggest_refined_query_text_anchors_on_question_not_prior_answer():
+    """The original question anchors the prompt; the prior answer is demoted."""
+    client = FakeClient("refined")
+    reviews = {"Bjorn": {"state": "flagged", "justification": "look for the guitar"}}
+    suggest_refined_query_text(
+        "Cathal taught Allie the piano",  # claim == prior (wrong) answer
+        reviews,
+        llm_client=client,
+        question="What instrument did Cathal teach Allie to play?",
+        model="m",
+    )
+    user = client.calls[0]["messages"][1]["content"]
+    assert "Original question: What instrument did Cathal teach Allie" in user
+    # The prior answer is present but explicitly marked as possibly-wrong context.
+    assert "may be wrong" in user
+    assert "Cathal taught Allie the piano" in user
+
+
 def test_suggest_refined_query_text_separates_rejected_from_flagged():
     # The LLM-path query must steer toward flagged angles but AWAY from rejected
     # ones (not lump both into "needs a clearer view").

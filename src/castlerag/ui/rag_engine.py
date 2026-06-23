@@ -242,19 +242,31 @@ class RagEngine:
             return compose_justification(claim, camera_id, verdict, evidence_text)
 
     def suggest_refined_query(
-        self, claim: str, reviews: Dict[str, Dict[str, str]]
+        self,
+        claim: str,
+        reviews: Dict[str, Dict[str, str]],
+        question: Optional[str] = None,
     ) -> str:
-        """LLM-drafted refined query; template fallback on failure."""
+        """LLM-drafted refined query; template fallback on failure.
+
+        ``question`` is the original user question; it anchors the refined query
+        so the search is not biased back toward the (possibly wrong) prior answer
+        carried in ``claim``.
+        """
         from castlerag.generation.suggestions import suggest_refined_query_text
 
         try:
             text = suggest_refined_query_text(
-                claim, reviews, self._chat_client(), model=self._gen_model()
+                claim,
+                reviews,
+                self._chat_client(),
+                question=question,
+                model=self._gen_model(),
             )
-            return text or compose_refined_query(claim, reviews)
+            return text or compose_refined_query(claim, reviews, question=question)
         except Exception as exc:
             log.warning("suggest_refined_query fell back to template (%s)", exc)
-            return compose_refined_query(claim, reviews)
+            return compose_refined_query(claim, reviews, question=question)
 
     # -- adapters -----------------------------------------------------------
 

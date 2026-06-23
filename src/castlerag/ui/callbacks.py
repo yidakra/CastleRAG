@@ -180,6 +180,21 @@ def _focused_claim_text(
     return str(group["claim"]["text"])  # type: ignore[index]
 
 
+def _focused_question_text(
+    thread: Optional[List[Dict[str, object]]],
+    focus: Optional[Dict[str, object]],
+) -> str:
+    """Return the question of the focused group (empty string if not found).
+
+    This anchors the refined-query draft on what the user actually asked, not on
+    the (possibly wrong) prior answer carried in the claim.
+    """
+    group = _find_group(thread or [], (focus or {}).get("group_id", ""))
+    if group is None:
+        return ""
+    return str(group["question"])  # type: ignore[index]
+
+
 # ---------------------------------------------------------------------------
 # Renderers (pure: read the store dicts, never the mirror)
 # ---------------------------------------------------------------------------
@@ -1046,6 +1061,9 @@ def register_callbacks(
             return review, thread, True, "", _converged_banner(), False
 
         claim_text = _focused_claim_text(thread, focus)
-        prefilled = engine.suggest_refined_query(claim_text, review)
+        question_text = _focused_question_text(thread, focus)
+        prefilled = engine.suggest_refined_query(
+            claim_text, review, question=question_text
+        )
         return review, thread, False, prefilled, [], True
 

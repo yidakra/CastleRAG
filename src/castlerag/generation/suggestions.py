@@ -122,10 +122,17 @@ def suggest_refined_query_text(
     reviews: Dict[str, Dict[str, str]],
     llm_client: Any,
     *,
+    question: Optional[str] = None,
     model: str = _DEFAULT_MODEL,
     timeout: float = 30.0,
 ) -> str:
-    """Draft a refined retrieval query from the per-camera verdicts/notes."""
+    """Draft a refined retrieval query from the per-camera verdicts/notes.
+
+    ``question`` is the original user question and should anchor the query. For a
+    free-form question ``claim`` is the *previous answer* (the UI's claim text),
+    which may be wrong — passing it as the sole anchor biases the refined search
+    back toward that answer, so it is demoted to a fallible prior here.
+    """
     lines = []
     flagged = []
     rejected = []
@@ -144,17 +151,19 @@ def suggest_refined_query_text(
 
     system = (
         "You compose ONE refined retrieval query for a multi-camera "
-        "investigation. The reviewer's per-camera notes are explicit instructions "
-        "about what to look for or avoid next — treat them as the PRIMARY signal "
-        "and follow them directly, even when they redirect the search away from "
-        "the original claim. Use the claim only for background context. Also steer "
-        "retrieval toward stronger evidence for the FLAGGED angles (which need a "
-        "clearer view) and AWAY from the REJECTED angles (ruled out — do not seek "
-        "further evidence from them). Return 1-2 sentences only — the query text, "
-        "no preamble or quotes."
+        "investigation. Anchor the query on the ORIGINAL QUESTION. The reviewer's "
+        "per-camera notes are explicit instructions about what to look for or "
+        "avoid next — treat them as the PRIMARY steering signal and follow them "
+        "directly. A prior tentative answer may be shown for context, but it MAY "
+        "BE WRONG: do not assume it is correct and do not narrow the search to it. "
+        "Steer retrieval toward stronger evidence for the FLAGGED angles (which "
+        "need a clearer view) and AWAY from the REJECTED angles (ruled out — do "
+        "not seek further evidence from them). Return 1-2 sentences only — the "
+        "query text, no preamble or quotes."
     )
     user = (
-        f"Original claim (background context only): {claim}\n"
+        f"Original question: {question or claim}\n"
+        f"Prior tentative answer (context only, may be wrong): {claim}\n"
         f"Reviewer notes per camera (PRIMARY — follow these instructions):\n"
         f"{verdict_block}\n"
         f"Angles needing a clearer view (seek more): {flagged_block}\n"

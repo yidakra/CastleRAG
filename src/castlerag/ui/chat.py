@@ -197,7 +197,10 @@ class ChatEngine(Protocol):
         ...
 
     def suggest_refined_query(
-        self, claim: str, reviews: Dict[str, Dict[str, str]]
+        self,
+        claim: str,
+        reviews: Dict[str, Dict[str, str]],
+        question: Optional[str] = None,
     ) -> str:
         """Draft a refined retrieval query from the verdicts (the reviewer edits)."""
         ...
@@ -316,10 +319,13 @@ class PlaceholderEngine:
         return compose_justification(claim, camera_id, verdict, evidence_text)
 
     def suggest_refined_query(
-        self, claim: str, reviews: Dict[str, Dict[str, str]]
+        self,
+        claim: str,
+        reviews: Dict[str, Dict[str, str]],
+        question: Optional[str] = None,
     ) -> str:
         """Offline refined-query draft — the deterministic template."""
-        return compose_refined_query(claim, reviews)
+        return compose_refined_query(claim, reviews, question=question)
 
     # -- internals ----------------------------------------------------------
 
@@ -484,16 +490,23 @@ def compose_justification(
     return base + "."
 
 
-def compose_refined_query(claim: str, reviews: Dict[str, Dict[str, str]]) -> str:
+def compose_refined_query(
+    claim: str,
+    reviews: Dict[str, Dict[str, str]],
+    question: Optional[str] = None,
+) -> str:
     """Build an editable refined query from the reviewer's per-camera feedback.
 
     ``reviews`` maps ``camera_id -> {"state": ..., "justification": ...}``.  The
-    query restates the claim and folds in each camera's justification, calling
-    out the angles the reviewer flagged or rejected as the ones to strengthen.
-    Deterministic and model-free so it works offline; a live engine may later
-    replace it with an LLM-composed query.
+    query anchors on the original ``question`` (when given) and folds in each
+    camera's justification, calling out the angles the reviewer flagged or
+    rejected as the ones to strengthen. ``claim`` (the prior answer) is only the
+    fallback anchor when no question is supplied, so the refined search is not
+    biased back toward a possibly-wrong prior answer. Deterministic and
+    model-free so it works offline; a live engine may replace it with an
+    LLM-composed query.
     """
-    claim = (claim or "the claim").strip().rstrip(".")
+    anchor = (question or claim or "the question").strip().rstrip("?.")
     notes = []
     flagged = []
     rejected = []
@@ -506,7 +519,7 @@ def compose_refined_query(claim: str, reviews: Dict[str, Dict[str, str]]) -> str
             flagged.append(camera_id)
         if info.get("state") in _REJECTED_VERDICTS:
             rejected.append(camera_id)
-    query = f"Re-examine whether {claim}."
+    query = f"Re-examine: {anchor}."
     if notes:
         query += " Reviewer notes — " + "; ".join(notes) + "."
     if flagged:
