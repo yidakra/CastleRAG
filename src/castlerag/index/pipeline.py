@@ -374,7 +374,9 @@ def build_qdrant_index(
 
     # Qdrant's REST POST body limit defaults to 32 MB; chunk upserts so a
     # 3584-dim clip artifact (~64 KB/point with payload) stays well under it.
-    upsert_chunk = 256
+    # Smaller chunks keep each on-disk upsert fast enough to avoid client
+    # timeouts on slower scratch storage.
+    upsert_chunk = 64
     for artifact in cache_artifacts:
         payload_rows = build_point_batches(
             artifact.records,
