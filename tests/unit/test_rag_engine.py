@@ -515,8 +515,20 @@ def test_build_engine_falls_back_when_vllm_unreachable(monkeypatch):
     assert engine_factory.engine_mode(engine) == "offline"
 
 
-def _build_cotemporal_engine() -> RagEngine:
-    """Engine whose pipeline exposes an in-memory Qdrant with 3 synced clips."""
+class _FakeMirror:
+    """Minimal mirror stub: cameras in ``no_embed`` resolve no YouTube embed."""
+
+    def __init__(self, no_embed=()) -> None:
+        self.no_embed = set(no_embed)
+
+    def is_placeholder(self, day, camera, hour) -> bool:  # noqa: ANN001
+        return camera in self.no_embed
+
+
+def _build_cotemporal_engine(
+    cameras=("Allie", "Bjorn", "Cathal"), mirror=None
+) -> RagEngine:
+    """Engine whose pipeline exposes an in-memory Qdrant with synced clips."""
     qm = pytest.importorskip("qdrant_client.http.models")
     from types import SimpleNamespace
 
@@ -544,7 +556,7 @@ def _build_cotemporal_engine() -> RagEngine:
             source_video_path=f"/d/{cam}/12.mp4",
             event_summary=f"{cam} in the kitchen",
         )
-        for cam in ("Allie", "Bjorn", "Cathal")
+        for cam in cameras
     ]
     client = QdrantClient(":memory:")
     client.create_collection(
@@ -560,7 +572,19 @@ def _build_cotemporal_engine() -> RagEngine:
         payloads=[r.model_dump(exclude_none=True) for r in rows],
     )
     pipeline = SimpleNamespace(qdrant_client=client, collection_name="t")
-    return RagEngine(cfg=None, pipeline=pipeline, ego_cameras=("Allie", "Bjorn"))
+    return RagEngine(
+        cfg=None, pipeline=pipeline, ego_cameras=("Allie", "Bjorn"), mirror=mirror
+    )
+
+
+def test_cotemporal_cameras_deprioritizes_mirrorless_angle():
+    """A camera the mirror can't embed (e.g. Bao) is sorted last, not into a slot."""
+    eng = _build_cotemporal_engine(
+        cameras=("Allie", "Bao", "Cathal"), mirror=_FakeMirror(no_embed={"Bao"})
+    )
+    cams = eng._cotemporal_cameras("day1", 1_700_000_000_000)
+    assert {c.camera_id for c in cams} == {"Allie", "Bao", "Cathal"}
+    assert cams[-1].camera_id == "Bao"  # mirror-less angle deprioritized to last
 
 
 def test_cotemporal_cameras_returns_all_angles_at_timestamp():

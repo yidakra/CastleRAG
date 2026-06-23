@@ -58,6 +58,10 @@ class RagEngine:
     pipeline: Any
     ego_cameras: Tuple[str, ...] = ()
     is_live: bool = True
+    # YouTube mirror, so synchronized-camera fills can prefer angles the UI can
+    # actually embed (some cameras — e.g. Bao — are in the index but barely
+    # mirrored, which otherwise yields "no footage" tiles). None -> no filtering.
+    mirror: Any = None
     # Lazily-built OpenAI-compatible vLLM client, reused for review suggestions.
     _client: Any = field(default=None, init=False, repr=False, compare=False)
 
@@ -81,7 +85,7 @@ class RagEngine:
             cfg = load_config(override_path=os.getenv("CASTLERAG_CONFIG"))
         pipeline = _build_default_pipeline(cfg)
         ego = tuple(getattr(cfg.dataset, "ego_cameras", ()) or ())
-        return cls(cfg=cfg, pipeline=pipeline, ego_cameras=ego)
+        return cls(cfg=cfg, pipeline=pipeline, ego_cameras=ego, mirror=mirror)
 
     # -- public protocol ----------------------------------------------------
 
@@ -588,7 +592,27 @@ class RagEngine:
                     or None
                 ),
             )
-        return list(by_cam.values())
+        # Prefer angles the UI can actually embed: a camera in the index but not
+        # mirrored at this (day, hour) — e.g. Bao — otherwise wins a slot and
+        # renders a "no footage" tile. Stable sort keeps the index order within
+        # each group, so mirror-less cameras only appear if nothing else fills.
+        cameras = list(by_cam.values())
+        cameras.sort(key=lambda c: not self._has_embed(c.day, c.camera_id, c.hour))
+        return cameras
+
+    def _has_embed(self, day: str, camera: str, hour: int) -> bool:
+        """True when the YouTube mirror can embed this (day, camera, hour).
+
+        Returns True when there is no mirror (can't tell, so don't filter), so
+        offline/injected engines keep their current behaviour.
+        """
+        mirror = self.mirror
+        if mirror is None:
+            return True
+        try:
+            return not mirror.is_placeholder(day, camera, int(hour))
+        except Exception:  # never let a mirror lookup break a moment
+            return True
 
     def _pad_cameras(
         self,
@@ -606,7 +630,13 @@ class RagEngine:
         """
         cameras = list(real[:_FIXED_CAMERA_COUNT])
         present = {cam.camera_id for cam in cameras}
-        for name in self.ego_cameras:
+        # Roster order, but cameras the mirror can embed at this (day, hour) first,
+        # so padding doesn't burn a slot on a "no footage" angle. Stable sort keeps
+        # the deterministic roster order within each group.
+        roster = sorted(
+            self.ego_cameras, key=lambda n: not self._has_embed(day, n, hour)
+        )
+        for name in roster:
             if len(cameras) >= _FIXED_CAMERA_COUNT:
                 break
             if name in present:
