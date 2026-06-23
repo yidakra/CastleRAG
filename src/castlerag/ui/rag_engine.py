@@ -470,13 +470,24 @@ class RagEngine:
                 if cam and cam not in by_camera:
                     by_camera[cam] = hit
 
+            # Score the primary cameras by the SAME metric the synchronized
+            # angles use — query cosine (the hit's dense ``raw_score``) — so all
+            # tiles in a moment are comparable. Mixing rerank-normalised (~1.0)
+            # primaries with raw-cosine (~0.18) angles produced the "one full,
+            # rest ~0" cliff; falling back to the display score only when a hit
+            # carries no cosine (e.g. BM25-only).
             real = [
                 CameraAngle(
                     camera_id=cam,
                     day=day,
                     hour=hour,
                     start_seconds=start,
-                    match_score=round(_display_score(hit, score_mode, max_rrf), 4),
+                    match_score=round(
+                        _clamp(hit.raw_score)
+                        if hit.raw_score is not None
+                        else _display_score(hit, score_mode, max_rrf),
+                        4,
+                    ),
                     is_best=False,
                     evidence_text=_hit_evidence_text(hit),
                 )
@@ -485,6 +496,16 @@ class RagEngine:
             cameras = self._fill_synchronized_cameras(
                 real, day, hour, start, anchor.absolute_start, query_vector
             )
+            # Normalise the tiles within the moment so the best angle reads 1.0 and
+            # the others are comparable fractions of it (relative angle relevance),
+            # instead of tiny absolute cosines next to a 1.0 primary.
+            top_score = max((c.match_score for c in cameras), default=0.0)
+            if top_score > 0:
+                for cam_angle in cameras:
+                    if cam_angle.match_score > 0:
+                        cam_angle.match_score = round(
+                            cam_angle.match_score / top_score, 4
+                        )
             best = max(cameras, key=lambda c: c.match_score)
             best.is_best = True
 

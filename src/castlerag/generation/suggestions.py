@@ -27,9 +27,12 @@ _VERDICT_PHRASE = {
     "flagged": "is INCONCLUSIVE for (needs a clearer angle on)",
     "rejected": "does NOT support",
 }
-# Flagged angles need a clearer view (seek more); rejected angles are ruled out
-# (steer away). Kept separate so the refined query excludes rather than re-seeks
-# rejected cameras — mirrors compose_refined_query in ui/chat.py.
+# The three verdicts must drive the refined query differently:
+#   confirmed -> POSITIVE: good evidence, retain / stay consistent with it.
+#   flagged   -> seek a CLEARER view of this angle (relevant but unclear).
+#   rejected  -> EXCLUDE (ruled out — the camera is also must_not-filtered).
+# Kept separate so Confirm is a real positive signal, not "done, look elsewhere".
+_CONFIRMED_STATES = {"confirmed"}
 _FLAGGED_STATES = {"flagged"}
 _REJECTED_STATES = {"rejected"}
 
@@ -134,6 +137,7 @@ def suggest_refined_query_text(
     back toward that answer, so it is demoted to a fallible prior here.
     """
     lines = []
+    confirmed = []
     flagged = []
     rejected = []
     for camera_id, info in reviews.items():
@@ -141,31 +145,36 @@ def suggest_refined_query_text(
         note = (info.get("justification") or "").strip()
         phrase = _VERDICT_PHRASE.get(state, "reviewed")
         lines.append(f"- {camera_id}: {phrase}" + (f" — {note}" if note else ""))
-        if state in _FLAGGED_STATES:
+        if state in _CONFIRMED_STATES:
+            confirmed.append(camera_id)
+        elif state in _FLAGGED_STATES:
             flagged.append(camera_id)
         elif state in _REJECTED_STATES:
             rejected.append(camera_id)
     verdict_block = "\n".join(lines) if lines else "- (no verdicts)"
+    confirmed_block = ", ".join(confirmed) if confirmed else "none"
     flagged_block = ", ".join(flagged) if flagged else "none"
     rejected_block = ", ".join(rejected) if rejected else "none"
 
     system = (
         "You compose ONE refined retrieval query for a multi-camera "
         "investigation. Anchor the query on the ORIGINAL QUESTION. The reviewer's "
-        "per-camera notes are explicit instructions about what to look for or "
-        "avoid next — treat them as the PRIMARY steering signal and follow them "
-        "directly. A prior tentative answer may be shown for context, but it MAY "
-        "BE WRONG: do not assume it is correct and do not narrow the search to it. "
-        "Steer retrieval toward stronger evidence for the FLAGGED angles (which "
-        "need a clearer view) and AWAY from the REJECTED angles (ruled out — do "
-        "not seek further evidence from them). Return 1-2 sentences only — the "
-        "query text, no preamble or quotes."
+        "per-camera notes are explicit instructions — treat them as the PRIMARY "
+        "steering signal. The three verdicts mean different things and must be "
+        "honoured differently: CONFIRMED angles are good evidence — KEEP and stay "
+        "consistent with them, do NOT steer away; FLAGGED angles are relevant but "
+        "unclear — seek a CLEARER view of them; REJECTED angles are ruled out — "
+        "exclude them, do not seek further evidence from them. A prior tentative "
+        "answer may be shown for context, but it MAY BE WRONG: do not assume it is "
+        "correct. Return 1-2 sentences only — the query text, no preamble or quotes."
     )
     user = (
         f"Original question: {question or claim}\n"
         f"Prior tentative answer (context only, may be wrong): {claim}\n"
         f"Reviewer notes per camera (PRIMARY — follow these instructions):\n"
         f"{verdict_block}\n"
+        f"Angles CONFIRMED (keep / stay consistent with — do not steer away): "
+        f"{confirmed_block}\n"
         f"Angles needing a clearer view (seek more): {flagged_block}\n"
         f"Angles rejected (exclude from the search): {rejected_block}\n\n"
         "Refined query:"

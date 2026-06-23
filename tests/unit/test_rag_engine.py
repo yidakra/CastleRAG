@@ -628,6 +628,21 @@ def test_hits_to_moments_ranks_by_rerank_not_rrf():
     assert moments[1].cameras[0].camera_id == "Allie"
 
 
+def test_hits_to_moments_normalizes_tiles_within_moment():
+    """Tiles share one scale, normalised so best=1.0 and others are fractions.
+
+    Avoids the 'primary 1.0, co-temporal ~0.18' cliff from mixing rerank-display
+    with raw cosine — primaries are scored by their dense ``raw_score`` cosine.
+    """
+    eng = _engine()  # no pipeline -> co-temporal empty, one padded slot
+    a = _clip_hit("Allie", 0.6, start=120.0).model_copy(update={"raw_score": 0.50})
+    b = _clip_hit("Bjorn", 0.5, start=120.0).model_copy(update={"raw_score": 0.20})
+    moments = eng._hits_to_moments([a, b], SupportLevel.PARTIAL)
+    scores = {c.camera_id: c.match_score for c in moments[0].cameras}
+    assert scores["Allie"] == 1.0  # best angle reads 1.0
+    assert scores["Bjorn"] == pytest.approx(0.4, abs=0.01)  # 0.20/0.50, comparable
+
+
 def test_stamp_rerank_scores_copies_from_rerank_result():
     from types import SimpleNamespace
 

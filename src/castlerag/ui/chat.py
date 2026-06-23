@@ -470,6 +470,7 @@ def _support_priors(rng: random.Random) -> Dict[str, float]:
 
 
 # Verdicts that mark a camera angle as a weak / unconvincing perspective.
+_CONFIRMED_VERDICTS = {"confirmed"}
 _FLAGGED_VERDICTS = {"flagged"}
 _REJECTED_VERDICTS = {"rejected"}
 
@@ -520,6 +521,7 @@ def compose_refined_query(
     """
     anchor = (question or claim or "the question").strip().rstrip("?.")
     notes = []
+    confirmed = []
     flagged = []
     rejected = []
 
@@ -527,6 +529,8 @@ def compose_refined_query(
         justification = (info.get("justification") or "").strip()
         if justification:
             notes.append(f"{camera_id}: {justification}")
+        if info.get("state") in _CONFIRMED_VERDICTS:
+            confirmed.append(camera_id)
         if info.get("state") in _FLAGGED_VERDICTS:
             flagged.append(camera_id)
         if info.get("state") in _REJECTED_VERDICTS:
@@ -534,6 +538,8 @@ def compose_refined_query(
     query = f"Re-examine: {anchor}."
     if notes:
         query += " Reviewer notes — " + "; ".join(notes) + "."
+    if confirmed:
+        query += " Keep and stay consistent with " + ", ".join(confirmed) + "."
     if flagged:
         query += " Find a clearer angle for " + ", ".join(flagged) + "."
     if rejected:

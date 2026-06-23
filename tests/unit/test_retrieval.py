@@ -15,7 +15,11 @@ from castlerag.retrieval.search import (
     retrieve,
 )
 from castlerag.retrieval.transcript_lexical import score_windows
-from castlerag.routing.question_router import RouteEvidenceProfile, RouteHints, route_question
+from castlerag.routing.question_router import (
+    RouteEvidenceProfile,
+    RouteHints,
+    route_question,
+)
 from castlerag.schemas import (
     EvalQuestion,
     RetrievalHit,

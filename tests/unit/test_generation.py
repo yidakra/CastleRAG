@@ -595,7 +595,10 @@ def test_clean_answer_text_strips_trailing_sentinel_line():
 
 def test_clean_answer_text_strips_inline_scaffold_and_sentinel():
     """An inline 'the correct answer is: FINAL_ANSWER: c' scaffold is removed."""
-    raw = "The guitar is shown at [camera=Cathal]. Thus, the correct answer is: FINAL_ANSWER: c"
+    raw = (
+        "The guitar is shown at [camera=Cathal]. "
+        "Thus, the correct answer is: FINAL_ANSWER: c"
+    )
     cleaned = clean_answer_text(raw)
     assert "FINAL_ANSWER" not in cleaned
     assert "answer is" not in cleaned.lower()
@@ -612,7 +615,10 @@ def test_generate_freeform_answer_has_no_mcq_sentinel():
 
     def _fake_llm(messages):
         # The system prompt forbids it, but defend against a stray sentinel.
-        return "Cathal taught Allie the guitar [camera=Cathal time=day1].\nFINAL_ANSWER: c"
+        return (
+            "Cathal taught Allie the guitar [camera=Cathal time=day1].\n"
+            "FINAL_ANSWER: c"
+        )
 
     text = generate_freeform_answer(
         question=_make_question(),
