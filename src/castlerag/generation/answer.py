@@ -453,3 +453,93 @@ def _call_generation_llm_with_model(
             return ""
         return str(response.choices[0].message.content or "")
     return _call_generation_llm(llm_client, messages)
+
+
+# ---------------------------------------------------------------------------
+# Free-form (open-question) generation — for the UI, which asks open questions
+# rather than CASTLE MCQs. The MCQ generator above forces a `FINAL_ANSWER: x`
+# sentinel that is meaningless without real choices and leaks into the answer
+# the dashboard shows; this path answers the question directly instead.
+# ---------------------------------------------------------------------------
+
+# Matches the MCQ sentinel anywhere (the strict line-anchored _FINAL_ANSWER_RE
+# misses it when the model writes it inline, e.g. "...answer is: FINAL_ANSWER: c").
+_FINAL_ANSWER_ANYWHERE_RE = re.compile(r"(?is)FINAL_ANSWER:\s*[a-z/]+\b\.?")
+# A trailing "Thus, the correct answer is:" clause left dangling once the
+# sentinel it pointed at is removed.
+_DANGLING_SCAFFOLD_RE = re.compile(
+    r"(?is)(?:thus|therefore|hence|so)?,?\s*(?:the\s+)?"
+    r"(?:correct\s+|final\s+)?answer\s+is\s*[:\-]?\s*$"
+)
+
+_FREEFORM_SYSTEM_PROMPT = """\
+You are CastleRAG answering an OPEN question about the CASTLE recordings — not a
+multiple-choice question. Use ONLY the supplied evidence.
+
+Rules:
+- Open with a direct, specific answer in one sentence, then at most one sentence
+  of support.
+- Cite at least one evidence item for every factual claim, as
+  [camera={camera_id} time={day} {start}-{end}] or [aux={source_type} id={record_id}].
+- Ground every claim in the cited evidence, never in outside knowledge.
+- If the evidence does not actually answer the question, or is conflicting or
+  insufficient, say so plainly — do NOT invent an answer.
+- Never output a letter choice, an "Option A/B/C/D", or a "FINAL_ANSWER:" line.
+"""
+
+_FREEFORM_USER_TEMPLATE = """\
+Answer this open question about the CASTLE recordings using only the evidence.
+
+Question route:
+{route}
+
+Route-specific instructions:
+{route_block}
+
+Question:
+{question}
+
+Evidence:
+{evidence}
+"""
+
+
+def clean_answer_text(raw_text: str) -> str:
+    """Strip the MCQ ``FINAL_ANSWER`` sentinel and any dangling scaffold clause.
+
+    The MCQ generator must end with ``FINAL_ANSWER: <letter>``; when that output
+    is shown verbatim for a free-form question it reads as nonsense (e.g.
+    "...the correct answer is: FINAL_ANSWER: c"). This removes the sentinel
+    wherever it appears and trims a now-orphaned "the answer is:" lead-in.
+    """
+    if not raw_text:
+        return ""
+    text = _FINAL_ANSWER_ANYWHERE_RE.sub("", raw_text).rstrip()
+    text = _DANGLING_SCAFFOLD_RE.sub("", text).rstrip()
+    return text.strip()
+
+
+def generate_freeform_answer(
+    question: EvalQuestion,
+    hints: RouteHints,
+    evidence_rows: List[RetrievalHit],
+    llm_client: Any,
+    *,
+    model: str = "Qwen/Qwen3-VL-8B-Instruct",
+    max_evidence_rows: int = 50,
+) -> str:
+    """Answer an open question directly from evidence (no MCQ sentinel)."""
+    rows = evidence_rows[:max_evidence_rows]
+    evidence_text = "\n\n".join(_enumerate_evidence_rows(rows)) or _MISSING_EVIDENCE_ROW
+    user = _FREEFORM_USER_TEMPLATE.format(
+        route=hints.route,
+        route_block=_ROUTE_PROMPT_BLOCKS.get(hints.route, ""),
+        question=question.query,
+        evidence=evidence_text,
+    )
+    messages = [
+        {"role": "system", "content": _FREEFORM_SYSTEM_PROMPT},
+        {"role": "user", "content": user},
+    ]
+    raw = _call_generation_llm_with_model(llm_client, messages, model=model)
+    return clean_answer_text(raw)

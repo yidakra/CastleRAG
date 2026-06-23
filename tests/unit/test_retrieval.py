@@ -8,9 +8,14 @@ import numpy as np
 import pytest
 
 from castlerag.retrieval.filters import build_filter
-from castlerag.retrieval.search import _collapse_hits, reciprocal_rank_fusion, retrieve
+from castlerag.retrieval.search import (
+    _collapse_hits,
+    _query_variants,
+    reciprocal_rank_fusion,
+    retrieve,
+)
 from castlerag.retrieval.transcript_lexical import score_windows
-from castlerag.routing.question_router import RouteEvidenceProfile, route_question
+from castlerag.routing.question_router import RouteEvidenceProfile, RouteHints, route_question
 from castlerag.schemas import (
     EvalQuestion,
     RetrievalHit,
@@ -30,6 +35,24 @@ def _question() -> EvalQuestion:
             "d": "She left the house",
         },
     )
+
+
+def test_query_variants_mcq_includes_choices():
+    """A real MCQ question expands its choices into a dense query variant."""
+    variants = _query_variants(_question(), RouteHints(route="speech_text"))
+    assert any("Choices:" in v and "She cooked soup" in v for v in variants)
+
+
+def test_query_variants_free_form_drops_choices():
+    """An open question must NOT inject blank 'Choices: A . B . ...' noise."""
+    free = EvalQuestion(
+        question_id="q_ff",
+        query="What instrument did Cathal teach Allie to play?",
+        answers={"a": "", "b": "", "c": "", "d": ""},
+    )
+    variants = _query_variants(free, RouteHints(route="speech_text"))
+    assert variants == ["What instrument did Cathal teach Allie to play?"]
+    assert not any("Choices:" in v for v in variants)
 
 
 def _windows() -> list[TranscriptWindow]:

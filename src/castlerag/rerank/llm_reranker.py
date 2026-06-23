@@ -53,6 +53,34 @@ Return strict JSON:
   "rationale": "<<=40 words>"
 }}"""
 
+# Free-form (open question) variant: no answer choices, relevance only. The
+# support map is forced to zeros (the live UI has no choices to support), and the
+# caller zeroes the support weight so ranking is purely by evidence relevance.
+_FREEFORM_RERANKER_PROMPT_TEMPLATE = """\
+You are ranking a route-specific evidence pack for an OPEN question about the \
+CASTLE recordings. This is NOT multiple choice — there are no answer options.
+
+Question:
+{question}
+
+Question route:
+{route}
+
+Evidence pack:
+{candidate_text}
+
+Score how well THIS candidate's evidence helps answer the open question:
+1. Evidence relevance from 0 to 4
+2. keep: true if the evidence is worth showing, false otherwise
+
+Return strict JSON:
+{{
+  "relevance": 0-4,
+  "support": {{"a": 0, "b": 0, "c": 0, "d": 0}},
+  "keep": true|false,
+  "rationale": "<<=40 words>"
+}}"""
+
 
 def format_candidate_pack(
     pack: EvidencePack | None = None,
@@ -124,6 +152,12 @@ def build_reranker_prompt(
     rank: int | None = None,
 ) -> str:
     """Build the strict-JSON reranker prompt for one candidate pack."""
+    if question.is_free_form():
+        return _FREEFORM_RERANKER_PROMPT_TEMPLATE.format(
+            question=question.query,
+            route=pack.route,
+            candidate_text=format_candidate_pack(pack, rank=rank),
+        )
     return _RERANKER_PROMPT_TEMPLATE.format(
         question=question.query,
         route=pack.route,
@@ -195,6 +229,11 @@ def rerank_candidates(
 ) -> RerankResult:
     """Rerank evidence packs with a local Qwen3-VL-compatible chat client."""
     ranked: list[RerankedEvidencePack] = []
+
+    # Free-form (open) questions have no choices to support, so rank purely on
+    # evidence relevance — the per-choice support term is noise over blanks.
+    if question.is_free_form():
+        support_weight = 0.0
 
     for rank, raw_pack in enumerate(candidate_packs, start=1):
         pack = _coerce_pack(raw_pack, hints)

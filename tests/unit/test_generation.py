@@ -11,8 +11,10 @@ from castlerag.generation.answer import (
     build_messages,
     build_prompt,
     choice_permutation,
+    clean_answer_text,
     extract_answer,
     generate_answer,
+    generate_freeform_answer,
 )
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import EvalQuestion, RetrievalHit
@@ -583,3 +585,41 @@ def test_generate_answer_with_model_fallback_via_callable():
         model="test-model",
     )
     assert prediction.predicted_answer == "b"
+
+
+def test_clean_answer_text_strips_trailing_sentinel_line():
+    """A FINAL_ANSWER line on its own is removed, leaving the prose answer."""
+    raw = "Cathal taught Allie the guitar.\n\nFINAL_ANSWER: c"
+    assert clean_answer_text(raw) == "Cathal taught Allie the guitar."
+
+
+def test_clean_answer_text_strips_inline_scaffold_and_sentinel():
+    """An inline 'the correct answer is: FINAL_ANSWER: c' scaffold is removed."""
+    raw = "The guitar is shown at [camera=Cathal]. Thus, the correct answer is: FINAL_ANSWER: c"
+    cleaned = clean_answer_text(raw)
+    assert "FINAL_ANSWER" not in cleaned
+    assert "answer is" not in cleaned.lower()
+    assert cleaned.startswith("The guitar is shown")
+
+
+def test_clean_answer_text_leaves_clean_prose_untouched():
+    text = "The evidence does not say which instrument Cathal taught Allie."
+    assert clean_answer_text(text) == text
+
+
+def test_generate_freeform_answer_has_no_mcq_sentinel():
+    """The free-form path returns prose with the MCQ sentinel cleaned out."""
+
+    def _fake_llm(messages):
+        # The system prompt forbids it, but defend against a stray sentinel.
+        return "Cathal taught Allie the guitar [camera=Cathal time=day1].\nFINAL_ANSWER: c"
+
+    text = generate_freeform_answer(
+        question=_make_question(),
+        hints=RouteHints(route="speech_text"),
+        evidence_rows=[_make_hit()],
+        llm_client=_fake_llm,
+        model="test-model",
+    )
+    assert "FINAL_ANSWER" not in text
+    assert text.startswith("Cathal taught Allie the guitar")

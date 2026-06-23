@@ -46,7 +46,7 @@ _FIXED_CAMERA_COUNT = 3
 _SUPPORTED_AT = 0.7
 _PARTIAL_AT = 0.4
 
-_MAX_MOMENTS = 4
+_MAX_MOMENTS = 3
 _BUCKET_SECONDS = 60  # cluster width when grouping hits into one moment
 
 
@@ -94,19 +94,38 @@ class RagEngine:
         """Answer a question with the real pipeline and adapt to the UI model."""
         from castlerag.eval.run_eval import run_question
 
-        # Real MCQ calls pass ``choices``; free-form UI questions don't, so the
-        # dummy "Option A".."Option D" we feed the pipeline (and the per-choice
-        # priors it yields) are meaningless and must not drive the claim/support.
+        # Real MCQ calls pass ``choices``; free-form UI questions don't. For an
+        # open question we feed BLANK choices (not "Option A".."Option D"): that
+        # marks the EvalQuestion as free-form, so retrieval, reranking, and
+        # generation all drop the four-option scaffolding instead of embedding
+        # and scoring meaningless placeholders.
         is_mcq = choices is not None
-        resolved = choices or {key: f"Option {key.upper()}" for key in _CHOICES}
+        resolved = choices or {key: "" for key in _CHOICES}
         eval_q = EvalQuestion(
             question_id=_question_id(question),
             query=question,
             answers=resolved,
         )
         result = run_question(
-            self.pipeline, self.cfg, eval_q, exclude_cameras=exclude_cameras
+            self.pipeline,
+            self.cfg,
+            eval_q,
+            exclude_cameras=exclude_cameras,
+            # Skip the MCQ generator for open questions — we answer them directly
+            # below; running it would waste an LLM call and force a fake letter.
+            generate_prediction=is_mcq,
         )
+        # Open UI questions are answered directly; MCQ callers keep the raw graded
+        # answer.
+        if is_mcq:
+            answer_text = result.prediction.raw_answer_text or (
+                f"Predicted **{result.prediction.predicted_answer.upper()}** — "
+                f"{resolved.get(result.prediction.predicted_answer, '')}."
+            )
+            freeform_answer = None
+        else:
+            answer_text = self._freeform_answer_text(eval_q, result)
+            freeform_answer = answer_text
         claim = self._synthesize_claim(
             result.prediction,
             result.support_priors,
@@ -114,20 +133,20 @@ class RagEngine:
             is_mcq=is_mcq,
             question=question,
             evidence_rows=result.evidence_rows,
+            freeform_answer=freeform_answer,
         )
         moments = self._hits_to_moments(result.evidence_rows, claim.support) or [
             self._no_evidence_moment(claim.support)
         ]
-        answer_text = result.prediction.raw_answer_text or (
-            f"Predicted **{result.prediction.predicted_answer.upper()}** — "
-            f"{resolved.get(result.prediction.predicted_answer, '')}."
-        )
         return ChatTurnResult(
             answer_text=answer_text,
             route=result.hints.route,
             support_priors=result.support_priors,
             evidence=self._hits_to_evidence_refs(result.evidence_rows),
-            predicted_choice=result.prediction.predicted_answer,
+            # Free-form questions have no choice; the stub "a" is not a real pick.
+            predicted_choice=(
+                result.prediction.predicted_answer if is_mcq else None
+            ),
             is_placeholder=False,
             claim=claim,
             moments=moments,
@@ -169,6 +188,28 @@ class RagEngine:
     def _gen_model(self) -> str:
         gen = getattr(self.cfg, "generation", None)
         return getattr(gen, "model", "Qwen/Qwen3-VL-8B-Instruct")
+
+    def _freeform_answer_text(self, eval_q: EvalQuestion, result: Any) -> str:
+        """Direct open-question answer; cleaned MCQ text as a fallback."""
+        from castlerag.generation.answer import (
+            clean_answer_text,
+            generate_freeform_answer,
+        )
+
+        try:
+            text = generate_freeform_answer(
+                eval_q,
+                result.hints,
+                result.evidence_rows,
+                self._chat_client(),
+                model=self._gen_model(),
+            )
+            if text:
+                return text
+        except Exception as exc:  # never break the UI on a model hiccup
+            log.warning("free-form answer fell back to cleaned MCQ text (%s)", exc)
+        cleaned = clean_answer_text(result.prediction.raw_answer_text or "")
+        return cleaned or "No answer could be produced from the retrieved evidence."
 
     def suggest_justification(
         self,
@@ -219,6 +260,7 @@ class RagEngine:
         is_mcq: bool = True,
         question: str = "",
         evidence_rows: Optional[List[RetrievalHit]] = None,
+        freeform_answer: Optional[str] = None,
     ) -> Claim:
         """Derive the claim under review and its support level.
 
@@ -235,9 +277,9 @@ class RagEngine:
             text = f"The footage supports: {choice_text}"
             score = float(support_priors.get(choice, 0.0))
         else:
-            text = (prediction.raw_answer_text or question or "").strip() or (
-                "The retrieved footage"
-            )
+            text = (
+                freeform_answer or prediction.raw_answer_text or question or ""
+            ).strip() or ("The retrieved footage")
             rows = evidence_rows or []
             score = max((h.rerank_score or 0.0 for h in rows), default=0.0)
         if score >= _SUPPORTED_AT:

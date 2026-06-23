@@ -118,6 +118,8 @@ def run_question(
     cfg: CastleRAGConfig,
     question: EvalQuestion,
     exclude_cameras: Sequence[str] = (),
+    *,
+    generate_prediction: bool = True,
 ) -> QuestionResult:
     """Run one question through route -> retrieve -> rerank -> generate.
 
@@ -128,6 +130,11 @@ def run_question(
     ``exclude_cameras`` hard-excludes those camera ids from dense retrieval (the
     UI refine loop passes the angles the reviewer rejected); empty on the eval
     path, so benchmark behaviour is unchanged.
+
+    ``generate_prediction=False`` skips the MCQ answer generator entirely and
+    returns a stub prediction. The free-form UI uses this: it answers open
+    questions with its own choice-free generator, so running the multiple-choice
+    generator here would only waste an LLM call and force a meaningless letter.
     """
     try:
         hints = pipeline.route(question.query, question.answers)
@@ -172,14 +179,32 @@ def run_question(
         max_rows=cfg.retrieval.max_evidence_rows,
     )
     support_priors = _aggregate_support_priors(rerank_result)
-    try:
-        prediction = pipeline.generate(question, hints, evidence_rows, support_priors)
-    except PipelineDependencyError as exc:
-        raise _stage_dependency_error("generation", question.question_id, exc) from exc
-    except NotImplementedError as exc:
-        raise _stage_error("generation", question.question_id, exc) from exc
-    except Exception as exc:
-        raise _stage_failure_error("generation", question.question_id, exc) from exc
+    if not generate_prediction:
+        prediction = Prediction(
+            question_id=question.question_id,
+            predicted_answer="a",  # placeholder; the caller supplies the real answer
+            route=hints.route,
+            support_priors=support_priors or None,
+            top_evidence_ids=[hit.record_id for hit in evidence_rows],
+            raw_answer_text="",
+            is_supported=bool(evidence_rows)
+            and max(support_priors.values(), default=0.0) > 0.0,
+        )
+    else:
+        try:
+            prediction = pipeline.generate(
+                question, hints, evidence_rows, support_priors
+            )
+        except PipelineDependencyError as exc:
+            raise _stage_dependency_error(
+                "generation", question.question_id, exc
+            ) from exc
+        except NotImplementedError as exc:
+            raise _stage_error("generation", question.question_id, exc) from exc
+        except Exception as exc:
+            raise _stage_failure_error(
+                "generation", question.question_id, exc
+            ) from exc
 
     return QuestionResult(
         prediction=prediction,

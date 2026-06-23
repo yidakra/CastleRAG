@@ -363,6 +363,27 @@ def _build_stub_engine(tmp_path: Path) -> RagEngine:
     )
 
 
+def test_run_question_skips_generation_for_free_form(tmp_path):
+    """Free-form questions skip the MCQ generator but still retrieve+rerank."""
+    from castlerag.eval.run_eval import run_question
+    from castlerag.schemas import EvalQuestion
+
+    engine = _build_stub_engine(tmp_path)
+    free = EvalQuestion(
+        question_id="q_ff",
+        query="Who balances a cup of water on the door?",
+        answers={"a": "", "b": "", "c": "", "d": ""},
+    )
+    assert free.is_free_form()
+    result = run_question(
+        engine.pipeline, engine.cfg, free, generate_prediction=False
+    )
+    # The MCQ generator was not called, so there is no raw FINAL_ANSWER text...
+    assert result.prediction.raw_answer_text == ""
+    # ...but retrieval and reranking still ran and produced evidence.
+    assert result.evidence_rows
+
+
 def test_answer_end_to_end_real_pipeline(tmp_path):
     engine = _build_stub_engine(tmp_path)
     result = engine.answer(

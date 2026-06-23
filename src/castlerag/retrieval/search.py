@@ -157,17 +157,21 @@ def retrieve(
 
 
 def _query_variants(question: EvalQuestion, hints: RouteHints) -> List[str]:
-    """Return query variants: bare, choices-expanded, and optionally entity-focused."""
-    variants = [
-        question.query,
-        (
+    """Return query variants: bare, choices-expanded, and optionally entity-focused.
+
+    The choices-expanded variant is skipped for free-form (open) questions: there
+    the choices are blank placeholders, so embedding "Choices: A . B . C . D ."
+    only injects noise into the dense query and drags retrieval off-topic.
+    """
+    variants = [question.query]
+    if not question.is_free_form():
+        variants.append(
             f"{question.query} Choices: "
             f"A {question.answers['a']}. "
             f"B {question.answers['b']}. "
             f"C {question.answers['c']}. "
             f"D {question.answers['d']}."
-        ),
-    ]
+        )
     if hints.llm_key_entities:
         entity_str = " ".join(hints.llm_key_entities)
         variants.append(f"{question.query} {entity_str}")

@@ -143,16 +143,20 @@ def suggest_refined_query_text(
     rejected_block = ", ".join(rejected) if rejected else "none"
 
     system = (
-        "You compose a single refined retrieval query for a multi-camera "
-        "investigation. Restate the claim and fold in the reviewer's feedback: "
-        "steer retrieval toward stronger evidence for the FLAGGED angles (which "
-        "need a clearer view), and steer AWAY from the REJECTED angles (which the "
-        "reviewer ruled out — do not seek further evidence from them). Return 1-2 "
-        "sentences only — the query text, no preamble or quotes."
+        "You compose ONE refined retrieval query for a multi-camera "
+        "investigation. The reviewer's per-camera notes are explicit instructions "
+        "about what to look for or avoid next — treat them as the PRIMARY signal "
+        "and follow them directly, even when they redirect the search away from "
+        "the original claim. Use the claim only for background context. Also steer "
+        "retrieval toward stronger evidence for the FLAGGED angles (which need a "
+        "clearer view) and AWAY from the REJECTED angles (ruled out — do not seek "
+        "further evidence from them). Return 1-2 sentences only — the query text, "
+        "no preamble or quotes."
     )
     user = (
-        f"Claim under review: {claim}\n"
-        f"Per-camera reviewer verdicts:\n{verdict_block}\n"
+        f"Original claim (background context only): {claim}\n"
+        f"Reviewer notes per camera (PRIMARY — follow these instructions):\n"
+        f"{verdict_block}\n"
         f"Angles needing a clearer view (seek more): {flagged_block}\n"
         f"Angles rejected (exclude from the search): {rejected_block}\n\n"
         "Refined query:"

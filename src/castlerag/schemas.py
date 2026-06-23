@@ -343,6 +343,16 @@ class EvalQuestion(BaseModel):
                 raise ValueError(f"answers must contain key '{key}'")
         return v
 
+    def is_free_form(self) -> bool:
+        """True for an open question with no real choices (e.g. the live UI).
+
+        The choice keys are always present (the validator requires them), so a
+        free-form question is signalled by every choice being blank. The MCQ
+        pipeline stages key off this to drop the four-option scaffolding from
+        retrieval, reranking, and generation.
+        """
+        return not any((value or "").strip() for value in self.answers.values())
+
 
 class Prediction(BaseModel):
     """Per-question prediction with optional evidence trace."""

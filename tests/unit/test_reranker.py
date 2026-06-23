@@ -129,6 +129,19 @@ def test_build_reranker_prompt_contains_json_contract():
     assert "Candidate pack 2" in prompt
 
 
+def test_build_reranker_prompt_free_form_omits_choices():
+    """An open question gets the choice-free reranker prompt."""
+    free = EvalQuestion(
+        question_id="q_ff",
+        query="What instrument did Cathal teach Allie to play?",
+        answers={"a": "", "b": "", "c": "", "d": ""},
+    )
+    prompt = build_reranker_prompt(free, _pack("pack1", 0.9), rank=1)
+    assert "Answer choices:" not in prompt
+    assert "OPEN question" in prompt
+    assert '"support": {"a": 0, "b": 0, "c": 0, "d": 0}' in prompt
+
+
 def test_parse_reranker_response_handles_extra_text():
     raw = (
         "Assessment follows.\n"
