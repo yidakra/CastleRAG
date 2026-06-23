@@ -114,14 +114,60 @@ cat <<EOF
 
 EOF
 
-# Bind 0.0.0.0 so the login node can forward the tunnel to this compute node.
-# --require-live: fail loudly with the exact missing dependency instead of
-# silently serving the offline demo (the whole point of this job).
-#
-# PUBLIC_TUNNEL=1 (opt-in, e.g. for a demo): also expose the UI on a public
-# cloudflared quick-tunnel URL so attendees who can't SSH in can reach it.
-# Requires CASTLERAG_UI_BASIC_AUTH=user:pass — the app gates every request, so
-# the live GPU backend isn't open to anyone with the link.
+# Exposure modes (--require-live always: fail loudly on a missing dependency):
+#   NAMED_TUNNEL_TOKEN set -> run a pre-created Cloudflare *named* tunnel: stable
+#       hostname + Cloudflare Access (email allowlist), both configured once in
+#       the Zero Trust dashboard. Best for a scheduled demo. Takes precedence.
+#   PUBLIC_TUNNEL=1        -> ephemeral quick tunnel + HTTP basic auth.
+#   (neither)              -> SSH-tunnel only (default; UI bound 0.0.0.0).
+
+# --- named tunnel: run the connector; the dashboard maps its hostname here. ---
+if [ -n "${NAMED_TUNNEL_TOKEN:-}" ]; then
+    CFBIN="${CLOUDFLARED:-${HOME}/cloudflared}"
+    if [ ! -x "${CFBIN}" ]; then
+        echo "[ui] ABORT: cloudflared not found/executable at ${CFBIN} (set CLOUDFLARED=...)."
+        exit 2
+    fi
+    castlerag ui --host 0.0.0.0 --port "${UI_PORT}" --require-live --config "${CONF}" &
+    UI_PID=$!
+    trap 'kill $EMB_PID $GEN_PID $QPID $UI_PID ${CF_PID:-} 2>/dev/null' EXIT
+    for i in $(seq 1 90); do
+        if [ -n "${CASTLERAG_UI_BASIC_AUTH:-}" ]; then
+            curl -sf -u "${CASTLERAG_UI_BASIC_AUTH}" "http://localhost:${UI_PORT}/" \
+                >/dev/null 2>&1 && { echo "[ui] dashboard ready ($((i*2))s)"; break; }
+        else
+            curl -sf "http://localhost:${UI_PORT}/" >/dev/null 2>&1 \
+                && { echo "[ui] dashboard ready ($((i*2))s)"; break; }
+        fi
+        kill -0 "$UI_PID" 2>/dev/null || { echo "[ui] ERROR: UI process died"; exit 1; }
+        sleep 2
+    done
+    # --protocol http2: compute nodes firewall QUIC/UDP-7844; TCP/443 reaches edge.
+    CF_LOG="logs/ui_cloudflared_${SLURM_JOB_ID}.log"
+    "${CFBIN}" tunnel --no-autoupdate --protocol http2 run --token "${NAMED_TUNNEL_TOKEN}" \
+        > "${CF_LOG}" 2>&1 &
+    CF_PID=$!
+    sleep 6
+    if ! kill -0 "$CF_PID" 2>/dev/null; then
+        echo "[ui] ERROR: named tunnel connector exited; log:"; tail -20 "${CF_LOG}"; exit 1
+    fi
+    cat <<EOF
+
+[ui] ============================================================
+[ui]  NAMED TUNNEL connector up (protocol=http2, registered to your account).
+[ui]  Public URL = the Public Hostname you mapped to this tunnel in the
+[ui]               Cloudflare Zero Trust dashboard (service http://localhost:${UI_PORT}).
+[ui]  Access     = your email-allowlist policy on that hostname.
+[ui]  Stable across runs. scancel ${SLURM_JOB_ID} to stop the connector.
+[ui] ============================================================
+
+EOF
+    wait "$UI_PID"
+fi
+
+# --- quick tunnel (ephemeral URL) + basic auth, or default SSH-tunnel serve ---
+# PUBLIC_TUNNEL=1 requires CASTLERAG_UI_BASIC_AUTH=user:pass — the app gates
+# every request, so the live GPU backend isn't open to anyone with the link.
 if [ "${PUBLIC_TUNNEL:-0}" != "1" ]; then
     exec castlerag ui --host 0.0.0.0 --port "${UI_PORT}" \
         --require-live --config "${CONF}"
