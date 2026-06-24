@@ -25,8 +25,9 @@ _FAINT = "#9a9aa4"   # --faint (empty-state copy, axis ticks)
 _GRID = "rgba(20, 20, 40, 0.06)"
 _MONO = "ui-monospace, SFMono-Regular, Menlo, monospace"
 
-# Heatmap: light lavender → mid-indigo → accent (agreement 0 → 0.5 → 1.0).
-_HEATMAP_SCALE = [[0.0, "#eeeef8"], [0.5, "#9590dc"], [1.0, _ACCENT]]
+# Heatmap: red → amber → indigo (disagreement → neutral → strong agreement).
+# Three-stop diverging scale gives clear contrast even in the 0.5–0.9 range.
+_HEATMAP_SCALE = [[0.0, "#f87171"], [0.5, "#fbbf24"], [1.0, _ACCENT]]
 
 
 def _base_layout() -> go.Layout:
