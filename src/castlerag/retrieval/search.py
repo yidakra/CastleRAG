@@ -16,15 +16,23 @@ from castlerag.schemas import EvalQuestion, RetrievalHit
 def reciprocal_rank_fusion(
     ranked_lists: List[List[RetrievalHit]],
     k: int = 60,
+    weights: Optional[List[float]] = None,
 ) -> List[RetrievalHit]:
-    """Fuse multiple ranked lists into one using RRF(k)."""
+    """Fuse multiple ranked lists into one using weighted RRF(k).
+
+    Each list contributes ``w / (k + rank)`` to a hit's score. When
+    ``weights`` is None all lists are weighted equally (w=1.0). Pass
+    route-aware weights to boost trusted sources (e.g. BM25 for speech
+    questions, video lanes for visual questions).
+    """
     by_record: Dict[str, RetrievalHit] = {}
     scores = defaultdict(float)
     max_raw: Dict[str, float] = {}
 
-    for ranked in ranked_lists:
+    for i, ranked in enumerate(ranked_lists):
+        w = (weights[i] if i < len(weights) else 1.0) if weights is not None else 1.0
         for rank, hit in enumerate(ranked, start=1):
-            scores[hit.record_id] += 1.0 / (k + rank)
+            scores[hit.record_id] += w / (k + rank)
             existing = by_record.get(hit.record_id)
             if existing is None or hit.score > existing.score:
                 by_record[hit.record_id] = hit
@@ -93,6 +101,15 @@ def retrieve(
             f"Expected 2D query embedding matrix, got shape {query_vectors.shape}"
         )
 
+    # Per-variant fusion weights: choices-expanded (index 1 for MCQ) is
+    # down-weighted because appending all four answer options shifts the
+    # embedding away from the core semantic/visual query signal.
+    variant_weights = _query_variant_weights(question, hints)
+
+    # For speech-heavy questions, boost BM25 — it captures exact lexical
+    # matches that dense embeddings may spread across synonyms.
+    bm25_w = 2.0 if hints.route == "speech_text" else 1.0
+
     transcript_dense_lists = [
         _dense_search(
             qdrant_client=qdrant_client,
@@ -112,12 +129,17 @@ def retrieve(
         )
         for query_vector in query_vectors
     ]
+    # No intermediate cap here — let _collapse_hits apply the route budget
+    # after all lanes are fused. Capping early discards high-quality
+    # transcript hits before they can compete with multimodal evidence.
     transcript_lane = reciprocal_rank_fusion(
         [transcript_bm25, *transcript_dense_lists],
         k=retrieval_cfg.rrf_k,
-    )[: min(retrieval_cfg.transcript_top_k, hints.evidence_profile.transcript_budget)]
+        weights=[bm25_w, *variant_weights],
+    )
 
     multimodal_lists: List[List[RetrievalHit]] = []
+    multimodal_weights: List[float] = []
     multimodal_specs = [
         ("main_event_summary", "text", retrieval_cfg.event_summary_top_k),
         ("main_clip", "video", retrieval_cfg.video_top_k),
@@ -128,7 +150,7 @@ def retrieve(
         ("aux_thermal", "image", retrieval_cfg.thermal_top_k),
     ]
     for source_type, modality, limit in multimodal_specs:
-        for query_vector in query_vectors:
+        for qi, query_vector in enumerate(query_vectors):
             hits = _dense_search(
                 qdrant_client=qdrant_client,
                 collection_name=collection_name,
@@ -148,10 +170,27 @@ def retrieve(
                 )
                 if hits:
                     multimodal_lists.append(hits)
+                    multimodal_weights.append(variant_weights[qi])
 
-    multimodal_lane = reciprocal_rank_fusion(multimodal_lists, k=retrieval_cfg.rrf_k)
+    multimodal_lane = reciprocal_rank_fusion(
+        multimodal_lists,
+        k=retrieval_cfg.rrf_k,
+        weights=multimodal_weights if multimodal_weights else None,
+    )
+
+    # Route-aware final merge: boost the lane that carries the strongest
+    # signal for this question type.
+    if hints.route == "speech_text":
+        final_weights: Optional[List[float]] = [2.0, 1.0]  # transcript dominates
+    elif hints.route == "static_visual":
+        final_weights = [1.0, 2.0]  # visual dominates
+    else:
+        final_weights = None  # equal weighting for temporal / mixed
+
     merged = reciprocal_rank_fusion(
-        [transcript_lane, multimodal_lane], k=retrieval_cfg.rrf_k
+        [transcript_lane, multimodal_lane],
+        k=retrieval_cfg.rrf_k,
+        weights=final_weights,
     )
     return _collapse_hits(merged, hints, retrieval_cfg)
 
@@ -176,6 +215,22 @@ def _query_variants(question: EvalQuestion, hints: RouteHints) -> List[str]:
         entity_str = " ".join(hints.llm_key_entities)
         variants.append(f"{question.query} {entity_str}")
     return variants
+
+
+def _query_variant_weights(question: EvalQuestion, hints: RouteHints) -> List[float]:
+    """Return per-variant fusion weights matching the order from _query_variants.
+
+    Choices-expanded is down-weighted (0.7) because appending all four MCQ
+    options shifts the embedding away from the core semantic/visual query.
+    Entity-focused is slightly down-weighted (0.9) — useful but narrower than
+    the bare query.
+    """
+    weights = [1.0]  # bare query
+    if not question.is_free_form():
+        weights.append(0.7)  # choices-expanded
+    if hints.llm_key_entities:
+        weights.append(0.9)  # entity-focused
+    return weights
 
 
 def _apply_score_thresholds(

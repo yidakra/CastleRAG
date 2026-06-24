@@ -231,6 +231,7 @@ def rerank_candidates(
 ) -> RerankResult:
     """Rerank evidence packs with a local Qwen3-VL-compatible chat client."""
     ranked: list[RerankedEvidencePack] = []
+    best_fallback: Optional[RerankedEvidencePack] = None
 
     # Free-form (open) questions have no choices to support, so rank purely on
     # evidence relevance — the per-choice support term is noise over blanks.
@@ -260,21 +261,32 @@ def rerank_candidates(
             )
             continue
 
-        if not reranker_output.keep or reranker_output.relevance <= min_relevance:
-            continue
-
         final_score = compute_rerank_score(
             reranker_output,
             relevance_weight=relevance_weight,
             support_weight=support_weight,
         )
-        ranked.append(
-            RerankedEvidencePack(
-                pack=pack,
-                reranker_output=reranker_output,
-                final_rerank_score=final_score,
-            )
+        candidate = RerankedEvidencePack(
+            pack=pack,
+            reranker_output=reranker_output,
+            final_rerank_score=final_score,
         )
+        # Track best regardless of filter — used as fallback if everything is pruned.
+        if best_fallback is None or final_score > best_fallback.final_rerank_score:
+            best_fallback = candidate
+
+        if not reranker_output.keep or reranker_output.relevance <= min_relevance:
+            continue
+        ranked.append(candidate)
+
+    # Guarantee at least one candidate survives so the generator always has
+    # grounding. Without this, a weak retrieval set causes total hallucination.
+    if not ranked and best_fallback is not None:
+        LOGGER.warning(
+            "All reranker candidates filtered (best relevance=%d); keeping as fallback.",
+            best_fallback.reranker_output.relevance,
+        )
+        ranked.append(best_fallback)
 
     ranked.sort(
         key=lambda item: (
@@ -406,21 +418,26 @@ def _flatten_evidence_rows(
 ) -> list[RetrievalHit]:
     """Deduplicate and collect evidence rows from kept packs up to max_rows.
 
-    Each hit gets ``rerank_score`` stamped from its pack's ``final_rerank_score``
-    normalised to [0, 1]. The max possible final score is
-    ``(relevance_weight + support_weight) × 4`` (relevance and per-choice support
-    are each rubric-capped at 4), so callers pass that sum as ``max_score``; it
-    only equals 4.0 when the weights sum to 1.0.
+    Each hit gets ``rerank_score`` stamped with the BEST normalised pack score
+    it appears in. A row present in two packs (scores 3.0 and 1.0) keeps
+    the 3.0 score, not the 1.0 from whichever pack is iterated last.
     """
-    rows: list[RetrievalHit] = []
-    seen: set[str] = set()
     divisor = max_score if max_score > 0 else 4.0
+    # First pass: find the best normed score for every record_id.
+    best: dict[str, float] = {}
     for item in kept_packs:
         normed = round(item.final_rerank_score / divisor, 4)
         for row in item.pack.evidence_rows:
+            if normed > best.get(row.record_id, -1.0):
+                best[row.record_id] = normed
+    # Second pass: collect rows in pack order, using the best score.
+    rows: list[RetrievalHit] = []
+    seen: set[str] = set()
+    for item in kept_packs:
+        for row in item.pack.evidence_rows:
             if row.record_id in seen:
                 continue
-            rows.append(row.model_copy(update={"rerank_score": normed}))
+            rows.append(row.model_copy(update={"rerank_score": best[row.record_id]}))
             seen.add(row.record_id)
             if len(rows) >= max_rows:
                 return rows

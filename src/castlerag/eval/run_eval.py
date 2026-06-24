@@ -739,7 +739,7 @@ def _ensure_vllm_runtime_ready(cfg: CastleRAGConfig) -> None:
             "runtime dependency missing: openai package is required for the "
             f"vLLM-backed {', '.join(needed_stages)} stages."
         ) from exc
-    OpenAI(base_url=base_url, api_key="not-needed")
+    OpenAI(base_url=base_url, api_key=os.getenv("LLM_API_KEY", "not-needed"))
 
 
 def _dependency_failure_message(
@@ -765,16 +765,23 @@ def _dependency_failure_message(
 
 
 def _build_vllm_chat_client() -> Any:
-    """Instantiate and return an OpenAI client pointed at the local vLLM endpoint."""
+    """Instantiate and return an OpenAI-compatible client for the LLM endpoint.
+
+    Points at ``VLLM_BASE_URL`` (local vLLM, Mistral API, OpenAI, etc.).
+    Reads the API key from ``LLM_API_KEY`` when set; falls back to the
+    ``"not-needed"`` sentinel that local vLLM accepts without auth.
+    """
     base_url = _vllm_base_url()
     if not base_url:
         raise PipelineDependencyError(
-            "VLLM_BASE_URL is not set. Start the Qwen3-VL vLLM endpoint first."
+            "VLLM_BASE_URL is not set. Set it to the vLLM endpoint or a "
+            "remote API base URL (e.g. https://api.mistral.ai/v1)."
         )
     try:
         from openai import OpenAI
     except ImportError as exc:
         raise PipelineDependencyError(
-            "openai package is required to talk to the vLLM endpoint."
+            "openai package is required to talk to the LLM endpoint."
         ) from exc
-    return OpenAI(base_url=base_url, api_key="not-needed")
+    api_key = os.getenv("LLM_API_KEY", "not-needed")
+    return OpenAI(base_url=base_url, api_key=api_key)
