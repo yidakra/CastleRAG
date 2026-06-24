@@ -79,30 +79,45 @@ def suggest_justification_text(
     ``verdict`` is the stored state (``confirmed`` / ``flagged`` / ``rejected``).
     ``meta`` may carry ``clock_label``, ``place_label`` and ``match_score``.
     """
-    phrase = _VERDICT_PHRASE.get(verdict, "was reviewed for")
     meta = meta or {}
     when = str(meta.get("clock_label") or "the moment")
     where = str(meta.get("place_label") or "the scene")
     score = meta.get("match_score")
     evidence = (evidence_text or "").strip() or "(no retrieved text for this angle)"
 
+    verdict_lower = (verdict or "").lower()
+    if verdict_lower == "confirmed":
+        instruction = (
+            "The reviewer has CONFIRMED this camera angle. "
+            "Write one sentence (max ~25 words) explaining what in the evidence "
+            "supports this confirmation. Accept the reviewer's judgement — do not "
+            "question or contradict it."
+        )
+    elif verdict_lower == "rejected":
+        instruction = (
+            "The reviewer has REJECTED this camera angle. "
+            "Write one sentence (max ~25 words) explaining what in the evidence "
+            "led to rejection or why this angle does not support the claim."
+        )
+    else:
+        instruction = (
+            "The reviewer has FLAGGED this camera angle as inconclusive. "
+            "Write one sentence (max ~25 words) explaining what makes this angle "
+            "ambiguous or unclear."
+        )
+
     system = (
-        "You are an analyst reviewing multi-camera surveillance evidence. "
-        "Write a single concise justification (max ~25 words) explaining the "
-        "reviewer's verdict for one camera angle, grounded ONLY in the provided "
-        "evidence. State plainly if the evidence is missing or insufficient. "
-        "Return the sentence only — no preamble, quotes, or labels."
+        "You are an analyst writing brief justifications for a human reviewer's "
+        "per-camera verdicts on surveillance evidence. "
+        + instruction
+        + " Return the sentence only — no preamble, quotes, or labels."
+    )
+    score_str = (
+        f" (match score {float(score):.2f})" if isinstance(score, (int, float)) else ""
     )
     user = (
         f"Claim under review: {claim}\n"
-        f"Camera: {camera_id} at {when} in {where}"
-        + (
-            f" (match score {float(score):.2f})"
-            if isinstance(score, (int, float))
-            else ""
-        )
-        + "\n"
-        f"Reviewer verdict: this angle {phrase} the claim.\n"
+        f"Camera: {camera_id} at {when} in {where}{score_str}\n"
         f"Retrieved evidence from this camera: {evidence}\n\n"
         "Justification:"
     )
