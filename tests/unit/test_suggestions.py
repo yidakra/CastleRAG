@@ -110,9 +110,8 @@ def test_suggest_refined_query_text_anchors_on_question_not_prior_answer():
     )
     user = client.calls[0]["messages"][1]["content"]
     assert "Original question: What instrument did Cathal teach Allie" in user
-    # The prior answer is present but explicitly marked as possibly-wrong context.
-    assert "may be wrong" in user
-    assert "Cathal taught Allie the piano" in user
+    # Prompt is concise — original question anchors, no verbose prior-answer block.
+    assert "Search query" in user
 
 
 def test_suggest_refined_query_text_keeps_confirmed_distinct_from_flagged():
@@ -127,9 +126,9 @@ def test_suggest_refined_query_text_keeps_confirmed_distinct_from_flagged():
         "X did Y", reviews, llm_client=client, question="What?", model="m"
     )
     user = client.calls[0]["messages"][1]["content"]
-    confirmed_line = next(ln for ln in user.splitlines() if "CONFIRMED" in ln)
+    confirmed_line = next(ln for ln in user.splitlines() if "good evidence" in ln)
     flagged_line = next(ln for ln in user.splitlines() if "clearer view" in ln)
-    rejected_line = next(ln for ln in user.splitlines() if "rejected" in ln.lower())
+    rejected_line = next(ln for ln in user.splitlines() if "exclude" in ln.lower())
     # Each camera lands in exactly its own bucket — Confirm is not lumped in.
     assert "Allie" in confirmed_line and "Bjorn" not in confirmed_line
     assert "Bjorn" in flagged_line and "Allie" not in flagged_line

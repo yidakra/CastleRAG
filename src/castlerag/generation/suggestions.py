@@ -179,27 +179,21 @@ def suggest_refined_query_text(
     rejected_block = ", ".join(rejected) if rejected else "none"
 
     system = (
-        "You compose ONE refined retrieval query for a multi-camera "
-        "investigation. Anchor the query on the ORIGINAL QUESTION. The reviewer's "
-        "per-camera notes are explicit instructions — treat them as the PRIMARY "
-        "steering signal. The three verdicts mean different things and must be "
-        "honoured differently: CONFIRMED angles are good evidence — KEEP and stay "
-        "consistent with them, do NOT steer away; FLAGGED angles are relevant but "
-        "unclear — seek a CLEARER view of them; REJECTED angles are ruled out — "
-        "exclude them, do not seek further evidence from them. A prior tentative "
-        "answer may be shown for context, but it MAY BE WRONG: do not assume it is "
-        "correct. Return 1-2 sentences only — the query text, no preamble or quotes."
+        "You write a SHORT retrieval search query (one sentence, max 15 words) "
+        "for a multi-camera video evidence system. The query must describe WHAT "
+        "to find — objects, actions, people, locations — NOT instructions or "
+        "verdicts. Stay anchored on the ORIGINAL QUESTION topic. Use the "
+        "reviewer's verdicts only to steer the topic: confirmed = on the right "
+        "track, stay focused; flagged = relevant but unclear, seek a clearer "
+        "view; rejected = irrelevant, search elsewhere. "
+        "Output ONLY the query text — no preamble, no quotes, no instructions."
     )
     user = (
         f"Original question: {question or claim}\n"
-        f"Prior tentative answer (context only, may be wrong): {claim}\n"
-        f"Reviewer notes per camera (PRIMARY — follow these instructions):\n"
-        f"{verdict_block}\n"
-        f"Angles CONFIRMED (keep / stay consistent with — do not steer away): "
-        f"{confirmed_block}\n"
-        f"Angles needing a clearer view (seek more): {flagged_block}\n"
-        f"Angles rejected (exclude from the search): {rejected_block}\n\n"
-        "Refined query:"
+        f"Confirmed cameras (good evidence): {confirmed_block}\n"
+        f"Flagged cameras (need clearer view): {flagged_block}\n"
+        f"Rejected cameras (exclude): {rejected_block}\n\n"
+        "Search query (max 15 words, keywords/topic only):"
     )
     messages = [
         {"role": "system", "content": system},
