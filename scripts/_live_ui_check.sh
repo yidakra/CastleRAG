@@ -3,7 +3,7 @@
 # on the persisted day-1 index, then exercise the real RagEngine end to end
 # (require-live build -> answer a cached question -> live per-camera suggestion +
 # refined query). Embeddings come from the query cache, so OmniEmbed isn't needed.
-set -uo pipefail
+set -euo pipefail
 SC="/scratch-shared/${USER}"
 export HF_HOME="${SC}/hf_cache" HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 VLLM_LOGGING_LEVEL=WARNING
 module purge

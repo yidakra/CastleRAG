@@ -55,7 +55,9 @@ def expand_candidates(
                 ocr_spans=_collect_ocr(evidence_rows),
                 frame_descriptions=_collect_frame_descriptions(evidence_rows),
                 auxiliary_notes=_collect_aux_notes(evidence_rows),
-                sampled_frame_paths=_collect_frame_paths(evidence_rows, max_frames=frames_per_candidate),
+                sampled_frame_paths=_collect_frame_paths(
+                    evidence_rows, max_frames=frames_per_candidate
+                ),
             )
         )
 
@@ -73,14 +75,18 @@ def expand_candidates(
                 ocr_spans=_collect_ocr([primary]),
                 frame_descriptions=_collect_frame_descriptions([primary]),
                 auxiliary_notes=_collect_aux_notes([primary]),
-                sampled_frame_paths=_collect_frame_paths([primary], max_frames=frames_per_candidate),
+                sampled_frame_paths=_collect_frame_paths(
+                    [primary], max_frames=frames_per_candidate
+                ),
             )
         )
 
     return packs
 
 
-def _bundle_rows(primary: RetrievalHit, hits: List[RetrievalHit], route: QuestionRoute) -> List[RetrievalHit]:
+def _bundle_rows(
+    primary: RetrievalHit, hits: List[RetrievalHit], route: QuestionRoute
+) -> List[RetrievalHit]:
     """Return hits that share context with or temporally overlap the primary hit."""
     rows: "OrderedDict[str, RetrievalHit]" = OrderedDict()
     rows[primary.record_id] = primary
@@ -149,8 +155,10 @@ def _collect_frame_descriptions(rows: List[RetrievalHit]) -> List[str]:
     return _unique_values(values)
 
 
-def _collect_frame_paths(rows: List[RetrievalHit], max_frames: Optional[int] = None) -> List[str]:
-    """Return deduplicated sampled frame JPEG paths from all hits, capped at max_frames."""
+def _collect_frame_paths(
+    rows: List[RetrievalHit], max_frames: Optional[int] = None
+) -> List[str]:
+    """Return deduplicated sampled frame JPEG paths from all hits, capped at max_frames."""  # noqa: E501
     paths: List[str] = []
     seen: set = set()
     for row in rows:

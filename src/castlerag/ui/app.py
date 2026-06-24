@@ -58,9 +58,9 @@ def build_app(
     import os
 
     from castlerag.config import load_config
-    cfg = getattr(engine, "cfg", None)
-    if cfg is None:
-        cfg = load_config(override_path=os.getenv("CASTLERAG_CONFIG"))
+    cfg = getattr(engine, "cfg", None) or cfg or load_config(
+        override_path=os.getenv("CASTLERAG_CONFIG")
+    )
     score_mode: str = getattr(getattr(cfg, "ui", None), "score_mode", "rrf_normalized")
 
     app = Dash(__name__, title="CastleRAG")

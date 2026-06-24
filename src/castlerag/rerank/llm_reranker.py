@@ -283,7 +283,7 @@ def rerank_candidates(
     # grounding. Without this, a weak retrieval set causes total hallucination.
     if not ranked and best_fallback is not None:
         LOGGER.warning(
-            "All reranker candidates filtered (best relevance=%d); keeping as fallback.",
+            "All reranker candidates filtered (best relevance=%d); keeping as fallback.",  # noqa: E501
             best_fallback.reranker_output.relevance,
         )
         ranked.append(best_fallback)
@@ -338,13 +338,16 @@ def _b64_frame(path: str) -> Optional[str]:
 
 
 def _build_content(prompt: str, frame_paths: List[str], max_frames: int = 4) -> Any:
-    """Return a plain string or a multimodal content list, depending on available frames."""
+    """Return a plain string or a multimodal content list, depending on frames."""
     encoded = [b for b in (_b64_frame(p) for p in frame_paths[:max_frames]) if b]
     if not encoded:
         return prompt
     items: List[Any] = [{"type": "text", "text": prompt}]
     for b64 in encoded:
-        items.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        items.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+        })
     return items
 
 
