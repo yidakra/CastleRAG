@@ -37,7 +37,6 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-
 UI_URL = os.environ.get("UI_URL", "http://localhost:8050/")
 OUT = Path(os.environ.get("UI_SMOKE_OUT_DIR", "outputs/ui_smoke"))
 QUESTION = "What book was Allie reading?"
