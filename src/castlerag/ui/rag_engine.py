@@ -609,6 +609,7 @@ class RagEngine:
         end_ms = abs_start_ms + window_ms
         exclude_ids = tuple(exclude) or None
 
+        ego_set = set(self.ego_cameras)
         by_cam: "OrderedDict[str, CameraAngle]" = OrderedDict()
         if query_vector is not None:
             # Query-scored: a time-windowed dense search ranks the co-temporal
@@ -634,6 +635,8 @@ class RagEngine:
             for hit in hits:  # already ordered by score, highest first
                 cam = hit.camera_id
                 if not cam or cam in by_cam:
+                    continue
+                if ego_set and cam not in ego_set:
                     continue
                 by_cam[cam] = CameraAngle(
                     camera_id=str(cam),
@@ -670,6 +673,8 @@ class RagEngine:
                 payload = dict(getattr(point, "payload", {}) or {})
                 cam = payload.get("camera_id")
                 if not cam or cam in by_cam:
+                    continue
+                if ego_set and cam not in ego_set:
                     continue
                 by_cam[cam] = CameraAngle(
                     camera_id=str(cam),

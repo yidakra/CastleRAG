@@ -582,7 +582,9 @@ def generate_freeform_answer(
     rows = evidence_rows[:max_evidence_rows]
     evidence_text = "\n\n".join(_enumerate_evidence_rows(rows)) or _MISSING_EVIDENCE_ROW
     context_block = (
-        f"\n\nReviewer feedback on previous evidence:\n{refinement_context}"
+        f"\n\nReviewer feedback on previous evidence (use as guidance only — "
+        f"do NOT cite timestamps from this block; only cite timestamps from "
+        f"the Evidence section above):\n{refinement_context}"
         if refinement_context
         else ""
     )

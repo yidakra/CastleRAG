@@ -578,7 +578,7 @@ def _build_cotemporal_engine(
     )
     pipeline = SimpleNamespace(qdrant_client=client, collection_name="t")
     return RagEngine(
-        cfg=None, pipeline=pipeline, ego_cameras=("Allie", "Bjorn"), mirror=mirror
+        cfg=None, pipeline=pipeline, ego_cameras=tuple(cameras), mirror=mirror
     )
 
 
