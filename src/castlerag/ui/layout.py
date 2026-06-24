@@ -20,6 +20,8 @@ contracts; everything else is DMC.
 
 from __future__ import annotations
 
+from typing import Optional
+
 import dash_mantine_components as dmc
 from dash import dcc, html
 
@@ -54,12 +56,28 @@ _SCORE_MODE_TOOLTIP: dict[str, str] = {
 }
 
 
-def _top_bar(mode: str) -> dmc.Group:
-    """Return the static top bar with the CastleRAG mark and status badges.
+def _top_bar(mode: str, cfg: Optional[object] = None) -> dmc.Group:
+    """Return the top bar with the CastleRAG mark, status badges, and clear button.
 
     ``mode`` is ``"live"`` (real RAG backend) or ``"offline"`` (placeholder).
+    Badges are derived from ``cfg`` when available, otherwise fall back to
+    hardcoded defaults.
     """
     live = mode == "live"
+
+    if cfg is not None:
+        ds = getattr(cfg, "dataset", None)
+        days: list = getattr(ds, "days", [1]) if ds else [1]
+        scope: str = getattr(ds, "camera_scope", "ego") if ds else "ego"
+        ego_cams: list = getattr(ds, "ego_cameras", []) if ds else []
+        exo_cams: list = getattr(ds, "exo_cameras", []) if ds else []
+        n_cams = len(ego_cams) + (len(exo_cams) if scope == "all" else 0)
+        day_label = f"Day {days[0]}" if len(days) == 1 else f"Days {days[0]}–{days[-1]}"
+        cam_label = f"{n_cams} cams"
+    else:
+        day_label = "Day 1"
+        cam_label = "15 cams"
+
     return dmc.Group(
         className="top-bar",
         justify="space-between",
@@ -74,12 +92,20 @@ def _top_bar(mode: str) -> dmc.Group:
             dmc.Group(
                 gap="xs",
                 children=[
-                    dmc.Badge("Day 1", variant="light", color="gray"),
-                    dmc.Badge("15 cams", variant="light", color="gray"),
+                    dmc.Badge(day_label, variant="light", color="gray"),
+                    dmc.Badge(cam_label, variant="light", color="gray"),
                     dmc.Badge(
                         "live RAG" if live else "offline",
                         variant="light" if live else "outline",
                         color="teal" if live else "gray",
+                    ),
+                    dmc.Button(
+                        "Clear",
+                        id="clear-thread-button",
+                        variant="subtle",
+                        color="gray",
+                        size="xs",
+                        n_clicks=0,
                     ),
                 ],
             ),
@@ -111,17 +137,15 @@ def _thread_column() -> html.Div:
                 align="flex-end",
                 wrap="nowrap",
                 children=[
-                    # dcc.Input (not a DMC input) so pressing Enter fires n_submit.
-                    dcc.Input(
+                    # dcc.Textarea expands as the user types (auto-resize via
+                    # query-input.js); Enter submits, Shift+Enter inserts a newline.
+                    dcc.Textarea(
                         id="new-question-input",
-                        type="text",
-                        placeholder="Ask a new question…  (press Enter)",
+                        placeholder="Ask a question",
                         className="ask-new-input",
-                        debounce=False,
-                        n_submit=0,
                     ),
                     dmc.Button(
-                        "New query",
+                        "Send",
                         id="ask-new-button",
                         n_clicks=0,
                         variant="filled",
@@ -275,12 +299,13 @@ def build_layout(
     mirror: YouTubeMirror,
     mode: str = "offline",
     score_mode: str = "rrf_normalized",
+    cfg: Optional[object] = None,
 ) -> html.Div:
     """Build the full dashboard layout (state lives in the stores below)."""
     return html.Div(
         className="app-root",
         children=[
-            _top_bar(mode),
+            _top_bar(mode, cfg),
             html.Div(
                 className="app-body",
                 children=[
@@ -291,7 +316,7 @@ def build_layout(
                     html.Div(
                         className="app-gutter",
                         id="app-gutter",
-                        title="Drag to resize",
+                        title="Drag to resize · double-click to reset",
                     ),
                     _viewer_column(score_mode),
                 ],
@@ -303,5 +328,7 @@ def build_layout(
                 id="iteration-store",
                 data={"claim": None, "iteration": 0, "next_seq": 1},
             ),
+            # Hidden sink used by the auto-focus clientside callback.
+            html.Div(id="_focus-dummy", style={"display": "none"}),
         ],
     )

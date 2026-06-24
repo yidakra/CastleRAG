@@ -23,7 +23,7 @@ from dash import ALL, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
 from castlerag.ui.chat import ChatEngine, ChatTurnResult
-from castlerag.ui.figures import camera_match_figure
+from castlerag.ui.figures import camera_match_figure, empty_figure
 from castlerag.ui.youtube import YouTubeMirror
 
 _MAX_ITERATIONS = 5
@@ -722,11 +722,85 @@ def register_callbacks(
 ) -> None:
     """Register the dashboard callbacks on ``app``."""
 
+    # ---- 1. Disable Send when input is empty ----------------------------------
+    app.clientside_callback(
+        """
+        function(value) {
+            return !value || value.trim() === "";
+        }
+        """,
+        Output("ask-new-button", "disabled"),
+        Input("new-question-input", "value"),
+    )
+
+    # ---- 2. Auto-focus input after every thread update -----------------------
+    app.clientside_callback(
+        """
+        function(data) {
+            setTimeout(function() {
+                var el = document.getElementById("new-question-input");
+                if (el) {
+                    el.focus();
+                    // Reset textarea height after submission/clear.
+                    if (!el.value) el.style.height = "";
+                }
+            }, 80);
+            return "";
+        }
+        """,
+        Output("_focus-dummy", "children"),
+        Input("thread-store", "data"),
+        prevent_initial_call=True,
+    )
+
+    # ---- 3. Clear thread -----------------------------------------------------
+    @app.callback(  # type: ignore[attr-defined,untyped-decorator]
+        Output("thread-store", "data", allow_duplicate=True),
+        Output("iteration-store", "data", allow_duplicate=True),
+        Output("focus-store", "data", allow_duplicate=True),
+        Output("review-store", "data", allow_duplicate=True),
+        Output("thread", "children", allow_duplicate=True),
+        Output("new-question-input", "value", allow_duplicate=True),
+        *_viewer_output_specs(),
+        Output("compose-wrap", "hidden", allow_duplicate=True),
+        Output("refined-query-input", "value", allow_duplicate=True),
+        Input("clear-thread-button", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def on_clear(n_clicks: Optional[int]) -> tuple:
+        """Reset all thread and viewer state to the initial empty dashboard."""
+        if not n_clicks:
+            raise PreventUpdate
+        return (
+            [],
+            {"claim": None, "iteration": 0, "next_seq": 1},
+            {},
+            {},
+            _render_thread([], {}),
+            "",
+            # _viewer_output_specs order: title, subtitle, camera-grid, review-row,
+            # banner children, banner hidden, evidence-figure, submit-wrap hidden
+            "Selected moment",
+            "",
+            [dmc.Text(
+                "Select an evidence moment to see its synchronized cameras.",
+                className="viewer-hint",
+                c="dimmed",
+                size="sm",
+            )],
+            [],
+            [],
+            True,
+            empty_figure(),
+            True,
+            True,   # compose-wrap hidden
+            "",     # refined-query-input
+        )
+
     @app.callback(  # type: ignore[attr-defined,untyped-decorator]
         *_thread_outputs(),
         Output("new-question-input", "value", allow_duplicate=True),
         Input("ask-new-button", "n_clicks"),
-        Input("new-question-input", "n_submit"),
         State("new-question-input", "value"),
         State("thread-store", "data"),
         State("iteration-store", "data"),
@@ -736,7 +810,6 @@ def register_callbacks(
     )
     def on_ask_new(
         n_clicks: Optional[int],
-        n_submit: Optional[int],
         question: Optional[str],
         thread: Optional[List[Dict[str, object]]],
         iteration_store: Optional[Dict[str, object]],

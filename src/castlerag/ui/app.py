@@ -65,7 +65,7 @@ def build_app(
 
     app = Dash(__name__, title="CastleRAG")
     app.layout = dmc.MantineProvider(
-        build_layout(mirror, mode=engine_mode(engine), score_mode=score_mode),
+        build_layout(mirror, mode=engine_mode(engine), score_mode=score_mode, cfg=cfg),
         theme=THEME,
         forceColorScheme="light",
     )

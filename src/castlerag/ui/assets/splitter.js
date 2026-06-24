@@ -9,7 +9,7 @@
   "use strict";
 
   var MIN_LEFT = 240; // px — keep the chat usable
-  var MIN_RIGHT = 360; // px — keep the video grid usable
+  var MIN_RIGHT = 440; // px — keep the 3-column camera/button grid usable
   var KEY = "castlerag.threadWidth";
 
   function appBody() {

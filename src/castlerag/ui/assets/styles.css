@@ -177,12 +177,16 @@ body {
 .ask-new-input {
     flex: 1;
     min-width: 0;
-    height: 38px;
+    min-height: 38px;
+    max-height: 120px;
     border: 1.5px dashed #d7d7e0;
     border-radius: 11px;
     padding: 9px 11px;
     font: inherit;
     font-size: 12px;
+    resize: none;
+    overflow-y: auto;
+    line-height: 1.4;
 }
 
 /* ---- right: evidence viewer ---- */
@@ -195,6 +199,7 @@ body {
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     padding: 16px;
+    min-width: 440px;
 }
 
 .camera-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
