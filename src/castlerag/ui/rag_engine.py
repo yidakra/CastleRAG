@@ -94,6 +94,7 @@ class RagEngine:
         question: str,
         choices: Optional[Dict[str, str]] = None,
         exclude_cameras: Sequence[str] = (),
+        _refinement_context: Optional[str] = None,
     ) -> ChatTurnResult:
         """Answer a question with the real pipeline and adapt to the UI model."""
         from castlerag.eval.run_eval import run_question
@@ -128,7 +129,9 @@ class RagEngine:
             )
             freeform_answer = None
         else:
-            answer_text = self._freeform_answer_text(eval_q, result)
+            answer_text = self._freeform_answer_text(
+                eval_q, result, refinement_context=_refinement_context
+            )
             freeform_answer = answer_text
         claim = self._synthesize_claim(
             result.prediction,
@@ -178,26 +181,27 @@ class RagEngine:
         iteration: int,
         exclude_cameras: Sequence[str] = (),
         anchor: Optional[Tuple[Optional[str], Optional[int]]] = None,
+        reviews: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> ChatTurnResult:
         """Run a real retrieval/generation pass for the refined query.
 
-        Rejected cameras are hard-excluded, but refinement must not simply stay
-        on the same timestamp with zero scores. The user's feedback should affect
-        a new retrieval pass and allow the answer/claim to change.
+        Rejected cameras are hard-excluded from retrieval. ``reviews`` carries
+        the human reviewer's per-camera verdicts and justifications; these are
+        formatted into a context block appended to the generation prompt so the
+        model grounds its answer in what the reviewer confirmed or rejected —
+        not just in the raw retrieved evidence.
 
-        ``anchor`` is accepted for protocol/backwards compatibility but no longer
-        used: the previous "stay on the same moment" behaviour froze the answer
-        to the prior claim and rendered zero-confidence angles (refinement no-op).
+        ``anchor`` is accepted for backwards compatibility but no longer used.
         """
+        review_context = _format_review_context(reviews) if reviews else None
         result = self.answer(
             refined_query,
             choices=None,
             exclude_cameras=exclude_cameras,
+            _refinement_context=review_context,
         )
-
         if result.claim is None:
             result.claim = Claim(text=claim, support=SupportLevel.PARTIAL)
-
         return result
 
     # -- review suggestions -------------------------------------------------
@@ -214,7 +218,12 @@ class RagEngine:
         gen = getattr(self.cfg, "generation", None)
         return getattr(gen, "model", "Qwen/Qwen3-VL-8B-Instruct")
 
-    def _freeform_answer_text(self, eval_q: EvalQuestion, result: Any) -> str:
+    def _freeform_answer_text(
+        self,
+        eval_q: EvalQuestion,
+        result: Any,
+        refinement_context: Optional[str] = None,
+    ) -> str:
         """Direct open-question answer; cleaned MCQ text as a fallback."""
         from castlerag.generation.answer import (
             clean_answer_text,
@@ -228,6 +237,7 @@ class RagEngine:
                 result.evidence_rows,
                 self._chat_client(),
                 model=self._gen_model(),
+                refinement_context=refinement_context,
             )
             if text:
                 return text
@@ -402,7 +412,7 @@ class RagEngine:
         ``moments[0]``) while honestly signalling that nothing was retrieved:
         the synthetic camera tiles resolve no mirror embed and carry score 0.
         """
-        cameras = self._pad_cameras([], "day1", 0, 0.0)
+        cameras = self._pad_cameras([], "day1", 0, 0.0, presence_score=0.0)
         cameras[0].is_best = True
         return EvidenceMoment(
             moment_id="m0",
@@ -666,7 +676,10 @@ class RagEngine:
                     day=str(payload.get("day") or day),
                     hour=int(payload.get("hour") or 0),
                     start_seconds=float(payload.get("start_seconds") or 0.0),
-                    match_score=0.0,
+                    # Small presence floor: camera was physically at the scene
+                    # even without a semantic score. After per-moment normalisation
+                    # this shows as ~0.05-0.15 rather than a flat zero bar.
+                    match_score=0.05,
                     is_best=False,
                     is_context=True,
                     evidence_text=(
@@ -709,6 +722,7 @@ class RagEngine:
         day: str,
         hour: int,
         start: float,
+        presence_score: float = 0.05,
     ) -> List[CameraAngle]:
         """Pad to exactly ``_FIXED_CAMERA_COUNT`` cameras, deterministically.
 
@@ -737,7 +751,7 @@ class RagEngine:
                     day=day,
                     hour=hour,
                     start_seconds=start,
-                    match_score=0.0,
+                    match_score=presence_score,
                     is_best=False,
                 )
             )
@@ -794,6 +808,32 @@ class RagEngine:
                 )
             )
         return refs
+
+
+def _format_review_context(reviews: Optional[Dict[str, Dict[str, str]]]) -> Optional[str]:
+    """Format per-camera review verdicts into a generation context block.
+
+    Only includes cameras that have been reviewed (not pending). The result is
+    appended after the evidence so the model knows which angles the human
+    confirmed, rejected, or flagged as partially relevant.
+    """
+    if not reviews:
+        return None
+    _LABEL = {"confirmed": "CONFIRMED", "rejected": "REJECTED", "flagged": "FLAGGED"}
+    lines: List[str] = []
+    for camera_id, info in reviews.items():
+        state = (info.get("state") or "pending").lower()
+        if state == "pending":
+            continue
+        label = _LABEL.get(state, state.upper())
+        just = (info.get("justification") or "").strip()
+        line = f"- {camera_id}: {label}"
+        if just:
+            line += f' — "{just}"'
+        lines.append(line)
+    if not lines:
+        return None
+    return "\n".join(lines)
 
 
 def _question_id(question: str) -> str:

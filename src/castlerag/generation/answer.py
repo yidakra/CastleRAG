@@ -544,7 +544,7 @@ Question:
 {question}
 
 Evidence:
-{evidence}
+{evidence}{context_block}
 """
 
 
@@ -571,15 +571,27 @@ def generate_freeform_answer(
     *,
     model: str = "Qwen/Qwen3-VL-8B-Instruct",
     max_evidence_rows: int = 50,
+    refinement_context: Optional[str] = None,
 ) -> str:
-    """Answer an open question directly from evidence (no MCQ sentinel)."""
+    """Answer an open question directly from evidence (no MCQ sentinel).
+
+    ``refinement_context`` — when set (refinement pass) — appends the
+    human reviewer's camera verdicts and justifications after the evidence
+    block, grounding the answer in human-validated signals.
+    """
     rows = evidence_rows[:max_evidence_rows]
     evidence_text = "\n\n".join(_enumerate_evidence_rows(rows)) or _MISSING_EVIDENCE_ROW
+    context_block = (
+        f"\n\nReviewer feedback on previous evidence:\n{refinement_context}"
+        if refinement_context
+        else ""
+    )
     user = _FREEFORM_USER_TEMPLATE.format(
         route=hints.route,
         route_block=_ROUTE_PROMPT_BLOCKS.get(hints.route, ""),
         question=question.query,
         evidence=evidence_text,
+        context_block=context_block,
     )
     messages = [
         {"role": "system", "content": _FREEFORM_SYSTEM_PROMPT},

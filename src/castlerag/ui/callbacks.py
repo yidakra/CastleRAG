@@ -938,6 +938,7 @@ def register_callbacks(
             new_iteration,
             exclude_cameras=_rejected_cameras(thread, review),
             anchor=anchor,
+            reviews=review,
         )
         group = _serialize_group(
             result,

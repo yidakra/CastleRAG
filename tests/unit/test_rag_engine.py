@@ -68,12 +68,15 @@ def test_hits_to_moments_pads_to_three_when_fewer_real_cameras():
     moments = _engine()._hits_to_moments(hits, SupportLevel.PARTIAL)
     cams = moments[0].cameras
     assert len(cams) == 3
-    # One real camera (score > 0) and two deterministic padded ones (score 0.0).
-    real = [c for c in cams if c.match_score > 0]
-    padded = [c for c in cams if c.match_score == 0.0]
-    assert len(real) == 1 and real[0].camera_id == "Bjorn"
+    # Bjorn was retrieved so it gets the highest score (is_best=True).
+    # Padded ego-cameras get a small presence floor (0.05) normalised to ~0.05–0.10,
+    # clearly below the retrieved camera's 1.0 after per-moment normalisation.
+    best = [c for c in cams if c.is_best]
+    padded = [c for c in cams if not c.is_best]
+    assert len(best) == 1 and best[0].camera_id == "Bjorn"
     assert len(padded) == 2
     assert all(c.camera_id != "Bjorn" for c in padded)
+    assert all(c.match_score <= 0.15 for c in padded)
 
 
 def test_pad_cameras_is_deterministic():
@@ -189,7 +192,9 @@ def test_no_evidence_moment_keeps_focus_contract():
     moment = _engine()._no_evidence_moment(SupportLevel.UNSUPPORTED)
     assert moment.moment_id == "m0"
     assert "No supporting footage" in moment.place_label
-    assert moment.cameras  # padded to the fixed camera count, all score 0
+    assert moment.cameras  # padded to the fixed camera count, no real evidence
+    # No-evidence padded cameras explicitly carry score 0.0 (not the presence
+    # floor used by ego-roster pads in normal moments) — they signal "nothing found".
     assert all(cam.match_score == 0.0 for cam in moment.cameras)
 
 
@@ -680,7 +685,7 @@ def test_refine_reruns_retrieval_with_refined_query_and_exclusions():
 
     eng = _build_cotemporal_engine()
 
-    def _fake_answer(question, choices=None, exclude_cameras=()):  # noqa: ANN001
+    def _fake_answer(question, choices=None, exclude_cameras=(), **_kwargs):  # noqa: ANN001
         captured["question"] = question
         captured["exclude"] = tuple(exclude_cameras)
         return ChatTurnResult(

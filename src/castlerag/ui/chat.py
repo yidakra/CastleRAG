@@ -205,6 +205,7 @@ class ChatEngine(Protocol):
         iteration: int,
         exclude_cameras: Sequence[str] = (),
         anchor: Optional[Tuple[Optional[str], Optional[int]]] = None,
+        reviews: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> ChatTurnResult:
         """Re-run retrieval for the same ``claim`` with a sharper query.
 
@@ -212,6 +213,8 @@ class ChatEngine(Protocol):
         hard-excludes them from retrieval, the placeholder ignores them.
         ``anchor`` is the focused moment's ``(day, absolute_start_ms)`` so the
         live engine can swap a rejected angle in-scene instead of teleporting.
+        ``reviews`` carries per-camera verdicts and justifications from the
+        reviewer; the live engine passes them to the generator as grounding.
         """
         ...
 
@@ -301,11 +304,12 @@ class PlaceholderEngine:
         iteration: int,
         exclude_cameras: Sequence[str] = (),
         anchor: Optional[Tuple[Optional[str], Optional[int]]] = None,
+        reviews: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> ChatTurnResult:
         """Re-run retrieval for ``claim``; support climbs as iterations rise.
 
-        The placeholder fabricates results, so ``exclude_cameras`` and ``anchor``
-        are accepted for protocol parity but not applied.
+        The placeholder fabricates results, so ``exclude_cameras``, ``anchor``,
+        and ``reviews`` are accepted for protocol parity but not applied.
         """
         rng = random.Random(_seed(f"{claim}|{refined_query}|{iteration}"))
         support = (
