@@ -76,7 +76,7 @@ def _top_bar(mode: str, cfg: Optional[object] = None) -> dmc.Group:
         cam_label = f"{n_cams} cams"
     else:
         day_label = "Day 1"
-        cam_label = "15 cams"
+        cam_label = "16 cams"
 
     return dmc.Group(
         className="top-bar",

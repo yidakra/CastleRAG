@@ -132,7 +132,7 @@ def suggest_justification_text(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    return _complete(
+    result = _complete(
         llm_client,
         messages,
         model=model,
@@ -140,6 +140,15 @@ def suggest_justification_text(
         temperature=0.3,
         timeout=timeout,
     ).strip()
+    # Discard "no evidence" hedges generated for confirmed verdicts — the reviewer
+    # made their call; a contradictory auto-draft is worse than no draft.
+    if verdict_lower == "confirmed":
+        lower = result.lower()
+        if any(p in lower for p in ("no text retrieved", "no evidence retrieved",
+                                     "no evidence from this camera",
+                                     "no retrieved text")):
+            return ""
+    return result
 
 
 def suggest_refined_query_text(
