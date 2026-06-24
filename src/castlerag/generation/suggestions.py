@@ -167,22 +167,22 @@ def suggest_refined_query_text(
     which may be wrong — passing it as the sole anchor biases the refined search
     back toward that answer, so it is demoted to a fallible prior here.
     """
-    lines = []
-    confirmed = []
-    flagged = []
-    rejected = []
+    confirmed_notes: list = []
+    flagged: list = []
+    rejected: list = []
     for camera_id, info in reviews.items():
         state = info.get("state", "pending")
         note = (info.get("justification") or "").strip()
-        phrase = _VERDICT_PHRASE.get(state, "reviewed")
-        lines.append(f"- {camera_id}: {phrase}" + (f" — {note}" if note else ""))
         if state in _CONFIRMED_STATES:
-            confirmed.append(camera_id)
+            # Include the justification so the LLM can extract specific terms
+            # (e.g. "guitar") that the reviewer already identified in the footage.
+            confirmed_notes.append(f"{camera_id}: {note}" if note else camera_id)
         elif state in _FLAGGED_STATES:
             flagged.append(camera_id)
         elif state in _REJECTED_STATES:
             rejected.append(camera_id)
-    confirmed_block = ", ".join(confirmed) if confirmed else "none"
+
+    confirmed_block = "; ".join(confirmed_notes) if confirmed_notes else "none"
     flagged_block = ", ".join(flagged) if flagged else "none"
     rejected_block = ", ".join(rejected) if rejected else "none"
 
@@ -190,15 +190,16 @@ def suggest_refined_query_text(
         "You write a SHORT retrieval search query (one sentence, max 15 words) "
         "for a multi-camera video evidence system. The query must describe WHAT "
         "to find — objects, actions, people, locations — NOT instructions or "
-        "verdicts. Stay anchored on the ORIGINAL QUESTION topic. Use the "
-        "reviewer's verdicts only to steer the topic: confirmed = on the right "
-        "track, stay focused; flagged = relevant but unclear, seek a clearer "
-        "view; rejected = irrelevant, search elsewhere. "
+        "verdicts. Stay anchored on the ORIGINAL QUESTION topic. "
+        "If confirmed cameras have justification notes, extract their SPECIFIC "
+        "terms (exact objects, actions, instrument names, etc.) and use those "
+        "in the query — do not substitute vague words like 'instrument' when "
+        "the notes already name 'guitar'. "
         "Output ONLY the query text — no preamble, no quotes, no instructions."
     )
     user = (
         f"Original question: {question or claim}\n"
-        f"Confirmed cameras (good evidence): {confirmed_block}\n"
+        f"Confirmed cameras (good evidence + reviewer notes): {confirmed_block}\n"
         f"Flagged cameras (need clearer view): {flagged_block}\n"
         f"Rejected cameras (exclude): {rejected_block}\n\n"
         "Search query (max 15 words, keywords/topic only):"
