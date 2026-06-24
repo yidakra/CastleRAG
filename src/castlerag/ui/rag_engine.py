@@ -361,7 +361,11 @@ class RagEngine:
         """
         reranked = getattr(rerank_result, "evidence_rows", None) or []
         scores = [r.rerank_score for r in reranked if r.rerank_score is not None]
-        if scores:
+        # Free-form questions have empty choice strings so the reranker scores all
+        # packs 0; treat an all-zero result the same as no reranker scores so we
+        # fall through to the cosine fallback rather than labelling every open
+        # answer UNSUPPORTED.
+        if scores and max(scores) > 0:
             return max(scores)
         cosines = [
             h.raw_score for h in (evidence_rows or []) if h.raw_score is not None
@@ -878,7 +882,10 @@ def _display_score(
     """
     if mode == "cosine" and hit.raw_score is not None:
         return _clamp(hit.raw_score)
-    if mode == "reranker" and hit.rerank_score is not None:
+    # A rerank_score of exactly 0.0 means the reranker gave up (e.g. free-form
+    # questions have empty choice strings); fall through to rrf_normalized so the
+    # displayed score reflects real retrieval relevance instead of a forced zero.
+    if mode == "reranker" and hit.rerank_score is not None and hit.rerank_score > 0:
         return _clamp(hit.rerank_score)
     # rrf_normalized (default) or fallback
     return _clamp(hit.score / max_rrf if max_rrf > 0 else 0.0)

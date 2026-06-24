@@ -342,3 +342,50 @@ def test_basic_auth_absent_when_env_unset(monkeypatch):
     app.layout = html.Div("ok")
     _install_basic_auth(app)
     assert app.server.test_client().get("/").status_code != 401  # no gate
+
+
+def test_should_converge_true_when_all_confirmed_or_ignored():
+    from castlerag.ui.callbacks import _should_converge
+
+    assert _should_converge(
+        {"Luca": {"state": "confirmed"}, "Klaus": {"state": "ignored"}}
+    )
+    assert _should_converge(
+        {"Luca": {"state": "confirmed"}, "Klaus": {"state": "confirmed"}}
+    )
+
+
+def test_should_converge_false_when_any_flagged_or_rejected():
+    from castlerag.ui.callbacks import _should_converge
+
+    assert not _should_converge(
+        {"Luca": {"state": "confirmed"}, "Klaus": {"state": "flagged"}}
+    )
+    assert not _should_converge(
+        {"Luca": {"state": "ignored"}, "Klaus": {"state": "rejected"}}
+    )
+    assert not _should_converge({})
+
+
+def test_strip_internal_links_removes_non_http_refs():
+    from castlerag.ui.callbacks import _strip_internal_links
+
+    text = (
+        "The answer is clear from "
+        "[camera=Luca time=day1 11:39:53-11:42:30](camera=Luca time=day1 "
+        "11:39:53-11:42:30) and also from "
+        "[transcript window camera=Cathal day=day1 11:18:24-11:19:26]"
+        "(transcript window camera=Cathal day=day1 11:18:24-11:19:26)."
+    )
+    stripped = _strip_internal_links(text)
+    assert "camera=Luca" in stripped  # text kept
+    assert "11:39:53" in stripped     # timestamp kept
+    assert "](camera=" not in stripped  # link markup gone
+    assert "https://" not in stripped   # no links remain
+
+
+def test_strip_internal_links_preserves_real_urls():
+    from castlerag.ui.callbacks import _strip_internal_links
+
+    text = "See [YouTube](https://www.youtube.com/watch?v=abc) for details."
+    assert _strip_internal_links(text) == text

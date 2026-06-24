@@ -17,6 +17,7 @@ URLs so the click/review callbacks never need the mirror.
 from __future__ import annotations
 
 import json
+import re
 from typing import Dict, List, Optional
 
 import dash_mantine_components as dmc
@@ -33,16 +34,25 @@ _REVIEW_ACTION_STATE = {
     "confirm": "confirmed",
     "refine": "flagged",
     "reject": "rejected",
+    "ignore": "ignored",
 }
 # Mantine color per review action button.
-_REVIEW_ACTION_COLOR = {"confirm": "green", "refine": "yellow", "reject": "red"}
+_REVIEW_ACTION_COLOR = {
+    "confirm": "green",
+    "refine": "yellow",
+    "reject": "red",
+    "ignore": "gray",
+}
 # How each recorded verdict reads on a frozen (read-only) iteration.
 _REVIEW_STATE_DISPLAY = {
     "confirmed": ("✓ Confirmed", "green"),
     "flagged": ("↻ Flagged for refine", "yellow"),
     "rejected": ("✕ Rejected", "red"),
+    "ignored": ("— Ignored", "gray"),
     "pending": ("— No verdict", "gray"),
 }
+
+_INTERNAL_LINK_RE = re.compile(r"\[([^\]]+)\]\((?!https?://)([^)]*)\)")
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +323,10 @@ def _render_group(
                 ],
             ),
             dmc.Text("Answer", size="xs", c="dimmed", mt="sm"),
-            dcc.Markdown(str(group["answer_text"]), className="answer-text"),
+            dcc.Markdown(
+                _strip_internal_links(str(group["answer_text"])),
+                className="answer-text",
+            ),
             dmc.Text("Top evidence moments", size="xs", fw=600, mt="sm", mb="xs"),
             dmc.Stack(moments, gap="xs", className="moment-list"),
         ],
@@ -460,7 +473,12 @@ def _review_column(
             ],
         )
 
-    actions = (("confirm", "✓ Confirm"), ("refine", "↻ Refine"), ("reject", "✕"))
+    actions = (
+        ("confirm", "✓ Confirm"),
+        ("refine", "↻ Refine"),
+        ("reject", "✕"),
+        ("ignore", "— Ignore"),
+    )
     buttons = [
         dmc.Button(
             label,
@@ -529,11 +547,17 @@ def _all_verdicts_in(review: Dict[str, Dict[str, str]]) -> bool:
         info.get("state", "pending") != "pending" for info in review.values()
     )
 
-def _all_confirmed(review: Dict[str, Dict[str, str]]) -> bool:
-    """Return True when every camera has been confirmed."""
+def _should_converge(review: Dict[str, Dict[str, str]]) -> bool:
+    """Return True when every camera is confirmed or ignored (no outstanding refine)."""
     return bool(review) and all(
-        info.get("state", "pending") == "confirmed" for info in review.values()
+        info.get("state", "pending") in {"confirmed", "ignored"}
+        for info in review.values()
     )
+
+
+def _strip_internal_links(text: str) -> str:
+    """Remove LLM-generated evidence ref links (non-http), keeping the link text."""
+    return _INTERNAL_LINK_RE.sub(r"\1", text)
 
 
 def _needs_refinement(review: Dict[str, Dict[str, str]]) -> bool:
@@ -610,7 +634,7 @@ def _converged_banner() -> List[dmc.Alert]:
     """Return the review-driven convergence banner."""
     return [
         dmc.Alert(
-            "All synchronized camera views were confirmed — no further "
+            "All synchronized camera views were confirmed or ignored — no further "
             "refinement needed.",
             title="✓ Search converged",
             color="green",
@@ -1181,7 +1205,7 @@ def register_callbacks(
         review = _capture_justifications(review, ctx.states_list)
         _persist_review(thread, focus, review)
 
-        if _all_confirmed(review):
+        if _should_converge(review):
             return review, thread, True, "", _converged_banner(), False
 
         claim_text = _focused_claim_text(thread, focus)
