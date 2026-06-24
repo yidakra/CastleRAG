@@ -4,7 +4,7 @@
 dataset:
   root: "/data/castle2024"
   hf_repo: "CASTLE-Dataset/CASTLE2024"
-  days: [1, 2, 3, 4]
+  days: [1]
   # 11 egocentric participant cameras — real CASTLE stream names
   ego_cameras:
     - "Allie"
