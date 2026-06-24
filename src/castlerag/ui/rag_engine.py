@@ -160,6 +160,18 @@ class RagEngine:
         moments = self._hits_to_moments(
             evidence_rows, claim.support, query_vector=query_vector
         ) or [self._no_evidence_moment(claim.support)]
+        pipeline_stats = {
+            "retrieved": len(result.retrieved),
+            "reranked": len(result.evidence_rows),
+            "candidates": len({
+                (h.day, _hour_of(h), int(_seconds_within_hour(h) // _BUCKET_SECONDS))
+                for h in result.evidence_rows
+                if h.camera_id and h.day
+            }),
+            "displayed": sum(
+                1 for m in moments if m.moment_id != "no-evidence"
+            ),
+        }
         return ChatTurnResult(
             answer_text=answer_text,
             route=result.hints.route,
@@ -172,6 +184,7 @@ class RagEngine:
             is_placeholder=False,
             claim=claim,
             moments=moments,
+            pipeline_stats=pipeline_stats,
         )
 
     def refine(

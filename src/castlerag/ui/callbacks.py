@@ -25,7 +25,11 @@ from dash import ALL, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 
 from castlerag.ui.chat import ChatEngine, ChatTurnResult
-from castlerag.ui.figures import camera_match_figure, empty_figure
+from castlerag.ui.figures import (
+    camera_match_figure,
+    empty_figure,
+    pipeline_funnel_figure,
+)
 from castlerag.ui.youtube import YouTubeMirror
 
 _MAX_ITERATIONS = 5
@@ -147,6 +151,7 @@ def _serialize_group(
         "reviews": {},
         # The refined query the user sent from this iteration (set on freeze).
         "sent_refined_query": None,
+        "pipeline_stats": getattr(result, "pipeline_stats", {}) or {},
         "moments": moments,
     }
 
@@ -306,6 +311,19 @@ def _render_group(
         for moment in group["moments"]  # type: ignore[index]
     ]
 
+    funnel_section: List[object] = []
+    stats = group.get("pipeline_stats") or {}
+    if stats and stats.get("retrieved", 0) > 0:
+        funnel_section = [
+            dmc.Text("Retrieval pipeline", size="xs", c="dimmed", mt="sm"),
+            dcc.Graph(
+                id=f"funnel-{group['group_id']}",
+                figure=pipeline_funnel_figure(stats),  # type: ignore[arg-type]
+                config={"displayModeBar": False, "staticPlot": True},
+                style={"marginTop": "2px"},
+            ),
+        ]
+
     return dmc.Card(
         className="group-card",
         withBorder=True,
@@ -327,6 +345,7 @@ def _render_group(
                 _strip_internal_links(str(group["answer_text"])),
                 className="answer-text",
             ),
+            *funnel_section,
             dmc.Text("Top evidence moments", size="xs", fw=600, mt="sm", mb="xs"),
             dmc.Stack(moments, gap="xs", className="moment-list"),
         ],

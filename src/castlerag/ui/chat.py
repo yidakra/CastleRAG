@@ -187,6 +187,7 @@ class ChatTurnResult:
     is_placeholder: bool = True
     claim: Optional[Claim] = None
     moments: List[EvidenceMoment] = field(default_factory=list)
+    pipeline_stats: Dict[str, int] = field(default_factory=dict)
 
 
 class ChatEngine(Protocol):
