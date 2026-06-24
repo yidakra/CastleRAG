@@ -100,6 +100,14 @@ def _top_bar(mode: str, cfg: Optional[object] = None) -> dmc.Group:
                         color="teal" if live else "gray",
                     ),
                     dmc.Button(
+                        "Export",
+                        id="export-thread-button",
+                        variant="subtle",
+                        color="gray",
+                        size="xs",
+                        n_clicks=0,
+                    ),
+                    dmc.Button(
                         "Clear",
                         id="clear-thread-button",
                         variant="subtle",
@@ -321,6 +329,7 @@ def build_layout(
                     _viewer_column(score_mode),
                 ],
             ),
+            dcc.Download(id="export-download"),
             dcc.Store(id="thread-store", data=[]),
             dcc.Store(id="focus-store", data={}),
             dcc.Store(id="review-store", data={}),

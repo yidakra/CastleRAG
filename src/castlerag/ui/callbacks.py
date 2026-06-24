@@ -16,6 +16,7 @@ URLs so the click/review callbacks never need the mirror.
 
 from __future__ import annotations
 
+import json
 from typing import Dict, List, Optional
 
 import dash_mantine_components as dmc
@@ -768,6 +769,47 @@ def register_callbacks(
             True,   # compose-wrap hidden
             "",     # refined-query-input
         )
+
+    @app.callback(  # type: ignore[attr-defined,untyped-decorator]
+        Output("export-download", "data"),
+        Input("export-thread-button", "n_clicks"),
+        State("thread-store", "data"),
+        prevent_initial_call=True,
+    )
+    def on_export_thread(n_clicks: Optional[int], thread: Optional[list]) -> object:
+        """Serialize the current thread to JSON and trigger a browser download."""
+        if not n_clicks or not thread:
+            raise PreventUpdate
+        turns = []
+        for g in thread:
+            turns.append({
+                "group_id": g.get("group_id"),
+                "iteration": g.get("iteration"),
+                "is_refinement": g.get("is_refinement"),
+                "question": g.get("question"),
+                "refined_query": g.get("refined_query"),
+                "answer": g.get("answer_text"),
+                "reviews": g.get("reviews", {}),
+                "moments": [
+                    {
+                        "moment_id": m.get("moment_id"),
+                        "clock_label": m.get("clock_label"),
+                        "place_label": m.get("place_label"),
+                        "cameras": [
+                            {
+                                "camera_id": c.get("camera_id"),
+                                "match_score": c.get("match_score"),
+                                "is_best": c.get("is_best"),
+                                "evidence_text": c.get("evidence_text"),
+                            }
+                            for c in (m.get("cameras") or [])
+                        ],
+                    }
+                    for m in (g.get("moments") or [])
+                ],
+            })
+        payload = json.dumps({"turns": turns}, indent=2, ensure_ascii=False)
+        return dcc.send_string(payload, "castlerag_session.json")
 
     @app.callback(  # type: ignore[attr-defined,untyped-decorator]
         *_thread_outputs(),
