@@ -13,9 +13,11 @@ Anti-confabulation rules (SPEC §6.1.1 — mandatory, not optional style):
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from castlerag.routing.question_router import RouteHints
@@ -145,26 +147,68 @@ def build_prompt(
     )
 
 
+def _b64_frame(path: str) -> Optional[str]:
+    """Read a frame JPEG and return its base64 string, or None if missing/unreadable."""
+    p = Path(path)
+    if not p.exists():
+        return None
+    try:
+        return base64.b64encode(p.read_bytes()).decode()
+    except OSError:
+        return None
+
+
+def _gather_frame_paths(evidence_rows: List[RetrievalHit], max_frames: int = 8) -> List[str]:
+    """Collect deduped frame paths from evidence rows, capped at max_frames."""
+    paths: List[str] = []
+    seen: set = set()
+    for row in evidence_rows:
+        for p in row.sampled_frame_paths:
+            if p not in seen:
+                seen.add(p)
+                paths.append(p)
+            if len(paths) >= max_frames:
+                return paths
+    return paths
+
+
 def build_messages(
     question: EvalQuestion,
     hints: RouteHints,
     evidence_rows: List[RetrievalHit],
     support_priors: Dict[str, float],
     max_evidence_rows: int = 50,
-) -> List[Dict[str, str]]:
-    """Return the system+user message list for the generation LLM."""
+    max_frames: int = 8,
+) -> List[Dict[str, Any]]:
+    """Return the system+user message list for the generation LLM.
+
+    When sampled frame JPEGs are available on disk they are base64-encoded and
+    appended as image_url items in the user message, making the call multimodal.
+    Falls back to plain text when no frames are present or files are missing.
+    """
+    prompt = build_prompt(
+        question=question,
+        hints=hints,
+        evidence_rows=evidence_rows,
+        support_priors=support_priors,
+        max_evidence_rows=max_evidence_rows,
+    )
+    encoded = [
+        b
+        for b in (_b64_frame(p) for p in _gather_frame_paths(evidence_rows, max_frames))
+        if b
+    ]
+    if encoded:
+        user_content: Any = [{"type": "text", "text": prompt}]
+        for b64 in encoded:
+            user_content.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+            )
+    else:
+        user_content = prompt
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": build_prompt(
-                question=question,
-                hints=hints,
-                evidence_rows=evidence_rows,
-                support_priors=support_priors,
-                max_evidence_rows=max_evidence_rows,
-            ),
-        },
+        {"role": "user", "content": user_content},
     ]
 
 

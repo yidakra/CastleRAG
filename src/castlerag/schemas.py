@@ -262,6 +262,7 @@ class RetrievalHit(BaseModel):
     # rerank_score: VLM-assessed relevance from the reranker, normalised to [0,1].
     raw_score: Optional[float] = None
     rerank_score: Optional[float] = None
+    sampled_frame_paths: List[str] = Field(default_factory=list)
 
 
 class EvidencePack(BaseModel):
@@ -277,6 +278,7 @@ class EvidencePack(BaseModel):
     ocr_spans: List[str] = Field(default_factory=list)
     frame_descriptions: List[str] = Field(default_factory=list)
     auxiliary_notes: List[str] = Field(default_factory=list)
+    sampled_frame_paths: List[str] = Field(default_factory=list)
 
 
 class RerankerOutput(BaseModel):

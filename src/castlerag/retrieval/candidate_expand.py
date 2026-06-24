@@ -57,6 +57,7 @@ def expand_candidates(
                 ocr_spans=_collect_ocr(evidence_rows),
                 frame_descriptions=_collect_frame_descriptions(evidence_rows),
                 auxiliary_notes=_collect_aux_notes(evidence_rows),
+                sampled_frame_paths=_collect_frame_paths(evidence_rows),
             )
         )
 
@@ -74,6 +75,7 @@ def expand_candidates(
                 ocr_spans=_collect_ocr([primary]),
                 frame_descriptions=_collect_frame_descriptions([primary]),
                 auxiliary_notes=_collect_aux_notes([primary]),
+                sampled_frame_paths=_collect_frame_paths([primary]),
             )
         )
 
@@ -135,6 +137,18 @@ def _collect_frame_descriptions(rows: List[RetrievalHit]) -> List[str]:
         if row.source_type == "main_clip" and row.asset_path:
             values.append(f"clip asset: {row.asset_path}")
     return _unique_values(values)
+
+
+def _collect_frame_paths(rows: List[RetrievalHit]) -> List[str]:
+    """Return deduplicated sampled frame JPEG paths from all hits."""
+    paths: List[str] = []
+    seen: set = set()
+    for row in rows:
+        for p in row.sampled_frame_paths:
+            if p not in seen:
+                seen.add(p)
+                paths.append(p)
+    return paths
 
 
 def _collect_aux_notes(rows: List[RetrievalHit]) -> List[str]:

@@ -253,6 +253,7 @@ def _dense_search(
                 event_summary=payload.get("event_summary"),
                 ocr_text=payload.get("ocr_text"),
                 asset_path=payload.get("asset_path"),
+                sampled_frame_paths=payload.get("sampled_frame_paths") or [],
             )
         )
     return hits

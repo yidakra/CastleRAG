@@ -6,9 +6,11 @@ Ablation: OpenGVLab/InternVL3-8B.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
-from typing import Any, Mapping, Sequence
+from pathlib import Path
+from typing import Any, List, Mapping, Optional, Sequence
 
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import (
@@ -243,6 +245,7 @@ def rerank_candidates(
                 llm_client=llm_client,
                 model=model,
                 prompt=prompt,
+                frame_paths=pack.sampled_frame_paths,
             )
             reranker_output = parse_reranker_response(
                 raw_response,
@@ -311,18 +314,42 @@ def _coerce_pack(
     return EvidencePack.model_validate(data)
 
 
+def _b64_frame(path: str) -> Optional[str]:
+    """Read a frame JPEG and return its base64 string, or None if missing/unreadable."""
+    p = Path(path)
+    if not p.exists():
+        return None
+    try:
+        return base64.b64encode(p.read_bytes()).decode()
+    except OSError:
+        return None
+
+
+def _build_content(prompt: str, frame_paths: List[str], max_frames: int = 4) -> Any:
+    """Return a plain string or a multimodal content list, depending on available frames."""
+    encoded = [b for b in (_b64_frame(p) for p in frame_paths[:max_frames]) if b]
+    if not encoded:
+        return prompt
+    items: List[Any] = [{"type": "text", "text": prompt}]
+    for b64 in encoded:
+        items.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+    return items
+
+
 def _invoke_reranker(
     *,
     llm_client: Any,
     model: str,
     prompt: str,
+    frame_paths: Optional[List[str]] = None,
     max_tokens: int = 256,
 ) -> str:
     """Call an OpenAI-compatible vLLM chat endpoint or a test double."""
+    content = _build_content(prompt, frame_paths or [])
     if hasattr(llm_client, "chat") and hasattr(llm_client.chat, "completions"):
         response = llm_client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": content}],
             max_tokens=max_tokens,
             temperature=0.0,
         )
@@ -333,7 +360,7 @@ def _invoke_reranker(
     if hasattr(llm_client, "create"):
         response = llm_client.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": content}],
             max_tokens=max_tokens,
             temperature=0.0,
         )
