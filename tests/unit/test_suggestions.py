@@ -153,9 +153,11 @@ def test_suggest_refined_query_text_separates_rejected_from_flagged():
 
 
 def test_suggestions_reject_non_openai_client():
+    # Use rejected + evidence so the call reaches the LLM client (confirmed+no
+    # evidence returns "" early without touching the client).
     with pytest.raises(TypeError):
         suggest_justification_text(
-            "c", "Cam", "confirmed", None, None, llm_client=object()
+            "c", "Cam", "rejected", "some evidence text", None, llm_client=object()
         )
 
 

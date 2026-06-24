@@ -83,7 +83,14 @@ def suggest_justification_text(
     when = str(meta.get("clock_label") or "the moment")
     where = str(meta.get("place_label") or "the scene")
     score = meta.get("match_score")
-    evidence = (evidence_text or "").strip() or "(no retrieved text for this angle)"
+    evidence = (evidence_text or "").strip()
+
+    # No evidence text + confirmed verdict → skip the LLM; a blank textarea is
+    # better than a generated "no evidence" message that contradicts the user.
+    if not evidence and (verdict or "").lower() == "confirmed":
+        return ""
+
+    evidence = evidence or "(no retrieved text for this angle)"
 
     verdict_lower = (verdict or "").lower()
     if verdict_lower == "confirmed":
