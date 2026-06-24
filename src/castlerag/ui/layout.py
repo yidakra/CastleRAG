@@ -68,7 +68,7 @@ def _top_bar(mode: str, cfg: Optional[object] = None) -> dmc.Group:
     if cfg is not None:
         ds = getattr(cfg, "dataset", None)
         days: list = getattr(ds, "days", [1]) if ds else [1]
-        scope: str = getattr(ds, "camera_scope", "ego") if ds else "ego"
+        scope: str = getattr(ds, "camera_scope", "ego") if ds else "ego"  # noqa: F841
         ego_cams: list = getattr(ds, "ego_cameras", []) if ds else []
         exo_cams: list = getattr(ds, "exo_cameras", []) if ds else []
         n_cams = len(ego_cams) + len(exo_cams)

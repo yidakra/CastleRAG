@@ -173,7 +173,6 @@ def suggest_refined_query_text(
             flagged.append(camera_id)
         elif state in _REJECTED_STATES:
             rejected.append(camera_id)
-    verdict_block = "\n".join(lines) if lines else "- (no verdicts)"
     confirmed_block = ", ".join(confirmed) if confirmed else "none"
     flagged_block = ", ".join(flagged) if flagged else "none"
     rejected_block = ", ".join(rejected) if rejected else "none"

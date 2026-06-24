@@ -810,7 +810,9 @@ class RagEngine:
         return refs
 
 
-def _format_review_context(reviews: Optional[Dict[str, Dict[str, str]]]) -> Optional[str]:
+def _format_review_context(
+    reviews: Optional[Dict[str, Dict[str, str]]],
+) -> Optional[str]:
     """Format per-camera review verdicts into a generation context block.
 
     Only includes cameras that have been reviewed (not pending). The result is

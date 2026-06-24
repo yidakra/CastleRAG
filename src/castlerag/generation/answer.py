@@ -158,7 +158,9 @@ def _b64_frame(path: str) -> Optional[str]:
         return None
 
 
-def _gather_frame_paths(evidence_rows: List[RetrievalHit], max_frames: int = 8) -> List[str]:
+def _gather_frame_paths(
+    evidence_rows: List[RetrievalHit], max_frames: int = 8
+) -> List[str]:
     """Collect deduped frame paths from evidence rows, capped at max_frames."""
     paths: List[str] = []
     seen: set = set()
@@ -202,7 +204,10 @@ def build_messages(
         user_content: Any = [{"type": "text", "text": prompt}]
         for b64 in encoded:
             user_content.append(
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                }
             )
     else:
         user_content = prompt
