@@ -514,6 +514,12 @@ def _call_generation_llm_with_model(
 # Matches the MCQ sentinel anywhere (the strict line-anchored _FINAL_ANSWER_RE
 # misses it when the model writes it inline, e.g. "...answer is: FINAL_ANSWER: c").
 _FINAL_ANSWER_ANYWHERE_RE = re.compile(r"(?is)FINAL_ANSWER:\s*[a-z/]+\b\.?")
+# Inline evidence citations the MCQ/freeform prompt instructs the LLM to write.
+# These are meaningless in the UI (the videos are already shown) and dcc.Markdown
+# renders bare [text] as reference links that go nowhere.
+_CITATION_RE = re.compile(
+    r"\[(?:camera=[^\]]*|aux=[^\]]*)\](?:\([^)]*\))?"
+)
 # A trailing "Thus, the correct answer is:" clause left dangling once the
 # sentinel it pointed at is removed.
 _DANGLING_SCAFFOLD_RE = re.compile(
@@ -528,9 +534,9 @@ multiple-choice question. Use ONLY the supplied evidence.
 Rules:
 - Open with a direct, specific answer in one sentence, then at most one sentence
   of support.
-- Cite at least one evidence item for every factual claim, as
-  [camera={camera_id} time={day} {start}-{end}] or [aux={source_type} id={record_id}].
-- Ground every claim in the cited evidence, never in outside knowledge.
+- Ground every claim in the evidence, never in outside knowledge.
+- Do NOT include citations, links, or bracket references (no [camera=...], no
+  [aux=...], no markdown links). Write plain prose only.
 - If the evidence does not actually answer the question, or is conflicting or
   insufficient, say so plainly — do NOT invent an answer.
 - Never output a letter choice, an "Option A/B/C/D", or a "FINAL_ANSWER:" line.
@@ -565,6 +571,14 @@ def clean_answer_text(raw_text: str) -> str:
         return ""
     text = _FINAL_ANSWER_ANYWHERE_RE.sub("", raw_text).rstrip()
     text = _DANGLING_SCAFFOLD_RE.sub("", text).rstrip()
+    # Strip evidence citations ([camera=...] / [aux=...]) — they render as broken
+    # links in the UI and the videos are shown in the evidence viewer anyway.
+    text = _CITATION_RE.sub("", text)
+    # Clean up dangling conjunctions/prepositions left before punctuation.
+    text = re.sub(r"\b(?:and|or|from|in|at|by|of)\s+([.,;])", r"\1", text)
+    # Collapse multiple spaces and tidy " ." → ".".
+    text = re.sub(r" +([.,;])", r"\1", text)
+    text = re.sub(r"  +", " ", text)
     return text.strip()
 
 
