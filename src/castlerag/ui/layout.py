@@ -71,7 +71,7 @@ def _top_bar(mode: str, cfg: Optional[object] = None) -> dmc.Group:
         scope: str = getattr(ds, "camera_scope", "ego") if ds else "ego"
         ego_cams: list = getattr(ds, "ego_cameras", []) if ds else []
         exo_cams: list = getattr(ds, "exo_cameras", []) if ds else []
-        n_cams = len(ego_cams) + (len(exo_cams) if scope == "all" else 0)
+        n_cams = len(ego_cams) + len(exo_cams)
         day_label = f"Day {days[0]}" if len(days) == 1 else f"Days {days[0]}–{days[-1]}"
         cam_label = f"{n_cams} cams"
     else:
