@@ -27,17 +27,7 @@ from castlerag.ui.figures import camera_match_figure, empty_figure
 from castlerag.ui.youtube import YouTubeMirror
 
 _MAX_ITERATIONS = 5
-_SUPPORT_LABEL = {
-    "unsupported": "Unsupported",
-    "partial": "Partial support",
-    "supported": "Supported",
-}
-# Mantine theme colors for each support level (badges, etc.).
-_SUPPORT_COLOR = {
-    "unsupported": "red",
-    "partial": "yellow",
-    "supported": "green",
-}
+
 _REVIEW_ACTION_STATE = {
     "confirm": "confirmed",
     "refine": "flagged",
@@ -270,9 +260,7 @@ def _render_moment(
 def _render_group(
     group: Dict[str, object], focus: Dict[str, object], order: int = 0
 ) -> dmc.Card:
-    """Render one query group (question, answer, claim, ranked moments)."""
-    claim = group["claim"]  # type: ignore[index]
-    support = str(claim["support"])
+    """Render one query group (question, answer, ranked moments)."""
     focus_gid = focus.get("group_id")
     focus_mid = focus.get("moment_id")
 
@@ -325,22 +313,6 @@ def _render_group(
             ),
             dmc.Text("Answer", size="xs", c="dimmed", mt="sm"),
             dcc.Markdown(str(group["answer_text"]), className="answer-text"),
-            dmc.Paper(
-                className="claim-block",
-                withBorder=True,
-                radius="sm",
-                p="sm",
-                mt="sm",
-                children=[
-                    dmc.Text("Claim under review", size="xs", c="dimmed"),
-                    dmc.Text(str(claim["text"]), mb="xs"),
-                    dmc.Badge(
-                        _SUPPORT_LABEL.get(support, support),
-                        variant="dot",
-                        color=_SUPPORT_COLOR.get(support, "gray"),
-                    ),
-                ],
-            ),
             dmc.Text("Top evidence moments", size="xs", fw=600, mt="sm", mb="xs"),
             dmc.Stack(moments, gap="xs", className="moment-list"),
         ],
@@ -861,7 +833,7 @@ def register_callbacks(
         new_focus = {"group_id": group_id, "moment_id": moment["moment_id"]}
         new_review = _pending_review(moment)
         iteration_store = {
-            "claim": group["claim"]["text"],  # type: ignore[index]
+            "claim": group["answer_text"],  # type: ignore[index]
             "iteration": 1,
             "next_seq": seq + 1,
         }
