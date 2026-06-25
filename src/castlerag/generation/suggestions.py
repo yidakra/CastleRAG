@@ -83,20 +83,34 @@ def suggest_justification_text(
     when = str(meta.get("clock_label") or "the moment")
     where = str(meta.get("place_label") or "the scene")
     score = meta.get("match_score")
+    has_match = isinstance(score, (int, float)) and float(score) > 0.0
     evidence = (evidence_text or "").strip()
-
-    # No evidence text + confirmed verdict → skip the LLM; a blank textarea is
-    # better than a generated "no evidence" message that contradicts the user.
-    if not evidence and (verdict or "").lower() == "confirmed":
-        return ""
-
-    evidence = evidence or "(no retrieved text for this angle)"
-
     verdict_lower = (verdict or "").lower()
+
     # An ignored angle was deliberately set aside; no justification is needed and
     # the generic "flagged as inconclusive" fall-through would contradict that.
     if verdict_lower == "ignored":
         return ""
+
+    # Reconcile "no retrieved text" with the camera's match. A retrieved camera
+    # with no transcript/OCR is a VISUAL match — its evidence is the frame, not
+    # text — so the justifier must not call it "no evidence".
+    visual_only = False
+    if not evidence:
+        # Confirmed + no text: a blank textarea beats a generated "no evidence"
+        # message that contradicts the reviewer's own call.
+        if verdict_lower == "confirmed":
+            return ""
+        if has_match:
+            evidence = (
+                "no transcript or OCR text was retrieved, but this camera is a "
+                "visual match for the scene — the supporting evidence is the "
+                "video frame itself"
+            )
+            visual_only = True
+        else:
+            evidence = "(no retrieved text for this angle)"
+
     if verdict_lower == "confirmed":
         instruction = (
             "The reviewer has CONFIRMED this camera angle. "
@@ -115,6 +129,13 @@ def suggest_justification_text(
             "The reviewer has FLAGGED this camera angle as inconclusive. "
             "Write one sentence (max ~25 words) explaining what makes this angle "
             "ambiguous or unclear."
+        )
+
+    if visual_only:
+        instruction += (
+            " This camera has no transcript text but IS a visual match for the "
+            "scene; base the sentence on that visual match and the reviewer's "
+            "verdict. Do NOT claim there is no evidence or no visual evidence."
         )
 
     system = (
@@ -144,14 +165,29 @@ def suggest_justification_text(
         temperature=0.3,
         timeout=timeout,
     ).strip()
-    # Discard "no evidence" hedges generated for confirmed verdicts — the reviewer
-    # made their call; a contradictory auto-draft is worse than no draft.
-    if verdict_lower == "confirmed":
-        lower = result.lower()
-        if any(p in lower for p in ("no text retrieved", "no evidence retrieved",
-                                     "no evidence from this camera",
-                                     "no retrieved text")):
+    # Catch "no evidence" hedges that contradict the reviewer or a real visual
+    # match. For confirmed, a blank box beats a contradictory draft; for a
+    # flagged/rejected visual-only match, swap in a verdict-appropriate sentence
+    # so the best camera never reads as "no visual evidence retrieved".
+    lowered = result.lower()
+    no_ev = any(
+        p in lowered
+        for p in (
+            "no text retrieved", "no evidence retrieved",
+            "no evidence from this camera", "no retrieved text",
+            "no visual evidence", "no evidence",
+        )
+    )
+    if no_ev:
+        if verdict_lower == "confirmed":
             return ""
+        if visual_only:
+            if verdict_lower == "rejected":
+                return f"{camera_id}'s view does not clearly support the claim."
+            return (
+                f"{camera_id} is a visual match for the scene, but the frame "
+                "alone is not fully conclusive — a clearer angle would help."
+            )
     return result
 
 

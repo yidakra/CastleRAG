@@ -101,6 +101,43 @@ def test_suggest_justification_text_ignored_returns_empty():
     assert client.calls == []  # short-circuited before reaching the client
 
 
+def test_flagged_visual_match_no_text_is_not_called_no_evidence():
+    # The best camera (high score) often has NO transcript/OCR — only a visual
+    # match. A flagged verdict must not draft "no visual evidence retrieved"; the
+    # prompt frames it as a visual match and the hedge is swapped out as a guard.
+    client = FakeClient("No visual evidence retrieved from this camera.")
+    out = suggest_justification_text(
+        claim="What instrument did Cathal teach Allie?",
+        camera_id="Cathal",
+        verdict="flagged",
+        evidence_text=None,  # visual hit: no transcript text
+        meta={"clock_label": "11:33", "place_label": "Scene", "match_score": 1.0},
+        llm_client=client,
+        model="m",
+    )
+    assert "no visual evidence" not in out.lower()
+    assert "no evidence" not in out.lower()
+    assert "Cathal" in out and "visual match" in out.lower()
+    # The model was told it IS a visual match and not to deny evidence.
+    system = client.calls[0]["messages"][0]["content"].lower()
+    assert "visual match" in system and "do not claim there is no evidence" in system
+
+
+def test_flagged_visual_match_keeps_a_good_llm_draft():
+    # When the model writes a sensible visual-match sentence, it's kept as-is.
+    client = FakeClient("Cathal's view of the keyboard is partly occluded by Allie.")
+    out = suggest_justification_text(
+        claim="What instrument did Cathal teach Allie?",
+        camera_id="Cathal",
+        verdict="flagged",
+        evidence_text=None,
+        meta={"match_score": 1.0},
+        llm_client=client,
+        model="m",
+    )
+    assert out == "Cathal's view of the keyboard is partly occluded by Allie."
+
+
 def test_suggest_refined_query_text_includes_weak_cameras():
     client = FakeClient("Re-examine the doorway handoff with a clearer Luca angle.")
     reviews = {
