@@ -29,9 +29,21 @@ body {
 }
 
 .app-root {
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 18px 20px 28px;
+    /* Full-window app shell: exactly one viewport tall, left-aligned, never
+       scrolls itself. No max-width + margin:auto centering (which can shove
+       content sideways when the page is wider than the viewport). The top bar
+       takes its natural height; the body flexes to fill the rest, and each
+       column scrolls internally — so the thread's ask bar is always on screen
+       regardless of the top bar's height. */
+    height: 100vh;   /* fallback for older engines */
+    height: 100dvh;  /* actual visible viewport — accounts for browser UI bars */
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 18px 28px 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 /* ---- top bar ---- */
@@ -54,12 +66,14 @@ body {
 
 /* ---- two-column body (split bar resizes the left column) ---- */
 .app-body {
+    flex: 1 1 auto;
+    min-height: 0;   /* let the columns shrink and scroll inside the shell */
     display: grid;
     /* left width is a CSS var so assets/splitter.js can drag it; middle track is
        the gutter; right takes the rest. */
     grid-template-columns: var(--thread-w, 344px) 10px minmax(0, 1fr);
     gap: 6px;
-    align-items: start;
+    align-items: stretch;   /* both columns fill the shell's height */
 }
 
 /* ---- draggable splitter ---- */
@@ -91,8 +105,8 @@ body {
 
 /* ---- left: thread column ---- */
 .thread-col {
-    height: calc(100vh - 120px);
-    max-height: calc(100vh - 120px);
+    height: 100%;       /* fill the stretched grid row (set by the shell) */
+    min-height: 0;
     display: flex;
     flex-direction: column;
     background: #fcfcfd;
@@ -220,6 +234,8 @@ body {
     box-shadow: var(--shadow);
     padding: 16px;
     min-width: 440px;
+    min-height: 0;        /* allow it to shrink within the shell… */
+    overflow-y: auto;     /* …and scroll its own content instead of the page */
 }
 
 .camera-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
