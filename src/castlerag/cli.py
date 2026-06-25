@@ -687,10 +687,29 @@ def eval_cmd(
     console.print(f"  submission written to [cyan]{sub_path}[/cyan]")
 
     if wandb or cfg.wandb.enabled:
+        import json
+
+        from castlerag.eval.io import compute_diversity_metrics, support_breakdown
         from castlerag.eval.wandb_logger import WandbLogger
 
+        # The guess/supported split is derivable from questions + predictions
+        # alone; diversity needs the evidence traces, which the answer step
+        # writes next to the predictions — log it too when that file is present.
+        support_split = support_breakdown(questions, predictions, answers_path)
+        diversity = None
+        traces_file = predictions_path.parent / "evidence_traces.jsonl"
+        if traces_file.exists():
+            traces = [
+                json.loads(line)
+                for line in traces_file.read_text().splitlines()
+                if line.strip()
+            ]
+            diversity = compute_diversity_metrics(traces)
+
         wb = WandbLogger(cfg, n_questions=len(questions))
-        wb.log_summary(accuracy, diversity=None, n_questions=len(questions))
+        wb.log_summary(
+            accuracy, diversity, len(questions), support_split=support_split
+        )
         wb.log_artifacts([sub_path, predictions_path])
         logged = wb.active
         wb.finish()

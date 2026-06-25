@@ -75,6 +75,13 @@ export VLLM_BASE_URL=http://localhost:8201/v1
 OUTDIR="${SC}/castle_outputs/eval_ui_demo_${SLURM_JOB_ID}"
 mkdir -p "${OUTDIR}"
 
-castlerag answer "${QFILE}" --config "${CONF}" --out "${OUTDIR}/predictions.json"
+# Record the W&B run offline — Snellius compute nodes have no internet, so online
+# logging would fail mid-job. The answer step's run carries accuracy, the
+# per-question table, diversity, and the guess/supported split; sync it afterward
+# from a login node (which does have internet) with the command echoed below.
+export WANDB_MODE=offline WANDB_DIR="${OUTDIR}"
+castlerag answer "${QFILE}" --config "${CONF}" --out "${OUTDIR}/predictions.json" --wandb
 castlerag eval "${QFILE}" "${OUTDIR}/predictions.json" --config "${CONF}"
 echo "[eval] DONE — predictions at ${OUTDIR}/predictions.json"
+echo "[eval] W&B run recorded offline. Sync from a login node with:"
+echo "        wandb sync ${OUTDIR}/wandb/latest-run"

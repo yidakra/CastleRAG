@@ -156,6 +156,7 @@ class WandbLogger:
         accuracy: Optional[float],
         diversity: Optional[Dict[str, Any]],
         n_questions: int,
+        support_split: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not self._active:
             return
@@ -167,6 +168,20 @@ class WandbLogger:
             summary["accuracy"] = accuracy
         for k, v in (diversity or {}).items():
             summary[f"diversity/{k}"] = v
+        if support_split:
+            # Flatten the evidence-backed vs guessed split into scalar summary
+            # keys so the guess rate and per-subset accuracy are first-class
+            # metrics in the run (not buried in an artifact).
+            if support_split.get("unsupported_rate") is not None:
+                summary["support/unsupported_rate"] = support_split["unsupported_rate"]
+            if support_split.get("num_unsupported") is not None:
+                summary["support/num_unsupported"] = support_split["num_unsupported"]
+            sup = support_split.get("supported") or {}
+            guess = support_split.get("unsupported") or {}
+            if sup.get("accuracy") is not None:
+                summary["support/supported_accuracy"] = sup["accuracy"]
+            if guess.get("accuracy") is not None:
+                summary["support/guessed_accuracy"] = guess["accuracy"]
         for k, v in summary.items():
             # wandb's summary encoder builds dotted paths and concatenates each
             # nested key onto the path as a string, so a nested dict with

@@ -367,7 +367,7 @@ def run_eval(
     )
 
     if wb is not None:
-        wb.log_summary(accuracy, diversity, len(selected))
+        wb.log_summary(accuracy, diversity, len(selected), support_split=support_split)
         wb.log_artifacts(
             [outputs.predictions, outputs.submissions, outputs.evidence_traces]
         )
