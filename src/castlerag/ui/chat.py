@@ -91,7 +91,7 @@ def _corroborating_clause(moment: "EvidenceMoment") -> str:
         cite_marker(moment.moment_id, cam.camera_id, moment.clock_label)
         for cam in others
     )
-    return f" Corroborating angles (same moment, other cameras): {markers}."
+    return f" Corroborating angles: {markers}."
 
 
 class SupportLevel(str, Enum):
