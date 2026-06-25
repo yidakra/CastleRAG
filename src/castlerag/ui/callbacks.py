@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import dash_mantine_components as dmc
 from dash import ALL, Input, Output, State, ctx, dcc, html
@@ -336,6 +336,23 @@ def _render_moment(
     )
 
 
+# Answer-confidence badge keyed by the claim's support level. Mirrors the
+# evidence-dot palette (green / amber / red) so a glance tells the reviewer how
+# strongly the surfaced evidence backs the answer — "Low confidence" is the
+# low-support flag the prediction's is_supported signal was always meant to show.
+_SUPPORT_BADGE: Dict[str, Tuple[str, str]] = {
+    "supported": ("Well supported", "green"),
+    "partial": ("Partial support", "yellow"),
+    "unsupported": ("Low confidence", "red"),
+}
+
+
+def _support_badge(support: str) -> dmc.Badge:
+    """Return a coloured confidence badge for a claim's support level."""
+    label, color = _SUPPORT_BADGE.get(support, _SUPPORT_BADGE["partial"])
+    return dmc.Badge(label, variant="light", color=color, size="xs")
+
+
 def _render_group(
     group: Dict[str, object], focus: Dict[str, object], order: int = 0
 ) -> dmc.Card:
@@ -396,7 +413,19 @@ def _render_group(
         children=[
             *header,
             dmc.Text(str(group["question"]), fw=600, className="question-text"),
-            dmc.Text("Answer", size="xs", c="dimmed", mt="sm"),
+            dmc.Group(
+                [
+                    dmc.Text("Answer", size="xs", c="dimmed"),
+                    _support_badge(
+                        str(
+                            (group.get("claim") or {}).get("support", "partial")  # type: ignore[union-attr]
+                        )
+                    ),
+                ],
+                gap="xs",
+                align="center",
+                mt="sm",
+            ),
             _render_answer(str(group["group_id"]), str(group["answer_text"])),
             *funnel_section,
             dmc.Text("Top evidence moments", size="xs", fw=600, mt="sm", mb="xs"),

@@ -26,6 +26,7 @@ from castlerag.eval.io import (
     compute_diversity_metrics,
     export_submission,
     select_questions,
+    support_breakdown,
     write_evidence_traces,
     write_predictions,
 )
@@ -73,6 +74,10 @@ class EvalRunResult:
     # callers display ``n_correct/n_graded`` rather than guessing a denominator.
     n_correct: Optional[int] = None
     n_graded: Optional[int] = None
+    # Evidence-backed vs unsupported-guess split (see io.support_breakdown):
+    # unsupported rate plus per-subset accuracy, for retrieval-vs-reasoning
+    # error analysis. Populated on every run; accuracy fields need ground truth.
+    support_split: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -344,12 +349,15 @@ def run_eval(
         n_correct, n_graded = accuracy_breakdown(selected, predictions, answers_path)
         accuracy = n_correct / n_graded if n_graded > 0 else 0.0
 
+    support_split = support_breakdown(selected, predictions, answers_path)
+
     outputs.metrics.parent.mkdir(parents=True, exist_ok=True)
     outputs.metrics.write_text(
         json.dumps(
             {
                 "accuracy": accuracy,
                 "num_questions": len(selected),
+                "support_split": support_split,
                 "diversity": diversity,
                 "predictions_path": str(outputs.predictions),
                 "submission_path": str(outputs.submissions),
@@ -373,6 +381,7 @@ def run_eval(
         diversity=diversity,
         n_correct=n_correct,
         n_graded=n_graded,
+        support_split=support_split,
     )
 
 

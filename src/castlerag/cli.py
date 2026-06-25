@@ -73,6 +73,32 @@ def _vllm_base_url() -> Optional[str]:
     return os.getenv("VLLM_BASE_URL")
 
 
+def _print_support_split(split: Optional[dict]) -> None:
+    """Print the unsupported-guess rate and supported-vs-guessed accuracy split."""
+    if not split or not split.get("num_predictions"):
+        return
+    n_unsup = split["num_unsupported"]
+    total = split["num_predictions"]
+    rate = split.get("unsupported_rate") or 0.0
+    console.print(
+        f"  guessed   : {n_unsup}/{total} unsupported "
+        f"([yellow]{rate:.0%}[/yellow] no reranker backing)"
+    )
+    sup, guess = split.get("supported", {}), split.get("unsupported", {})
+    if sup.get("accuracy") is not None or guess.get("accuracy") is not None:
+        def _cell(d: dict) -> str:
+            acc = d.get("accuracy")
+            return (
+                f"{acc:.2f} ({d['correct']}/{d['graded']})"
+                if acc is not None
+                else "n/a"
+            )
+
+        console.print(
+            f"  acc split : supported {_cell(sup)} · guessed {_cell(guess)}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -606,6 +632,7 @@ def answer(
             f"  accuracy  : [green]{result.accuracy:.4f}[/green]"
             f"  ({result.n_correct}/{result.n_graded})"
         )
+    _print_support_split(result.support_split)
 
 
 @app.command(name="eval")
@@ -713,6 +740,7 @@ def smoke_test(
             f"  accuracy  : [green]{result.accuracy:.4f}[/green]"
             f"  ({result.n_correct}/{result.n_graded})"
         )
+    _print_support_split(result.support_split)
 
 
 @app.command()

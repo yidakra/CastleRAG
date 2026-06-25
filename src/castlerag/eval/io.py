@@ -175,6 +175,61 @@ def accuracy_breakdown(
     return correct, graded
 
 
+def support_breakdown(
+    questions: Dict[str, EvalQuestion],
+    predictions: Dict[str, Prediction],
+    answers_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Split predictions into evidence-backed vs unsupported guesses.
+
+    ``is_supported`` is False when an answer has no retrieval/reranker backing
+    (no evidence retrieved, or the reranker credited no choice). Splitting
+    accuracy by that flag separates retrieval failures (unsupported guesses)
+    from reasoning failures (supported but wrong), and the unsupported rate is a
+    cheap health signal on its own. Per-subset accuracy is None without ground
+    truth (``unsupported_rate`` is always available).
+    """
+    ext: Dict[str, str] = (
+        json.loads(answers_path.read_text()) if answers_path is not None else {}
+    )
+    total = len(predictions)
+    num_unsupported = sum(1 for p in predictions.values() if not p.is_supported)
+    sup_correct = sup_graded = guess_correct = guess_graded = 0
+    for qid, q in questions.items():
+        truth = ext.get(qid) or q.ground_truth
+        if truth is None:
+            continue
+        pred = predictions.get(qid)
+        if pred is None:
+            continue
+        ok = pred.predicted_answer == truth
+        if pred.is_supported:
+            sup_graded += 1
+            sup_correct += int(ok)
+        else:
+            guess_graded += 1
+            guess_correct += int(ok)
+
+    def _acc(correct: int, graded: int) -> Optional[float]:
+        return (correct / graded) if graded > 0 else None
+
+    return {
+        "num_predictions": total,
+        "num_unsupported": num_unsupported,
+        "unsupported_rate": (num_unsupported / total) if total > 0 else None,
+        "supported": {
+            "graded": sup_graded,
+            "correct": sup_correct,
+            "accuracy": _acc(sup_correct, sup_graded),
+        },
+        "unsupported": {
+            "graded": guess_graded,
+            "correct": guess_correct,
+            "accuracy": _acc(guess_correct, guess_graded),
+        },
+    }
+
+
 def compute_accuracy(
     questions: Dict[str, EvalQuestion],
     predictions: Dict[str, Prediction],
