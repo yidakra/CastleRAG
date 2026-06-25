@@ -71,6 +71,13 @@ class EmbeddingConfig(BaseModel):
     cache_dir: str = "data/derived/embeddings"
     vllm_tensor_parallel: int = 1
     vllm_gpu_memory_utilization: float = 0.90
+    # Base URL of the OmniEmbed embeddings server. Set this in two-endpoint
+    # deployments (UI / eval / answer) where embeddings are served separately
+    # from generation — e.g. OmniEmbed on :8200 and the Qwen3-VL chat model on
+    # :8201 — so query embeddings never get POSTed to the generation server
+    # (which 404s). When None, the runtime falls back to OMNIEMBED_BASE_URL then
+    # VLLM_BASE_URL, preserving single-endpoint setups. See issue #54.
+    base_url: Optional[str] = None
 
 
 class QdrantConfig(BaseModel):
@@ -103,10 +110,23 @@ class GenerationConfig(BaseModel):
     model: str = "Qwen/Qwen3-VL-8B-Instruct"
     ablation_model: str = "OpenGVLab/InternVL3-8B"
     backend: Literal["vllm", "transformers"] = "vllm"
-    max_new_tokens: int = 512
+    # The MCQ generator answers first (FINAL_ANSWER line) then justifies; this
+    # budget must cover that justification. 512 truncated long chain-of-thought
+    # before the answer line was ever emitted, so 13/19 questions were graded on
+    # a fallback guess instead of the model's real answer.
+    max_new_tokens: int = 1024
     temperature: float = 0.0
     vllm_tensor_parallel: int = 1
     vllm_gpu_memory_utilization: float = 0.90
+    # Multimodal prompt budgeting. Frames are downscaled to `frame_max_pixels` on
+    # their longest edge before encoding, then packed into the generation prompt
+    # only while the running token estimate stays under `prompt_token_budget`
+    # (which must leave headroom below the served --max-model-len for the
+    # `max_new_tokens` completion). Without this, full-resolution frames produced
+    # 66k-72k-token prompts that the server rejected (>49k context).
+    max_frames: int = 8
+    frame_max_pixels: int = 768
+    prompt_token_budget: int = 40000
     # When True, generate_answer presents the four answer choices in a
     # deterministic per-question permutation (sha1(question_id)) and maps the
     # model's predicted letter back to the original letter.  Counteracts the
@@ -162,6 +182,22 @@ class RoutingConfig(BaseModel):
     model: str = "Qwen/Qwen3-VL-8B-Instruct"
 
 
+class WandbConfig(BaseModel):
+    enabled: bool = False
+    project: str = "castlerag"
+    entity: str = ""
+    run_name: str = ""
+
+
+class UIConfig(BaseModel):
+    # Controls which score is shown in the dashboard's per-camera bar chart.
+    # rrf_normalized: RRF score normalised to [0,1] relative to the top moment.
+    # cosine:         Raw cosine similarity from Qdrant before RRF (always in [0,1]).
+    # reranker:       VLM-assessed relevance from the reranker, normalised to [0,1].
+    #                 Falls back to rrf_normalized when the reranker did not run.
+    score_mode: Literal["rrf_normalized", "cosine", "reranker"] = "rrf_normalized"
+
+
 class CastleRAGConfig(BaseModel):
     dataset: DatasetConfig = Field(default_factory=DatasetConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
@@ -172,6 +208,8 @@ class CastleRAGConfig(BaseModel):
     reranking: RerankingConfig = Field(default_factory=RerankingConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
+    wandb: WandbConfig = Field(default_factory=WandbConfig)
     lora: LoRAConfig = Field(default_factory=LoRAConfig)
     slurm: SlurmConfig = Field(default_factory=SlurmConfig)
     version: str = "0.1.0"

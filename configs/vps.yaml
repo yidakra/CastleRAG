@@ -1,0 +1,32 @@
+# VPS deployment — deep-merged on configs/base.yaml.
+# Single-host live demo: Qdrant (docker container) + OmniEmbed (:8200) +
+# Qwen3-VL AWQ (:8201) all on this box; UI on :8050 reaches each via localhost.
+#
+# Index lives at /home/ubuntu/storage (bind-mounted into the Qdrant container).
+# The UI does NOT read local media files itself — it renders Plotly + transcript
+# text + YouTube embeds — but the runtime still loads the BM25 transcript index
+# (transcripts.pkl) at startup and discovers chunk artifacts on disk, so we
+# point the cache and chunks dirs at the existing /data/castle_derived tree.
+preprocessing:
+  chunks_dir: "/data/castle_derived/chunks"
+embedding:
+  cache_dir: "/data/castle_derived/embeddings"
+  # OmniEmbed server runs on :8200 here. Declaring it keeps query embeddings
+  # off the generation server on a query-cache miss.
+  base_url: "http://localhost:8200/v1"
+qdrant:
+  host: "localhost"
+  port: 6333
+  collection: "castle_multimodal_v1"
+retrieval:
+  # Snellius default was 50 rows. On A2 we pair this with --max-model-len 8192 on
+  # the AWQ vLLM (the AWQ kernels add overhead vs fp16 and KV cache eats the rest
+  # of 16 GB), so each row's evidence text + caption + scene_graph must fit. 20
+  # gives a comfortable margin for the rerank prompt.
+  max_evidence_rows: 20
+generation:
+  # Served-name on the vLLM endpoint maps cyankiwi/Qwen3-VL-8B-Instruct-AWQ-4bit
+  # back to this canonical name (see scripts/vps_ui.sh --served-model-name).
+  model: "Qwen/Qwen3-VL-8B-Instruct"
+reranking:
+  model: "Qwen/Qwen3-VL-8B-Instruct"

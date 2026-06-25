@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import List
+from typing import List, Optional
 
 from castlerag.routing.question_router import QuestionRoute
 from castlerag.schemas import EvidencePack, RetrievalHit
@@ -20,8 +20,6 @@ def expand_candidates(
     Each pack includes sampled frame paths, linked transcript windows,
     event summaries, OCR spans, and auxiliary notes for the reranker.
     """
-    del frames_per_candidate
-
     primary_hits = [
         hit
         for hit in hits
@@ -35,7 +33,7 @@ def expand_candidates(
     for primary in primary_hits:
         if len(packs) >= max_candidate_videos:
             break
-        bundle = _bundle_rows(primary, hits)
+        bundle = _bundle_rows(primary, hits, route)
         evidence_rows = []
         seen_local: set[str] = set()
         for row in bundle:
@@ -57,6 +55,9 @@ def expand_candidates(
                 ocr_spans=_collect_ocr(evidence_rows),
                 frame_descriptions=_collect_frame_descriptions(evidence_rows),
                 auxiliary_notes=_collect_aux_notes(evidence_rows),
+                sampled_frame_paths=_collect_frame_paths(
+                    evidence_rows, max_frames=frames_per_candidate
+                ),
             )
         )
 
@@ -74,20 +75,25 @@ def expand_candidates(
                 ocr_spans=_collect_ocr([primary]),
                 frame_descriptions=_collect_frame_descriptions([primary]),
                 auxiliary_notes=_collect_aux_notes([primary]),
+                sampled_frame_paths=_collect_frame_paths(
+                    [primary], max_frames=frames_per_candidate
+                ),
             )
         )
 
     return packs
 
 
-def _bundle_rows(primary: RetrievalHit, hits: List[RetrievalHit]) -> List[RetrievalHit]:
+def _bundle_rows(
+    primary: RetrievalHit, hits: List[RetrievalHit], route: QuestionRoute
+) -> List[RetrievalHit]:
     """Return hits that share context with or temporally overlap the primary hit."""
     rows: "OrderedDict[str, RetrievalHit]" = OrderedDict()
     rows[primary.record_id] = primary
     for hit in hits:
         if hit.record_id == primary.record_id:
             continue
-        if _same_context(primary, hit) or _overlaps(primary, hit):
+        if _same_context(primary, hit) or _overlaps(primary, hit, route=route):
             rows[hit.record_id] = hit
     return list(rows.values())
 
@@ -101,8 +107,20 @@ def _same_context(left: RetrievalHit, right: RetrievalHit) -> bool:
     )
 
 
-def _overlaps(left: RetrievalHit, right: RetrievalHit, slack_ms: int = 30_000) -> bool:
-    """Return True if the two hits' time spans overlap within the given slack window."""
+def _overlaps(
+    left: RetrievalHit,
+    right: RetrievalHit,
+    route: QuestionRoute = "mixed",
+    slack_ms: Optional[int] = None,
+) -> bool:
+    """Return True if the two hits' time spans overlap within the given slack window.
+
+    Temporal questions use a tighter window (10 s) to avoid bundling unrelated
+    micro-events that fall within the same 30-second span. All other routes use
+    20 s, reduced from the original 30 s to better isolate distinct moments.
+    """
+    if slack_ms is None:
+        slack_ms = 10_000 if route == "temporal" else 20_000
     if left.absolute_start is None or left.absolute_end is None:
         return False
     if right.absolute_start is None or right.absolute_end is None:
@@ -135,6 +153,24 @@ def _collect_frame_descriptions(rows: List[RetrievalHit]) -> List[str]:
         if row.source_type == "main_clip" and row.asset_path:
             values.append(f"clip asset: {row.asset_path}")
     return _unique_values(values)
+
+
+def _collect_frame_paths(
+    rows: List[RetrievalHit], max_frames: Optional[int] = None
+) -> List[str]:
+    """Return deduplicated sampled frame JPEG paths from all hits, capped at max_frames."""  # noqa: E501
+    if max_frames is not None and max_frames <= 0:
+        return []
+    paths: List[str] = []
+    seen: set = set()
+    for row in rows:
+        for p in row.sampled_frame_paths:
+            if p not in seen:
+                seen.add(p)
+                paths.append(p)
+                if max_frames is not None and len(paths) >= max_frames:
+                    return paths
+    return paths
 
 
 def _collect_aux_notes(rows: List[RetrievalHit]) -> List[str]:

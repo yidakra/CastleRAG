@@ -41,11 +41,15 @@ inference = [
     "vllm>=0.5",
     "accelerate>=0.30",
 ]
-# Dash dashboard (chat + YouTube embeds + Plotly analytics)
+# Dash dashboard (Dash Mantine Components + YouTube embeds + Plotly analytics)
 ui = [
     "dash>=2.16",
+    "dash-mantine-components>=2.0",
     "plotly>=5.20",
-    "pandas>=2.0",
+]
+# Experiment tracking (optional — gracefully skipped when not installed)
+tracking = [
+    "wandb>=0.17",
 ]
 
 [tool.hatch.build.targets.wheel]

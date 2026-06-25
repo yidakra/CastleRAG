@@ -4,7 +4,7 @@
 dataset:
   root: "/data/castle2024"
   hf_repo: "CASTLE-Dataset/CASTLE2024"
-  days: [1, 2, 3, 4]
+  days: [1]
   # 11 egocentric participant cameras — real CASTLE stream names
   ego_cameras:
     - "Allie"
@@ -97,6 +97,20 @@ outputs:
   evidence_traces: "outputs/evidence_traces.jsonl"
   submissions: "outputs/submissions.json"
   metrics: "outputs/metrics.json"
+
+ui:
+  # Score shown in the per-camera bar chart in the dashboard.
+  # rrf_normalized: RRF score normalised to [0,1] relative to the top moment.
+  # cosine:         Raw cosine similarity from Qdrant (always [0,1], most intuitive).
+  # reranker:       VLM-assessed relevance normalised to [0,1]; falls back to
+  #                 rrf_normalized when the reranker did not run (offline mode).
+  score_mode: "reranker"  # rrf_normalized | cosine | reranker
+
+wandb:
+  enabled: false          # set to true or pass --wandb to castlerag answer/eval
+  project: "castlerag"
+  entity: "foundationmodels"  # W&B team
+  run_name: ""            # auto-generated if blank
 
 # BLOCKED: do not enable until a CASTLE QA train/val split is explicitly found
 lora:

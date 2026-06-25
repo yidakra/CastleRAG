@@ -18,6 +18,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence
 
+from castlerag.frame_encoding import encode_frame, estimate_text_tokens
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import AnswerChoice, EvalQuestion, Prediction, RetrievalHit
 
@@ -61,11 +62,21 @@ _SYSTEM_PROMPT = """\
 You are CastleRAG's final answer generator for CASTLE multiple-choice questions.
 Target model contract: Qwen/Qwen3-VL-8B-Instruct served through vLLM.
 
+Output format (MANDATORY — answer first so it is never lost):
+- Your VERY FIRST line MUST be exactly one of, with a single letter:
+    FINAL_ANSWER: a
+    FINAL_ANSWER: b
+    FINAL_ANSWER: c
+    FINAL_ANSWER: d
+  Never substitute "abstain", "none", "insufficient", or any other token, and
+  always commit to a letter even when the evidence is weak.
+- After that line, give a brief justification (a few sentences) citing evidence.
+
 Rules:
 - Use only the provided evidence.
 - Prefer direct evidence over speculation.
 - If evidence is weak, say so briefly but still choose the most supported option.
-- Every factual claim used in the decision must cite at least one evidence item.
+- Every factual claim used in the justification must cite at least one evidence item.
 - Citations must use the format [camera={{camera_id}} time={{day}} {{start}}-{{end}}] \
 or [aux={{source_type}} id={{record_id}}].
 - Follow the route-specific instruction block exactly.
@@ -73,19 +84,10 @@ or [aux={{source_type}} id={{record_id}}].
 - Anti-confabulation rules are mandatory:
   - no_echo: do not quote the question, answer options, route hints,
     or prompt instructions as evidence.
-  - abstain: when no clip supports a claim, explicitly say the evidence
-    is insufficient and mark the rationale low-confidence — but you must
-    still commit to a letter; never write FINAL_ANSWER: abstain.
   - localise: every count, object-location, or spatial claim must cite
     a specific camera and timestamp.
   - ground: confidence must come from cited evidence,
     not from option plausibility or outside knowledge.
-- You MUST end with exactly one line, and the value MUST be a single letter:
-    FINAL_ANSWER: a
-    FINAL_ANSWER: b
-    FINAL_ANSWER: c
-    FINAL_ANSWER: d
-  Never substitute "abstain", "none", "insufficient", or any other token.
 """
 
 _USER_PROMPT_TEMPLATE = """\
@@ -145,26 +147,133 @@ def build_prompt(
     )
 
 
+def _gather_frame_paths(
+    evidence_rows: List[RetrievalHit], max_frames: int = 8
+) -> List[str]:
+    """Collect deduped frame paths from evidence rows, capped at max_frames."""
+    paths: List[str] = []
+    seen: set = set()
+    for row in evidence_rows:
+        for p in row.sampled_frame_paths:
+            if p not in seen:
+                seen.add(p)
+                paths.append(p)
+            if len(paths) >= max_frames:
+                return paths
+    return paths
+
+
+def _build_user_content(
+    prompt: str,
+    evidence_rows: List[RetrievalHit],
+    max_frames: int,
+    *,
+    frame_max_pixels: int = 768,
+    image_token_budget: Optional[int] = None,
+) -> Any:
+    """Return the user message content for a chat call.
+
+    Sampled frame JPEGs are downscaled to ``frame_max_pixels`` on their longest
+    edge, base64-encoded, and appended as image_url items alongside the text,
+    making the call multimodal; the call falls back to the plain prompt string
+    when no frames are present or files are missing.
+
+    Downscaling caps each frame to a small, known visual-token cost (full 4K
+    frames otherwise cost ~10k tokens each, blowing the model context). When
+    ``image_token_budget`` is given, frames are packed only while their estimated
+    visual tokens stay within it, guaranteeing the prompt fits the served
+    context — the failure that previously rejected 21/40 generation calls with
+    66k-72k-token prompts against a 49k limit.
+    """
+    remaining = image_token_budget
+    encoded: List[str] = []
+    if (remaining is None or remaining > 0) and max_frames > 0:
+        for path in _gather_frame_paths(evidence_rows, max_frames):
+            enc = encode_frame(path, max_pixels=frame_max_pixels)
+            if enc is None:
+                continue
+            b64, image_tokens = enc
+            if remaining is not None:
+                if image_tokens > remaining:
+                    # Adding this frame would exceed the budget; stop packing.
+                    break
+                remaining -= image_tokens
+            encoded.append(b64)
+    if not encoded:
+        return prompt
+    user_content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for b64 in encoded:
+        user_content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            }
+        )
+    return user_content
+
+
 def build_messages(
     question: EvalQuestion,
     hints: RouteHints,
     evidence_rows: List[RetrievalHit],
     support_priors: Dict[str, float],
     max_evidence_rows: int = 50,
-) -> List[Dict[str, str]]:
-    """Return the system+user message list for the generation LLM."""
+    max_frames: int = 8,
+    frame_max_pixels: int = 768,
+    prompt_token_budget: int = 40000,
+    reserved_output_tokens: int = 512,
+) -> List[Dict[str, Any]]:
+    """Return the system+user message list for the generation LLM.
+
+    Sampled frame JPEGs are downscaled, base64-encoded, and appended as image_url
+    items, making the call multimodal; the call falls back to plain text when no
+    frames are present or files are missing.
+
+    Frames and evidence text are packed under ``prompt_token_budget`` (which must
+    sit below the served ``--max-model-len`` with ``reserved_output_tokens`` of
+    headroom for the completion): evidence rows are trimmed if the text alone is
+    too large, then frames are added only while the running token estimate stays
+    within budget. This keeps prompts from overrunning the model context — the
+    failure that previously rejected 21/40 generation calls with 66k-72k-token
+    prompts against a 49k limit.
+    """
+    usable_budget = prompt_token_budget - reserved_output_tokens
+    system_tokens = estimate_text_tokens(_SYSTEM_PROMPT)
+
+    # Trim evidence rows from the tail until the text portion fits the budget,
+    # keeping at least the single strongest row so the prompt is never empty.
+    rows = list(evidence_rows[:max_evidence_rows])
+    prompt = build_prompt(
+        question=question,
+        hints=hints,
+        evidence_rows=rows,
+        support_priors=support_priors,
+        max_evidence_rows=max_evidence_rows,
+    )
+    while (
+        len(rows) > 1
+        and system_tokens + estimate_text_tokens(prompt) > usable_budget
+    ):
+        rows = rows[:-1]
+        prompt = build_prompt(
+            question=question,
+            hints=hints,
+            evidence_rows=rows,
+            support_priors=support_priors,
+            max_evidence_rows=max_evidence_rows,
+        )
+
+    image_budget = usable_budget - system_tokens - estimate_text_tokens(prompt)
+    user_content = _build_user_content(
+        prompt,
+        rows,
+        max_frames,
+        frame_max_pixels=frame_max_pixels,
+        image_token_budget=max(0, image_budget),
+    )
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": build_prompt(
-                question=question,
-                hints=hints,
-                evidence_rows=evidence_rows,
-                support_priors=support_priors,
-                max_evidence_rows=max_evidence_rows,
-            ),
-        },
+        {"role": "user", "content": user_content},
     ]
 
 
@@ -301,7 +410,9 @@ def _estimate_confidence(
     return round(max(0.0, min(confidence, 1.0)), 4)
 
 
-def _call_generation_llm(llm_client: Any, messages: List[Dict[str, str]]) -> str:
+def _call_generation_llm(
+    llm_client: Any, messages: List[Dict[str, str]], *, max_tokens: int = 512
+) -> str:
     """Dispatch a chat-completion request via the LLM client's available interface."""
     if hasattr(llm_client, "generate_from_messages"):
         return str(llm_client.generate_from_messages(messages))
@@ -309,7 +420,7 @@ def _call_generation_llm(llm_client: Any, messages: List[Dict[str, str]]) -> str
         response = llm_client.chat.completions.create(
             model="Qwen/Qwen3-VL-8B-Instruct",
             messages=messages,
-            max_tokens=512,
+            max_tokens=max_tokens,
             temperature=0.0,
         )
         if not response.choices:
@@ -372,6 +483,10 @@ def generate_answer(
     model: str = "Qwen/Qwen3-VL-8B-Instruct",
     max_evidence_rows: int = 50,
     shuffle_choices: bool = False,
+    max_frames: int = 8,
+    frame_max_pixels: int = 768,
+    prompt_token_budget: int = 40000,
+    max_new_tokens: int = 1024,
 ) -> Prediction:
     """Run grounded answer generation and return a normalized Prediction."""
     rows = evidence_rows[:max_evidence_rows]
@@ -401,20 +516,25 @@ def generate_answer(
         evidence_rows=rows,
         support_priors=prompt_priors,
         max_evidence_rows=max_evidence_rows,
+        max_frames=max_frames,
+        frame_max_pixels=frame_max_pixels,
+        prompt_token_budget=prompt_token_budget,
     )
-    raw_answer_text = _call_generation_llm_with_model(llm_client, messages, model=model)
+    raw_answer_text = _call_generation_llm_with_model(
+        llm_client, messages, model=model, max_tokens=max_new_tokens
+    )
     presented_answer = extract_answer(
         raw_answer_text, prompt_priors, question_id=question.question_id
     )
     predicted_answer: AnswerChoice = presented_to_original[presented_answer]  # type: ignore[assignment]
 
-    # When nothing supports any choice — no evidence retrieved, or the reranker
-    # credited no choice with support — a forced MCQ answer is just a guess, and
-    # the LLM reliably defaults to "a". Override it with a deterministic uniform
-    # pick so the guess is unbiased, and record that the answer is unsupported.
+    # ``is_supported`` is a recorded diagnostic only — it flags answers with no
+    # retrieval/reranker backing (no evidence, or the reranker credited no
+    # choice) so error analysis can separate retrieval failures from reasoning
+    # failures. It does NOT mutate the answer: extract_answer already routes
+    # missing/abstained answers through a deterministic fallback, so the model's
+    # explicit, evidence-grounded choice is always respected.
     is_supported = bool(rows) and max(support_priors.values(), default=0.0) > 0.0
-    if not is_supported:
-        predicted_answer = _fallback_answer({}, question_id=question.question_id)
 
     return Prediction(
         question_id=question.question_id,
@@ -438,6 +558,7 @@ def _call_generation_llm_with_model(
     messages: List[Dict[str, str]],
     *,
     model: str,
+    max_tokens: int = 512,
 ) -> str:
     """Dispatch a chat-completion for a specific model, falling back as needed."""
     if hasattr(llm_client, "generate_from_messages"):
@@ -446,10 +567,150 @@ def _call_generation_llm_with_model(
         response = llm_client.chat.completions.create(
             model=model,
             messages=messages,
-            max_tokens=512,
+            max_tokens=max_tokens,
             temperature=0.0,
         )
         if not response.choices:
             return ""
         return str(response.choices[0].message.content or "")
-    return _call_generation_llm(llm_client, messages)
+    return _call_generation_llm(llm_client, messages, max_tokens=max_tokens)
+
+
+# ---------------------------------------------------------------------------
+# Free-form (open-question) generation — for the UI, which asks open questions
+# rather than CASTLE MCQs. The MCQ generator above forces a `FINAL_ANSWER: x`
+# sentinel that is meaningless without real choices and leaks into the answer
+# the dashboard shows; this path answers the question directly instead.
+# ---------------------------------------------------------------------------
+
+# Matches the MCQ sentinel anywhere (the strict line-anchored _FINAL_ANSWER_RE
+# misses it when the model writes it inline, e.g. "...answer is: FINAL_ANSWER: c").
+_FINAL_ANSWER_ANYWHERE_RE = re.compile(r"(?is)FINAL_ANSWER:\s*[a-z/]+\b\.?")
+# Inline evidence citations the MCQ/freeform prompt instructs the LLM to write.
+# These are meaningless in the UI (the videos are already shown) and dcc.Markdown
+# renders bare [text] as reference links that go nowhere.
+_CITATION_RE = re.compile(
+    r"\[(?:camera=[^\]]*|aux=[^\]]*)\](?:\([^)]*\))?"
+)
+# A trailing "Thus, the correct answer is:" clause left dangling once the
+# sentinel it pointed at is removed.
+_DANGLING_SCAFFOLD_RE = re.compile(
+    r"(?is)(?:thus|therefore|hence|so)?,?\s*(?:the\s+)?"
+    r"(?:correct\s+|final\s+)?answer\s+is\s*[:\-]?\s*$"
+)
+
+_FREEFORM_SYSTEM_PROMPT = """\
+You are CastleRAG answering an OPEN question about the CASTLE recordings — not a
+multiple-choice question. Use ONLY the supplied evidence.
+
+Rules:
+- Open with a direct, specific answer in one sentence, then at most one sentence
+  of support.
+- Ground every claim in the evidence, never in outside knowledge.
+- Do NOT include citations, links, or bracket references (no [camera=...], no
+  [aux=...], no markdown links). Write plain prose only.
+- If the evidence does not actually answer the question, or is conflicting or
+  insufficient, say so plainly — do NOT invent an answer.
+- Never output a letter choice, an "Option A/B/C/D", or a "FINAL_ANSWER:" line.
+"""
+
+_FREEFORM_USER_TEMPLATE = """\
+Answer this open question about the CASTLE recordings using only the evidence.
+
+Question route:
+{route}
+
+Route-specific instructions:
+{route_block}
+
+Question:
+{question}
+
+Evidence:
+{evidence}{context_block}
+"""
+
+
+def clean_answer_text(raw_text: str) -> str:
+    """Strip the MCQ ``FINAL_ANSWER`` sentinel and any dangling scaffold clause.
+
+    The MCQ generator must end with ``FINAL_ANSWER: <letter>``; when that output
+    is shown verbatim for a free-form question it reads as nonsense (e.g.
+    "...the correct answer is: FINAL_ANSWER: c"). This removes the sentinel
+    wherever it appears and trims a now-orphaned "the answer is:" lead-in.
+    """
+    if not raw_text:
+        return ""
+    text = _FINAL_ANSWER_ANYWHERE_RE.sub("", raw_text).rstrip()
+    text = _DANGLING_SCAFFOLD_RE.sub("", text).rstrip()
+    # Strip evidence citations ([camera=...] / [aux=...]) — they render as broken
+    # links in the UI and the videos are shown in the evidence viewer anyway.
+    text = _CITATION_RE.sub("", text)
+    # Clean up dangling conjunctions/prepositions left before punctuation.
+    text = re.sub(r"\b(?:and|or|from|in|at|by|of)\s+([.,;])", r"\1", text)
+    # Collapse multiple spaces and tidy " ." → ".".
+    text = re.sub(r" +([.,;])", r"\1", text)
+    text = re.sub(r"  +", " ", text)
+    return text.strip()
+
+
+def generate_freeform_answer(
+    question: EvalQuestion,
+    hints: RouteHints,
+    evidence_rows: List[RetrievalHit],
+    llm_client: Any,
+    *,
+    model: str = "Qwen/Qwen3-VL-8B-Instruct",
+    max_evidence_rows: int = 50,
+    max_frames: int = 8,
+    frame_max_pixels: int = 768,
+    prompt_token_budget: int = 40000,
+    refinement_context: Optional[str] = None,
+) -> str:
+    """Answer an open question directly from evidence (no MCQ sentinel).
+
+    ``refinement_context`` — when set (refinement pass) — appends the
+    human reviewer's camera verdicts and justifications after the evidence
+    block, grounding the answer in human-validated signals.
+
+    Sampled frame JPEGs on the evidence rows are base64-encoded and attached
+    as image_url items (mirroring :func:`build_messages`), so static-visual
+    and mixed questions reach the Qwen3-VL model with the actual frame
+    evidence rather than text alone. Falls back to a plain-text message when
+    no frames are available.
+    """
+    rows = evidence_rows[:max_evidence_rows]
+    evidence_text = "\n\n".join(_enumerate_evidence_rows(rows)) or _MISSING_EVIDENCE_ROW
+    context_block = (
+        f"\n\nReviewer feedback on previous evidence (use as guidance only — "
+        f"do NOT cite timestamps from this block; only cite timestamps from "
+        f"the Evidence section above):\n{refinement_context}"
+        if refinement_context
+        else ""
+    )
+    user = _FREEFORM_USER_TEMPLATE.format(
+        route=hints.route,
+        route_block=_ROUTE_PROMPT_BLOCKS.get(hints.route, ""),
+        question=question.query,
+        evidence=evidence_text,
+        context_block=context_block,
+    )
+    image_budget = (
+        prompt_token_budget
+        - 512
+        - estimate_text_tokens(_FREEFORM_SYSTEM_PROMPT)
+        - estimate_text_tokens(user)
+    )
+    user_content = _build_user_content(
+        user,
+        rows,
+        max_frames,
+        frame_max_pixels=frame_max_pixels,
+        image_token_budget=max(0, image_budget),
+    )
+    messages = [
+        {"role": "system", "content": _FREEFORM_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+    raw = _call_generation_llm_with_model(llm_client, messages, model=model)
+    return clean_answer_text(raw)

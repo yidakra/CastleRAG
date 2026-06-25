@@ -245,6 +245,9 @@ class RouteHints:
     llm_key_entities: List[str] = field(default_factory=list)
     llm_focus_modalities: List[str] = field(default_factory=list)
     evidence_profile: Optional[RouteEvidenceProfile] = None
+    # Camera ids the UI reviewer rejected; hard-excluded from dense retrieval on
+    # subsequent refine iterations (must_not). Empty on the eval path.
+    exclude_cameras: Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Fill evidence_profile from the route default when not provided."""

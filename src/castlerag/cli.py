@@ -15,6 +15,7 @@ from rich.console import Console
 from castlerag.config import CastleRAGConfig, load_config
 from castlerag.embed.omniembed import OmniEmbedClient
 from castlerag.eval import PipelineDependencyError, load_questions, run_eval
+from castlerag.eval.run_eval import _omniembed_base_url
 from castlerag.index import get_client, load_bm25_index
 from castlerag.index.pipeline import (
     build_bm25_artifact,
@@ -70,6 +71,32 @@ def _count_records(records: object) -> int:
 def _vllm_base_url() -> Optional[str]:
     """Return the VLLM_BASE_URL environment variable, or None if unset."""
     return os.getenv("VLLM_BASE_URL")
+
+
+def _print_support_split(split: Optional[dict]) -> None:
+    """Print the unsupported-guess rate and supported-vs-guessed accuracy split."""
+    if not split or not split.get("num_predictions"):
+        return
+    n_unsup = split["num_unsupported"]
+    total = split["num_predictions"]
+    rate = split.get("unsupported_rate") or 0.0
+    console.print(
+        f"  guessed   : {n_unsup}/{total} unsupported "
+        f"([yellow]{rate:.0%}[/yellow] no reranker backing)"
+    )
+    sup, guess = split.get("supported", {}), split.get("unsupported", {})
+    if sup.get("accuracy") is not None or guess.get("accuracy") is not None:
+        def _cell(d: dict) -> str:
+            acc = d.get("accuracy")
+            return (
+                f"{acc:.2f} ({d['correct']}/{d['graded']})"
+                if acc is not None
+                else "n/a"
+            )
+
+        console.print(
+            f"  acc split : supported {_cell(sup)} · guessed {_cell(guess)}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +437,7 @@ def embed(
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
-        vllm_base_url=_vllm_base_url(),
+        vllm_base_url=_omniembed_base_url(cfg),
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
@@ -486,7 +513,7 @@ def index(
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
-        vllm_base_url=_vllm_base_url(),
+        vllm_base_url=_omniembed_base_url(cfg),
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
@@ -539,7 +566,7 @@ def retrieve(
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
-        vllm_base_url=_vllm_base_url(),
+        vllm_base_url=_omniembed_base_url(cfg),
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
@@ -563,13 +590,16 @@ def retrieve(
 
 @app.command()
 def answer(
-    questions_path: Path = typer.Argument(..., help="Official CASTLE questions JSON"),
+    questions_path: Path = typer.Argument(
+        ..., help="Official CASTLE questions JSON or CSV"
+    ),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     snellius: bool = typer.Option(False, "--snellius"),
     question_id: Optional[str] = typer.Option(
         None, "--id", help="Run only this question id"
     ),
     out: Optional[Path] = typer.Option(None, "--out", help="Output predictions path"),
+    wandb: bool = typer.Option(False, "--wandb", help="Log run to Weights & Biases"),
 ) -> None:
     """Run full retrieve → rerank → generate pipeline on CASTLE questions."""
     cfg = _resolve_config(config, snellius)
@@ -579,6 +609,8 @@ def answer(
     console.print(f"  questions : {questions_path}")
     console.print(f"  model     : {cfg.generation.model}")
     console.print(f"  output    : {out_path}")
+    if wandb:
+        console.print("  wandb     : [cyan]enabled[/cyan]")
     questions = load_questions(questions_path)
     try:
         result = run_eval(
@@ -586,6 +618,7 @@ def answer(
             config_path=override,
             question_ids=[question_id] if question_id else None,
             predictions_path=out_path,
+            use_wandb=wandb,
         )
     except (PipelineDependencyError, NotImplementedError, ValueError, KeyError) as exc:
         console.print(f"[red]{exc}[/red]")
@@ -594,19 +627,32 @@ def answer(
     console.print(f"  predicted : {len(result.predictions)} questions")
     console.print(f"  traces    : {result.output_paths.evidence_traces}")
     console.print(f"  submit    : {result.output_paths.submissions}")
+    if result.accuracy is not None:
+        console.print(
+            f"  accuracy  : [green]{result.accuracy:.4f}[/green]"
+            f"  ({result.n_correct}/{result.n_graded})"
+        )
+    _print_support_split(result.support_split)
 
 
 @app.command(name="eval")
 def eval_cmd(
-    questions_path: Path = typer.Argument(..., help="Official CASTLE questions JSON"),
+    questions_path: Path = typer.Argument(..., help="CASTLE questions JSON or CSV"),
     predictions_path: Path = typer.Argument(..., help="Predictions JSON"),
     answers_path: Optional[Path] = typer.Option(
-        None, "--answers", help="Ground-truth answer key JSON"
+        None, "--answers", help="Ground-truth answer key JSON (not needed for CSV)"
     ),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    wandb: bool = typer.Option(
+        False, "--wandb", help="Log results to Weights & Biases"
+    ),
 ) -> None:
     """Evaluate predictions against ground truth and export submission JSON."""
-    from castlerag.eval.io import compute_accuracy, export_submission, load_predictions
+    from castlerag.eval.io import (
+        accuracy_breakdown,
+        export_submission,
+        load_predictions,
+    )
 
     cfg = _resolve_config(config, False)
     questions = load_questions(questions_path)
@@ -616,12 +662,19 @@ def eval_cmd(
         f"{len(questions)} questions, {len(predictions)} predictions"
     )
 
-    if answers_path:
-        accuracy = compute_accuracy(questions, predictions, answers_path)
-        n_correct = int(round(accuracy * len(questions)))
+    # Resolve accuracy: explicit answer key beats embedded ground_truth (from CSV).
+    has_gt = answers_path is not None or any(
+        q.ground_truth is not None for q in questions.values()
+    )
+    accuracy = None
+    if has_gt:
+        n_correct, n_graded = accuracy_breakdown(questions, predictions, answers_path)
+        accuracy = n_correct / n_graded if n_graded > 0 else 0.0
+
+    if accuracy is not None:
         console.print(
             f"  accuracy : [green]{accuracy:.4f}[/green]  "
-            f"({n_correct}/{len(questions)})"
+            f"({n_correct}/{n_graded})"
         )
     else:
         console.print(
@@ -633,12 +686,48 @@ def eval_cmd(
     export_submission(predictions, sub_path)
     console.print(f"  submission written to [cyan]{sub_path}[/cyan]")
 
+    if wandb or cfg.wandb.enabled:
+        import json
+
+        from castlerag.eval.io import compute_diversity_metrics, support_breakdown
+        from castlerag.eval.wandb_logger import WandbLogger
+
+        # The guess/supported split is derivable from questions + predictions
+        # alone; diversity needs the evidence traces, which the answer step
+        # writes next to the predictions — log it too when that file is present.
+        support_split = support_breakdown(questions, predictions, answers_path)
+        diversity = None
+        traces_file = predictions_path.parent / "evidence_traces.jsonl"
+        if traces_file.exists():
+            traces = [
+                json.loads(line)
+                for line in traces_file.read_text().splitlines()
+                if line.strip()
+            ]
+            diversity = compute_diversity_metrics(traces)
+
+        wb = WandbLogger(cfg, n_questions=len(questions))
+        wb.log_summary(
+            accuracy, diversity, len(questions), support_split=support_split
+        )
+        wb.log_artifacts([sub_path, predictions_path])
+        logged = wb.active
+        wb.finish()
+        if logged:
+            console.print("  wandb     : [cyan]run logged[/cyan]")
+        else:
+            console.print(
+                "  wandb     : [yellow]not logged (wandb unavailable or "
+                "init failed)[/yellow]"
+            )
+
 
 @app.command(name="smoke-test")
 def smoke_test(
-    questions_path: Path = typer.Argument(..., help="CASTLE questions JSON"),
+    questions_path: Path = typer.Argument(..., help="CASTLE questions JSON or CSV"),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     n: int = typer.Option(5, "--n", help="Number of questions to run (default 5)"),
+    wandb: bool = typer.Option(False, "--wandb", help="Log run to Weights & Biases"),
 ) -> None:
     """5-question end-to-end smoke test (issue #15)."""
     cfg = _resolve_config(config, False)
@@ -657,6 +746,7 @@ def smoke_test(
             config_path=config,
             out_dir=out_dir,
             max_questions=n,
+            use_wandb=wandb,
         )
     except (PipelineDependencyError, NotImplementedError, ValueError, KeyError) as exc:
         console.print(f"[red]{exc}[/red]")
@@ -664,29 +754,66 @@ def smoke_test(
 
     console.print(f"  predicted : {len(result.predictions)} questions")
     console.print(f"  output    : {result.output_paths.predictions}")
+    if result.accuracy is not None:
+        console.print(
+            f"  accuracy  : [green]{result.accuracy:.4f}[/green]"
+            f"  ({result.n_correct}/{result.n_graded})"
+        )
+    _print_support_split(result.support_split)
 
 
 @app.command()
 def ui(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind host"),
-    port: int = typer.Option(8050, "--port", help="Bind port"),
+    port: int = typer.Option(50225, "--port", help="Bind port"),
     debug: bool = typer.Option(False, "--debug", help="Run Dash in debug mode"),
+    config: Optional[str] = typer.Option(
+        None, "--config", help="Config YAML for the live backend (deep-merged on base)."
+    ),
+    require_live: bool = typer.Option(
+        False,
+        "--require-live/--no-require-live",
+        "--live",
+        help="Require the real RAG backend; fail loudly (don't fall back to demo).",
+    ),
 ) -> None:
     """Launch the Dash dashboard (chat + YouTube embeds + Plotly analytics).
 
-    Runs on the offline placeholder engine — no RAG, models, Qdrant, or vLLM
-    required.  Install the UI extra first: ``pip install -e ".[ui]"``.
+    Defaults to the offline placeholder engine so it boots with no backend. Pass
+    ``--require-live`` (optionally ``--config configs/snellius_me.yaml``) to bind
+    the real RAG backend and fail with a precise reason if it isn't reachable —
+    needs ``VLLM_BASE_URL`` plus a running Qdrant + built index. Install the UI
+    extra first: ``pip install -e ".[ui]"``.
     """
     try:
         from castlerag.ui.app import run as run_ui
+        from castlerag.ui.engine_factory import EngineUnavailable
     except ImportError as exc:
         console.print(
             "[red]UI dependencies missing. Install them with:[/red] "
             'pip install -e ".[ui]"'
         )
         raise typer.Exit(1) from exc
-    console.print(f"[bold]castlerag ui[/bold]  http://{host}:{port}")
-    run_ui(host=host, port=port, debug=debug)
+
+    cfg = None
+    if config is not None:
+        from castlerag.config import load_config
+
+        cfg = load_config(override_path=config)
+
+    mode = "live (required)" if require_live else "demo unless backend reachable"
+    console.print(f"[bold]castlerag ui[/bold]  http://{host}:{port}  [{mode}]")
+    try:
+        run_ui(
+            host=host, port=port, debug=debug, cfg=cfg, require_live=require_live
+        )
+    except EngineUnavailable as exc:
+        console.print(f"[red]Live backend unavailable:[/red] {exc}")
+        console.print(
+            "[yellow]Start the stack (vLLM + Qdrant), export VLLM_BASE_URL, then "
+            "retry — or drop --require-live to run the offline demo.[/yellow]"
+        )
+        raise typer.Exit(1) from exc
 
 
 if __name__ == "__main__":

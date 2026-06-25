@@ -11,8 +11,10 @@ from castlerag.generation.answer import (
     build_messages,
     build_prompt,
     choice_permutation,
+    clean_answer_text,
     extract_answer,
     generate_answer,
+    generate_freeform_answer,
 )
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import EvalQuestion, RetrievalHit
@@ -201,11 +203,29 @@ def test_generate_answer_shuffle_maps_back_to_original_letter():
     assert prediction.is_supported is True
 
 
-def test_generate_answer_overrides_biased_guess_when_unsupported():
+def test_generate_answer_respects_explicit_answer_when_unsupported():
     # Evidence was retrieved but the reranker credited no choice (all-zero
-    # priors). The LLM defaults to "a"; the pipeline must override that biased
-    # guess with a deterministic uniform pick and mark the answer unsupported.
-    client = _FakeChatClient("No choice is supported.\nFINAL_ANSWER: a")
+    # priors). The model still committed to an explicit FINAL_ANSWER — that
+    # evidence-grounded choice must be respected, not discarded as a random
+    # guess. is_supported still reflects the (absent) reranker support.
+    client = _FakeChatClient("FINAL_ANSWER: c\nThe fridge logo reads Bosch.")
+    zero = {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}
+    pred = generate_answer(
+        question=_make_question(),
+        hints=RouteHints(route="static_visual"),
+        evidence_rows=[_make_hit()],
+        support_priors=zero,
+        llm_client=client,
+    )
+    assert pred.predicted_answer == "c"
+    assert pred.is_supported is False
+
+
+def test_generate_answer_uniform_fallback_when_unsupported_and_no_answer():
+    # The model gave no FINAL_ANSWER (abstained / cut off) AND the reranker
+    # credited no choice. The unavoidable guess must be a deterministic uniform
+    # pick (not a constant "a") and marked unsupported.
+    client = _FakeChatClient("The evidence is insufficient to decide.")
     zero = {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}
     seen = set()
     for i in range(64):
@@ -583,3 +603,98 @@ def test_generate_answer_with_model_fallback_via_callable():
         model="test-model",
     )
     assert prediction.predicted_answer == "b"
+
+
+def test_clean_answer_text_strips_trailing_sentinel_line():
+    """A FINAL_ANSWER line on its own is removed, leaving the prose answer."""
+    raw = "Cathal taught Allie the guitar.\n\nFINAL_ANSWER: c"
+    assert clean_answer_text(raw) == "Cathal taught Allie the guitar."
+
+
+def test_clean_answer_text_strips_inline_scaffold_and_sentinel():
+    """An inline 'the correct answer is: FINAL_ANSWER: c' scaffold is removed."""
+    raw = (
+        "The guitar is shown at [camera=Cathal]. "
+        "Thus, the correct answer is: FINAL_ANSWER: c"
+    )
+    cleaned = clean_answer_text(raw)
+    assert "FINAL_ANSWER" not in cleaned
+    assert "answer is" not in cleaned.lower()
+    assert cleaned.startswith("The guitar is shown")
+
+
+def test_clean_answer_text_leaves_clean_prose_untouched():
+    text = "The evidence does not say which instrument Cathal taught Allie."
+    assert clean_answer_text(text) == text
+
+
+def test_generate_freeform_answer_has_no_mcq_sentinel():
+    """The free-form path returns prose with the MCQ sentinel cleaned out."""
+
+    def _fake_llm(messages):
+        # The system prompt forbids it, but defend against a stray sentinel.
+        return (
+            "Cathal taught Allie the guitar [camera=Cathal time=day1].\n"
+            "FINAL_ANSWER: c"
+        )
+
+    text = generate_freeform_answer(
+        question=_make_question(),
+        hints=RouteHints(route="speech_text"),
+        evidence_rows=[_make_hit()],
+        llm_client=_fake_llm,
+        model="test-model",
+    )
+    assert "FINAL_ANSWER" not in text
+    assert text.startswith("Cathal taught Allie the guitar")
+
+
+def test_generate_freeform_answer_attaches_sampled_frames(tmp_path):
+    """Free-form path sends frame images when rows carry sampled_frame_paths."""
+    # A real (decodable) JPEG — the generator downscales frames before encoding,
+    # so the image must actually open, not just carry a JPEG magic number.
+    from PIL import Image
+
+    frame = tmp_path / "frame_0.jpg"
+    Image.new("RGB", (64, 48), (120, 90, 200)).save(frame, "JPEG")
+    hit = _make_hit().model_copy(update={"sampled_frame_paths": [str(frame)]})
+
+    captured = {}
+
+    def _fake_llm(messages):
+        captured["messages"] = messages
+        return "Allie walked to the office."
+
+    generate_freeform_answer(
+        question=_make_question(),
+        hints=RouteHints(route="static_visual"),
+        evidence_rows=[hit],
+        llm_client=_fake_llm,
+        model="test-model",
+    )
+
+    content = captured["messages"][1]["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text"
+    image_items = [item for item in content if item["type"] == "image_url"]
+    assert len(image_items) == 1
+    assert image_items[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+def test_generate_freeform_answer_plain_text_without_frames():
+    """Free-form path stays plain-text when no frames are present."""
+    captured = {}
+
+    def _fake_llm(messages):
+        captured["messages"] = messages
+        return "Allie walked to the office."
+
+    generate_freeform_answer(
+        question=_make_question(),
+        hints=RouteHints(route="speech_text"),
+        evidence_rows=[_make_hit()],
+        llm_client=_fake_llm,
+        model="test-model",
+    )
+
+    assert isinstance(captured["messages"][1]["content"], str)

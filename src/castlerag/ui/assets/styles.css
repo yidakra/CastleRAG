@@ -1,162 +1,340 @@
-/* CastleRAG dashboard shell — minimal layout for the placeholder backbone. */
+/* CastleRAG dashboard — structural layer only.
+ *
+ * Dash Mantine Components (themed in castlerag.ui.app.THEME) owns all the
+ * presentational styling: cards, badges, buttons, text, paper, alerts. What
+ * remains here is the structural skeleton DMC does not cover: the page grid,
+ * the two-column layout, the scrollable thread, the camera/review grids, the
+ * absolutely-positioned camera overlays, and the raw dcc text inputs.
+ */
 
 :root {
-    --bg: #f4f6f9;
+    --bg: #f1f1f4;
     --panel: #ffffff;
-    --border: #e2e8f0;
-    --accent: #4C78A8;
-    --text: #1f2933;
-    --muted: #7b8794;
+    --border: #ececf1;
+    --border-strong: #e4e4ea;
+    --accent: #4f46e5;
+    --accent-soft: #eef0fe;
+    --faint: #9a9aa4;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(20, 20, 40, 0.04), 0 10px 30px rgba(20, 20, 40, 0.06);
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+* { box-sizing: border-box; }
 
 body {
     margin: 0;
     background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
 }
 
 .app-root {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 16px;
-}
-
-.app-header {
+    /* Full-window app shell: exactly one viewport tall, left-aligned, never
+       scrolls itself. No max-width + margin:auto centering (which can shove
+       content sideways when the page is wider than the viewport). The top bar
+       takes its natural height; the body flexes to fill the rest, and each
+       column scrolls internally — so the thread's ask bar is always on screen
+       regardless of the top bar's height. */
+    height: 100vh;   /* fallback for older engines */
+    height: 100dvh;  /* actual visible viewport — accounts for browser UI bars */
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 18px 28px 20px;
     display: flex;
-    align-items: baseline;
-    gap: 12px;
-    padding: 8px 4px 16px;
-    border-bottom: 1px solid var(--border);
+    flex-direction: column;
+    overflow: hidden;
 }
 
-.app-title { margin: 0; font-size: 26px; }
-.app-subtitle { color: var(--muted); font-size: 14px; }
+/* ---- top bar ---- */
+.top-bar { padding: 6px 4px 16px; }
+.brand-mark {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: var(--accent);
+    position: relative;
+    flex: none;
+}
+.brand-mark::after {
+    content: "";
+    position: absolute;
+    inset: 6px;
+    border: 1.7px solid #fff;
+    border-radius: 3px;
+}
 
+/* ---- two-column body (split bar resizes the left column) ---- */
 .app-body {
+    flex: 1 1 auto;
+    min-height: 0;   /* let the columns shrink and scroll inside the shell */
     display: grid;
-    grid-template-columns: 360px minmax(0, 1fr);
-    grid-template-areas: "chat video" "chat analytics";
-    gap: 16px;
-    margin-top: 16px;
+    /* left width is a CSS var so assets/splitter.js can drag it; middle track is
+       the gutter; right takes the rest. */
+    grid-template-columns: var(--thread-w, 344px) 10px minmax(0, 1fr);
+    gap: 6px;
+    align-items: stretch;   /* both columns fill the shell's height */
 }
 
-.chat-panel { grid-area: chat; }
-.video-panel { grid-area: video; }
-.analytics-row { grid-area: analytics; }
+/* ---- draggable splitter ---- */
+.app-gutter {
+    align-self: stretch;          /* fill the grid row's height */
+    cursor: col-resize;
+    position: relative;
+    border-radius: 6px;
+    touch-action: none;
+    user-select: none;
+}
+.app-gutter::before {             /* the visible grip line */
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--border-strong);
+    border-radius: 2px;
+    transition: background 0.12s ease, width 0.12s ease;
+}
+.app-gutter:hover::before,
+.app-gutter.dragging::before {
+    background: var(--accent);
+    width: 4px;
+}
 
-.chat-panel, .video-panel {
-    background: var(--panel);
+/* ---- left: thread column ---- */
+.thread-col {
+    height: 100%;       /* fill the stretched grid row (set by the shell) */
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: #fcfcfd;
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
+    border-radius: var(--radius);
+    overflow: hidden;
 }
 
-.panel-title { margin: 0 0 12px; font-size: 18px; }
-.panel-subtitle { margin: 16px 0 8px; font-size: 14px; color: var(--muted); }
 
-.chat-history {
-    height: 320px;
+.thread {
+    flex: 1 1 auto;
+    height: 0;
+    min-height: 0;
     overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px;
-    background: #fbfcfe;
-    margin-bottom: 12px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
 }
 
-.chat-hint { color: var(--muted); font-size: 13px; }
-
-.chat-bubble {
-    border-radius: 10px;
+/* clickable evidence-moment row (DMC content inside an html.Button shell) */
+.moment {
+    width: 100%;
+    text-align: left;
     padding: 8px 10px;
-    margin: 6px 0;
-    font-size: 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    cursor: pointer;
+    font: inherit;
+}
+.moment:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.moment.focused {
+    background: var(--accent-soft);
+    border: 1.5px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* Long live-RAG answers can be very verbose; keep them scrollable inside
+   the query card so the left thread/input bar do not get pushed off-screen. */
+.group-card {
+    min-height: 0;
+    flex: none;
+}
+
+.question-text {
+    display: -webkit-box;
+    line-clamp: 4;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.moment-list {
+    max-height: 230px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.answer-text {
+    max-height: 260px;
+    overflow-y: auto;
+    padding-right: 6px;
+    line-height: 1.45;
+}
+
+.answer-text p:first-child {
+    margin-top: 0;
+}
+
+.answer-text p:last-child {
+    margin-bottom: 0;
+}
+
+/* inline, clickable evidence citation in an answer (an html.Button shell) */
+.cite-chip {
+    display: inline;
+    border: none;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    margin: 0 1px;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+.cite-chip:hover {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+
+/* in-flight question shown optimistically while the pipeline runs */
+.pending-card {
+    flex: none;
+    margin: 0 14px 10px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+    border-radius: 10px;
+    background: var(--accent-soft);
+    color: #3a3a44;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+.pending-card::after {
+    content: "Searching the recordings…";
+    display: block;
+    margin-top: 5px;
+    font-weight: 400;
+    font-size: 11px;
+    color: var(--faint);
+    animation: pendingPulse 1.1s ease-in-out infinite;
+}
+@keyframes pendingPulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
+
+/* ---- ask-new bar (DMC group + raw dcc.Input) ---- */
+.ask-new {
+    flex: none;
+    padding: 12px 14px;
+    border-top: 1px solid var(--border);
+    background: #fcfcfd;
+}
+.ask-new-input {
+    flex: 1;
+    min-width: 0;
+    min-height: 38px;
+    max-height: 120px;
+    border: 1.5px dashed #d7d7e0;
+    border-radius: 11px;
+    padding: 9px 11px;
+    font: inherit;
+    font-size: 12px;
+    resize: none;
+    overflow-y: auto;
     line-height: 1.4;
 }
 
-.chat-user { background: #eef2f7; }
-.chat-assistant { background: #e8f0fb; }
-.bubble-badge { margin-top: 4px; font-size: 12px; color: var(--accent); }
-
-.question-input {
-    width: 100%;
-    min-height: 64px;
-    box-sizing: border-box;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 8px;
-    font-size: 14px;
-    resize: vertical;
-}
-
-.choice-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    margin: 8px 0;
-}
-
-.choice-input {
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 8px;
-    font-size: 13px;
-}
-
-.send-button {
-    width: 100%;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    padding: 10px;
-    font-size: 15px;
-    cursor: pointer;
-}
-
-.send-button:hover { background: #3b6690; }
-
-.video-caption { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
-
-.video-embed {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    border: none;
-    border-radius: 8px;
-    background: #000;
-}
-
-.evidence-list { display: flex; flex-direction: column; gap: 6px; }
-
-.evidence-item {
-    text-align: left;
-    background: #f7f9fc;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.evidence-item:hover { border-color: var(--accent); }
-
-.analytics-row {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+/* ---- right: evidence viewer ---- */
+.viewer-col {
+    display: flex;
+    flex-direction: column;
     gap: 12px;
-}
-
-.analytics-row .dash-graph {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 16px;
+    min-width: 440px;
+    min-height: 0;        /* allow it to shrink within the shell… */
+    overflow-y: auto;     /* …and scroll its own content instead of the page */
 }
 
-@media (max-width: 1000px) {
-    .app-body {
-        grid-template-columns: 1fr;
-        grid-template-areas: "chat" "video" "analytics";
-    }
-    .analytics-row { grid-template-columns: 1fr; }
+.camera-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.camera-media {
+    position: relative;
+    border-radius: 9px;
+    overflow: hidden;
+    border: 1px solid var(--border-strong);
+    background: #000;
+}
+.camera-tile.best .camera-media { box-shadow: 0 0 0 2.5px var(--accent); }
+.camera-frame { width: 100%; height: 100%; border: none; display: block; }
+.cam-time {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    z-index: 1;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: #fff;
+    background: rgba(24, 24, 27, 0.62);
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+.best-badge { position: absolute; left: 6px; top: 6px; z-index: 1; }
+.playing-badge { position: absolute; left: 6px; bottom: 6px; z-index: 1; }
+.camera-tile.playing .camera-media {
+    box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--accent) 70%, #fff);
+}
+
+.evidence-figure { width: 100%; }
+
+.review-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; }
+
+/* ---- frozen (read-only) iterations ---- */
+.review-frozen { background: #fafafa; border-style: dashed; }
+.frozen-query {
+    background: #f4f4ff;
+    border-color: #c7c7f0;
+}
+.frozen-query p { margin: 0; }
+
+/* ---- raw dcc text areas (review justification + refine compose) ---- */
+.submit-wrap { margin-top: 11px; }
+.review-just {
+    width: 100%;
+    margin-top: 6px;
+    min-height: 34px;
+    resize: vertical;
+    font: inherit;
+    font-size: 10.5px;
+    line-height: 1.4;
+    border: 1px dashed #dcdce2;
+    border-radius: 6px;
+    padding: 6px 8px;
+    background: #fff;
+}
+.compose-input {
+    width: 100%;
+    min-height: 46px;
+    resize: vertical;
+    font: inherit;
+    font-size: 12.5px;
+    border: 1px solid var(--border-strong);
+    border-radius: 9px;
+    padding: 9px 11px;
+    background: #fff;
+}
+
+/* ---- responsive ---- */
+@media (max-width: 900px) {
+    .app-body { grid-template-columns: 1fr; }
+    .thread-col { height: 70vh; max-height: 70vh; }
+    .app-gutter { display: none; }  /* single column -> no splitter */
 }

@@ -16,6 +16,7 @@ the mirror skipped) falls back to ``placeholder_video_id``.
 from __future__ import annotations
 
 import csv
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -46,7 +47,13 @@ class YouTubeMirror:
 
     mapping: Dict[MirrorKey, str] = field(default_factory=dict)
     placeholder_video_id: str = PLACEHOLDER_VIDEO_ID
-    # Privacy-enhanced host, matching the CASTLE viewer's embeds.
+    # Privacy-enhanced host, matching the CASTLE viewer's embeds.  For tunneled
+    # demo deployments (Cloudflare quick tunnel etc.) the nocookie host can
+    # trigger YouTube's "Sign in to confirm you're not a bot" gate because it
+    # is, by design, cookie-blind and can't see the visitor's sign-in.  Set
+    # ``CASTLERAG_UI_YOUTUBE_EMBED_HOST=https://www.youtube.com`` to swap to
+    # the standard host (which the browser may forward the YouTube cookie to
+    # when third-party cookies are allowed for youtube.com).
     embed_host: str = "https://www.youtube-nocookie.com"
     watch_host: str = "https://www.youtube.com"
 
@@ -69,6 +76,9 @@ class YouTubeMirror:
                         row["day"], row["camera"], int(row["hour"])
                     )
                     mapping[key] = video_id
+        env_host = os.getenv("CASTLERAG_UI_YOUTUBE_EMBED_HOST", "").strip()
+        if env_host and "embed_host" not in kwargs:
+            kwargs["embed_host"] = env_host
         return cls(mapping=mapping, **kwargs)  # type: ignore[arg-type]
 
     def video_id(self, day: str, camera: str, hour: int) -> str:

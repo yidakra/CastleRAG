@@ -10,6 +10,7 @@ Payload indexes (for server-side filtering):
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List
 
 from castlerag.embed.omniembed import make_point_id
@@ -49,9 +50,12 @@ _BOOL_INDEX_FIELDS = [
 def get_client(host: str = "localhost", port: int = 6333) -> Any:
     """Return an initialised qdrant_client.QdrantClient.
 
-    A generous timeout (default 5s is too short) keeps batched upserts into an
-    on-disk collection from raising ``ResponseHandlingException: timed out`` when
-    the store is on slower scratch/disk.
+    The httpx-level timeout is bumped from the qdrant-client default of 5s, which
+    is too short for two on-disk cases: a cold-cache HNSW segment warming up on
+    the first query per process / after a container restart (~5–10s), and batched
+    upserts into an on-disk collection on slower scratch/disk (which otherwise
+    raise ``ResponseHandlingException: timed out``). Override via the
+    ``QDRANT_CLIENT_TIMEOUT`` env var (seconds) — e.g. raise it for bulk indexing.
     """
     try:
         from qdrant_client import QdrantClient
@@ -59,7 +63,8 @@ def get_client(host: str = "localhost", port: int = 6333) -> Any:
         raise ImportError(
             "qdrant-client not installed; run: pip install qdrant-client"
         ) from e
-    return QdrantClient(host=host, port=port, timeout=300)
+    timeout = float(os.getenv("QDRANT_CLIENT_TIMEOUT", "60"))
+    return QdrantClient(host=host, port=port, timeout=timeout)
 
 
 def create_collection(

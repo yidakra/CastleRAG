@@ -7,10 +7,20 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from castlerag.retrieval.candidate_expand import _collect_frame_paths
 from castlerag.retrieval.filters import build_filter
-from castlerag.retrieval.search import _collapse_hits, reciprocal_rank_fusion, retrieve
+from castlerag.retrieval.search import (
+    _collapse_hits,
+    _query_variants,
+    reciprocal_rank_fusion,
+    retrieve,
+)
 from castlerag.retrieval.transcript_lexical import score_windows
-from castlerag.routing.question_router import RouteEvidenceProfile, route_question
+from castlerag.routing.question_router import (
+    RouteEvidenceProfile,
+    RouteHints,
+    route_question,
+)
 from castlerag.schemas import (
     EvalQuestion,
     RetrievalHit,
@@ -30,6 +40,24 @@ def _question() -> EvalQuestion:
             "d": "She left the house",
         },
     )
+
+
+def test_query_variants_mcq_includes_choices():
+    """A real MCQ question expands its choices into a dense query variant."""
+    variants = _query_variants(_question(), RouteHints(route="speech_text"))
+    assert any("Choices:" in v and "She cooked soup" in v for v in variants)
+
+
+def test_query_variants_free_form_drops_choices():
+    """An open question must NOT inject blank 'Choices: A . B . ...' noise."""
+    free = EvalQuestion(
+        question_id="q_ff",
+        query="What instrument did Cathal teach Allie to play?",
+        answers={"a": "", "b": "", "c": "", "d": ""},
+    )
+    variants = _query_variants(free, RouteHints(route="speech_text"))
+    assert variants == ["What instrument did Cathal teach Allie to play?"]
+    assert not any("Choices:" in v for v in variants)
 
 
 def _windows() -> list[TranscriptWindow]:
@@ -103,6 +131,10 @@ def test_score_windows_prefers_exact_overlap_and_hints():
     )
     assert hits[0].record_id == "tw_1"
     assert hits[0].score > hits[1].score
+    # Lexical hits explicitly carry within-hour second offsets so downstream
+    # consumers don't fall back to recomputing them from absolute_start.
+    assert hits[0].start_seconds == 0.0
+    assert hits[0].end_seconds == 15.0
 
 
 def test_reciprocal_rank_fusion_merges_on_record_id():
@@ -238,6 +270,46 @@ def test_retrieve_fuses_transcript_and_multimodal_hits():
     assert len(hits) <= 50
 
 
+def test_retrieve_excludes_rejected_cameras_from_bm25_lane():
+    # Regression: dense lanes hard-exclude via must_not server-side, but the
+    # BM25 transcript lane is fused locally — excluded cameras must be dropped
+    # there too, or they leak back through RRF (PR #56 review finding).
+    class FakeBM25:
+        def get_scores(self, tokens: list[str]) -> np.ndarray:
+            return np.asarray([3.0, 1.0], dtype=np.float32)
+
+    class FakeEmbedClient:
+        def embed_texts(self, texts: list[str]) -> np.ndarray:
+            return np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+
+    class EmptyQdrant:
+        # Dense lanes return nothing, isolating the BM25 transcript lane.
+        def query_points(self, **kwargs):
+            return SimpleNamespace(points=[])
+
+    bm25_bundle = SimpleNamespace(bm25=FakeBM25(), windows=_windows())  # both "Allie"
+    cfg = SimpleNamespace(
+        transcript_top_k=30, event_summary_top_k=20, video_top_k=20,
+        photo_top_k=16, aux_video_top_k=8, heartrate_top_k=8, gaze_top_k=8,
+        thermal_top_k=8, rrf_k=60, max_candidate_videos=4, frames_per_candidate=32,
+        max_aux_images=16, max_evidence_rows=50, modality_score_thresholds={},
+    )
+
+    def _run(exclude: tuple) -> list:
+        hints = route_question(_question().query, _question().answers)
+        hints.exclude_cameras = exclude
+        return retrieve(
+            question=_question(), hints=hints, qdrant_client=EmptyQdrant(),
+            collection_name="castle_test", bm25_index=bm25_bundle,
+            embed_client=FakeEmbedClient(), retrieval_cfg=cfg,
+        )
+
+    # Without exclusion the BM25 "Allie" windows surface through the lane...
+    assert any(h.camera_id == "Allie" for h in _run(()))
+    # ...and excluding "Allie" drops them from the fused transcript lane.
+    assert all(h.camera_id != "Allie" for h in _run(("Allie",)))
+
+
 def test_retrieve_consumes_router_budget_profile_without_reparsing():
     class FakeBM25:
         def get_scores(self, tokens: list[str]) -> np.ndarray:
@@ -358,6 +430,27 @@ def test_build_filter_camera_id():
     assert "camera_id" in keys
 
 
+def test_build_filter_exclude_camera_ids_adds_must_not():
+    f = build_filter(day="day1", exclude_camera_ids=["Kitchen", "Allie"])
+    assert f is not None
+    assert [c.key for c in f.must] == ["day"]
+    assert [c.match.value for c in f.must_not] == ["Kitchen", "Allie"]
+
+
+def test_build_filter_only_exclude_returns_must_not_only():
+    f = build_filter(exclude_camera_ids=["Kitchen"])
+    assert f is not None
+    assert f.must is None
+    assert len(f.must_not) == 1
+
+
+def test_build_filter_empty_exclude_is_noop():
+    # An empty exclusion must not create a filter on its own (keeps eval path
+    # unfiltered when no cameras were rejected).
+    assert build_filter(exclude_camera_ids=[]) is None
+    assert build_filter(exclude_camera_ids=None) is None
+
+
 def test_build_filter_participant_id():
     f = build_filter(participant_id="Bjorn")
     assert f is not None
@@ -468,6 +561,13 @@ def _make_hit(
         source_type=source_type,
         modality="text",
     )
+
+
+def test_collect_frame_paths_max_frames_zero_disables_visual_inputs():
+    """max_frames=0 returns no frames even when hits have sampled frames."""
+    hit = _make_hit("vid_1", source_type="multimodal_frame")
+    hit.sampled_frame_paths = ["frame_0.jpg", "frame_1.jpg"]
+    assert _collect_frame_paths([hit], max_frames=0) == []
 
 
 def test_collapse_hits_stops_at_max_rows():

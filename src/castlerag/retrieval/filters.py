@@ -8,7 +8,7 @@ Time overlap rule (SPEC §4.5):
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 
 def build_filter(
@@ -22,10 +22,14 @@ def build_filter(
     time_range_start_ms: Optional[int] = None,
     time_range_end_ms: Optional[int] = None,
     has_speech: Optional[bool] = None,
+    exclude_camera_ids: Optional[Sequence[str]] = None,
 ) -> Any:
     """Return a qdrant_client Filter object for the given constraints.
 
     Omitted parameters are not added to the filter (no restriction).
+    ``exclude_camera_ids`` adds ``must_not`` conditions so the named cameras are
+    hard-excluded from results — used by the UI refine loop to drop angles the
+    reviewer rejected.
     """
     from qdrant_client.http import models as qm
 
@@ -90,6 +94,11 @@ def build_filter(
             f"<= time_range_end_ms ({time_range_end_ms})"
         )
 
-    if not conditions:
+    must_not = [
+        qm.FieldCondition(key="camera_id", match=qm.MatchValue(value=cam))
+        for cam in (exclude_camera_ids or [])
+    ]
+
+    if not conditions and not must_not:
         return None
-    return qm.Filter(must=conditions)
+    return qm.Filter(must=conditions or None, must_not=must_not or None)

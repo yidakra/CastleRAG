@@ -129,6 +129,19 @@ def test_build_reranker_prompt_contains_json_contract():
     assert "Candidate pack 2" in prompt
 
 
+def test_build_reranker_prompt_free_form_omits_choices():
+    """An open question gets the choice-free reranker prompt."""
+    free = EvalQuestion(
+        question_id="q_ff",
+        query="What instrument did Cathal teach Allie to play?",
+        answers={"a": "", "b": "", "c": "", "d": ""},
+    )
+    prompt = build_reranker_prompt(free, _pack("pack1", 0.9), rank=1)
+    assert "Answer choices:" not in prompt
+    assert "OPEN question" in prompt
+    assert '"support": {"a": 0, "b": 0, "c": 0, "d": 0}' in prompt
+
+
 def test_parse_reranker_response_handles_extra_text():
     raw = (
         "Assessment follows.\n"
@@ -187,6 +200,35 @@ def test_rerank_candidates_orders_top_packs_and_aggregates_priors():
     assert client.chat.completions.calls[0]["model"] == "Qwen/Qwen3-VL-8B-Instruct"
 
 
+def test_flatten_evidence_rows_normalizes_by_weight_sum():
+    """rerank_score must stay in [0,1] even when weights don't sum to 1.0."""
+    # Max possible final score = (1.0 + 1.0) * 4 = 8.0; a max-rubric pack must
+    # normalise to 1.0, not 2.0 (which `/4.0` would have produced).
+    output = RerankerOutput(
+        relevance=4,
+        support={"a": 4, "b": 0, "c": 0, "d": 0},
+        keep=True,
+        rationale="max rubric",
+    )
+    output.final_rerank_score = compute_rerank_score(
+        output, relevance_weight=1.0, support_weight=1.0
+    )
+    pack = _pack("pk", 0.9)
+    kept = [
+        RerankedEvidencePack(
+            pack=pack,
+            reranker_output=output,
+            final_rerank_score=output.final_rerank_score,
+        )
+    ]
+    rows = _flatten_evidence_rows(
+        kept, max_rows=10, max_score=(1.0 + 1.0) * 4.0
+    )
+    assert rows
+    assert all(0.0 <= row.rerank_score <= 1.0 for row in rows)
+    assert rows[0].rerank_score == pytest.approx(1.0)
+
+
 def test_rerank_candidates_skips_parse_failures_and_low_relevance(caplog):
     pack_ok = _pack("pack_ok", 0.8)
     pack_bad = _pack("pack_bad", 0.7)
@@ -214,6 +256,38 @@ def test_rerank_candidates_skips_parse_failures_and_low_relevance(caplog):
         )
     assert [item.pack.pack_id for item in result.kept_packs] == ["pack_ok"]
     assert "parse failure" in caplog.text
+
+
+def test_rerank_candidates_zeroes_support_for_pruned_fallback(caplog):
+    # The only candidate is rejected by min_relevance but reports non-zero
+    # support. Keeping it as fallback must zero its support so it does not flow
+    # into support_priors and mislead generate_answer() into "supported".
+    pack_low = _pack("pack_low", 0.6)
+    client = _FakeLLMClient(
+        [
+            (
+                '{"relevance": 1, "support": {"a": 0, "b": 0, "c": 4, "d": 0}, '
+                '"keep": true, "rationale": "Weak but only option"}'
+            ),
+        ]
+    )
+    with caplog.at_level(logging.WARNING):
+        result = rerank_candidates(
+            question=_question(),
+            hints=RouteHints(route="speech_text"),
+            candidate_packs=[pack_low],
+            llm_client=client,
+            min_relevance=1,
+        )
+    assert [item.pack.pack_id for item in result.kept_packs] == ["pack_low"]
+    fallback = result.kept_packs[0]
+    assert fallback.reranker_output.support == {"a": 0, "b": 0, "c": 0, "d": 0}
+    assert result.support_priors == {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}
+    # final score recomputed without the support term (relevance only).
+    assert fallback.final_rerank_score == compute_rerank_score(
+        fallback.reranker_output
+    )
+    assert "fallback" in caplog.text
 
 
 # ---------------------------------------------------------------------------

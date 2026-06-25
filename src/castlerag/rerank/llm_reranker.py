@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Mapping, Sequence
+from typing import Any, List, Mapping, Optional, Sequence
 
+from castlerag.frame_encoding import encode_frame
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import (
     EvalQuestion,
@@ -49,6 +50,34 @@ Return strict JSON:
 {{
   "relevance": 0-4,
   "support": {{"a": 0-4, "b": 0-4, "c": 0-4, "d": 0-4}},
+  "keep": true|false,
+  "rationale": "<<=40 words>"
+}}"""
+
+# Free-form (open question) variant: no answer choices, relevance only. The
+# support map is forced to zeros (the live UI has no choices to support), and the
+# caller zeroes the support weight so ranking is purely by evidence relevance.
+_FREEFORM_RERANKER_PROMPT_TEMPLATE = """\
+You are ranking a route-specific evidence pack for an OPEN question about the \
+CASTLE recordings. This is NOT multiple choice — there are no answer options.
+
+Question:
+{question}
+
+Question route:
+{route}
+
+Evidence pack:
+{candidate_text}
+
+Score how well THIS candidate's evidence helps answer the open question:
+1. Evidence relevance from 0 to 4
+2. keep: true if the evidence is worth showing, false otherwise
+
+Return strict JSON:
+{{
+  "relevance": 0-4,
+  "support": {{"a": 0, "b": 0, "c": 0, "d": 0}},
   "keep": true|false,
   "rationale": "<<=40 words>"
 }}"""
@@ -124,6 +153,12 @@ def build_reranker_prompt(
     rank: int | None = None,
 ) -> str:
     """Build the strict-JSON reranker prompt for one candidate pack."""
+    if question.is_free_form():
+        return _FREEFORM_RERANKER_PROMPT_TEMPLATE.format(
+            question=question.query,
+            route=pack.route,
+            candidate_text=format_candidate_pack(pack, rank=rank),
+        )
     return _RERANKER_PROMPT_TEMPLATE.format(
         question=question.query,
         route=pack.route,
@@ -195,6 +230,13 @@ def rerank_candidates(
 ) -> RerankResult:
     """Rerank evidence packs with a local Qwen3-VL-compatible chat client."""
     ranked: list[RerankedEvidencePack] = []
+    all_candidates: list[RerankedEvidencePack] = []
+    best_fallback: Optional[RerankedEvidencePack] = None
+
+    # Free-form (open) questions have no choices to support, so rank purely on
+    # evidence relevance — the per-choice support term is noise over blanks.
+    if question.is_free_form():
+        support_weight = 0.0
 
     for rank, raw_pack in enumerate(candidate_packs, start=1):
         pack = _coerce_pack(raw_pack, hints)
@@ -204,6 +246,7 @@ def rerank_candidates(
                 llm_client=llm_client,
                 model=model,
                 prompt=prompt,
+                frame_paths=pack.sampled_frame_paths,
             )
             reranker_output = parse_reranker_response(
                 raw_response,
@@ -218,21 +261,58 @@ def rerank_candidates(
             )
             continue
 
-        if not reranker_output.keep or reranker_output.relevance <= min_relevance:
-            continue
-
         final_score = compute_rerank_score(
             reranker_output,
             relevance_weight=relevance_weight,
             support_weight=support_weight,
         )
-        ranked.append(
-            RerankedEvidencePack(
-                pack=pack,
-                reranker_output=reranker_output,
-                final_rerank_score=final_score,
-            )
+        candidate = RerankedEvidencePack(
+            pack=pack,
+            reranker_output=reranker_output,
+            final_rerank_score=final_score,
         )
+        # Track every candidate (regardless of filter) for the fallback below.
+        all_candidates.append(candidate)
+        if best_fallback is None or final_score > best_fallback.final_rerank_score:
+            best_fallback = candidate
+
+        if not reranker_output.keep or reranker_output.relevance <= min_relevance:
+            continue
+        ranked.append(candidate)
+
+    # When the reranker prunes everything, don't collapse to a single ungrounded
+    # row — that left the generator with one (often wrong) frame and nothing to
+    # read. Keep the top-k candidates by score so the (high-res) generator has
+    # several frames/transcripts to actually look at. Their support is zeroed so
+    # the answer is still honestly flagged unsupported (the reranker endorsed
+    # nothing), but it becomes a *grounded* attempt instead of a blind guess.
+    if not ranked and all_candidates:
+        LOGGER.warning(
+            "All reranker candidates filtered (best relevance=%d); keeping top-%d "
+            "as ungrounded fallback.",
+            best_fallback.reranker_output.relevance,
+            top_k,
+        )
+        fallback = sorted(
+            all_candidates, key=lambda c: -c.final_rerank_score
+        )[:top_k]
+        for cand in fallback:
+            zeroed_output = cand.reranker_output.model_copy(
+                update={"support": {"a": 0, "b": 0, "c": 0, "d": 0}}
+            )
+            zeroed_score = compute_rerank_score(
+                zeroed_output,
+                relevance_weight=relevance_weight,
+                support_weight=support_weight,
+            )
+            ranked.append(
+                cand.model_copy(
+                    update={
+                        "reranker_output": zeroed_output,
+                        "final_rerank_score": zeroed_score,
+                    }
+                )
+            )
 
     ranked.sort(
         key=lambda item: (
@@ -246,7 +326,11 @@ def rerank_candidates(
         route=hints.route,
         kept_packs=kept,
         support_priors=_aggregate_support_priors(kept),
-        evidence_rows=_flatten_evidence_rows(kept, max_rows=max_evidence_rows),
+        evidence_rows=_flatten_evidence_rows(
+            kept,
+            max_rows=max_evidence_rows,
+            max_score=(relevance_weight + support_weight) * 4.0,
+        ),
     )
 
 
@@ -268,18 +352,51 @@ def _coerce_pack(
     return EvidencePack.model_validate(data)
 
 
+def _build_content(
+    prompt: str,
+    frame_paths: List[str],
+    max_frames: int = 4,
+    frame_max_pixels: int = 768,
+) -> Any:
+    """Return a plain string or a multimodal content list, depending on frames.
+
+    Frames are downscaled to ``frame_max_pixels`` on their longest edge before
+    encoding so a few candidate frames cannot push the reranker prompt past the
+    model context (full-resolution frames previously produced 33k-token prompts).
+    """
+    encoded = [
+        enc[0]
+        for enc in (
+            encode_frame(p, max_pixels=frame_max_pixels)
+            for p in frame_paths[:max_frames]
+        )
+        if enc is not None
+    ]
+    if not encoded:
+        return prompt
+    items: List[Any] = [{"type": "text", "text": prompt}]
+    for b64 in encoded:
+        items.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+        })
+    return items
+
+
 def _invoke_reranker(
     *,
     llm_client: Any,
     model: str,
     prompt: str,
+    frame_paths: Optional[List[str]] = None,
     max_tokens: int = 256,
 ) -> str:
     """Call an OpenAI-compatible vLLM chat endpoint or a test double."""
+    content = _build_content(prompt, frame_paths or [])
     if hasattr(llm_client, "chat") and hasattr(llm_client.chat, "completions"):
         response = llm_client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": content}],
             max_tokens=max_tokens,
             temperature=0.0,
         )
@@ -290,7 +407,7 @@ def _invoke_reranker(
     if hasattr(llm_client, "create"):
         response = llm_client.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": content}],
             max_tokens=max_tokens,
             temperature=0.0,
         )
@@ -332,15 +449,30 @@ def _flatten_evidence_rows(
     kept_packs: Sequence[RerankedEvidencePack],
     *,
     max_rows: int,
+    max_score: float = 4.0,
 ) -> list[RetrievalHit]:
-    """Deduplicate and collect evidence rows from kept packs up to max_rows."""
+    """Deduplicate and collect evidence rows from kept packs up to max_rows.
+
+    Each hit gets ``rerank_score`` stamped with the BEST normalised pack score
+    it appears in. A row present in two packs (scores 3.0 and 1.0) keeps
+    the 3.0 score, not the 1.0 from whichever pack is iterated last.
+    """
+    divisor = max_score if max_score > 0 else 4.0
+    # First pass: find the best normed score for every record_id.
+    best: dict[str, float] = {}
+    for item in kept_packs:
+        normed = round(item.final_rerank_score / divisor, 4)
+        for row in item.pack.evidence_rows:
+            if normed > best.get(row.record_id, -1.0):
+                best[row.record_id] = normed
+    # Second pass: collect rows in pack order, using the best score.
     rows: list[RetrievalHit] = []
     seen: set[str] = set()
     for item in kept_packs:
         for row in item.pack.evidence_rows:
             if row.record_id in seen:
                 continue
-            rows.append(row)
+            rows.append(row.model_copy(update={"rerank_score": best[row.record_id]}))
             seen.add(row.record_id)
             if len(rows) >= max_rows:
                 return rows

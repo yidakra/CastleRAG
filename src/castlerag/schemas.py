@@ -247,12 +247,22 @@ class RetrievalHit(BaseModel):
     day: Optional[str] = None
     camera_id: Optional[str] = None
     participant_id: Optional[str] = None
+    room: Optional[str] = None
+    hour: Optional[int] = None
+    start_seconds: Optional[float] = None
+    end_seconds: Optional[float] = None
     absolute_start: Optional[int] = None
     absolute_end: Optional[int] = None
     transcript_text: Optional[str] = None
     event_summary: Optional[str] = None
     ocr_text: Optional[str] = None
     asset_path: Optional[str] = None
+    # Display-score fields — populated at different pipeline stages.
+    # raw_score: cosine similarity from Qdrant before RRF overwrites `score`.
+    # rerank_score: VLM-assessed relevance from the reranker, normalised to [0,1].
+    raw_score: Optional[float] = None
+    rerank_score: Optional[float] = None
+    sampled_frame_paths: List[str] = Field(default_factory=list)
 
 
 class EvidencePack(BaseModel):
@@ -268,6 +278,7 @@ class EvidencePack(BaseModel):
     ocr_spans: List[str] = Field(default_factory=list)
     frame_descriptions: List[str] = Field(default_factory=list)
     auxiliary_notes: List[str] = Field(default_factory=list)
+    sampled_frame_paths: List[str] = Field(default_factory=list)
 
 
 class RerankerOutput(BaseModel):
@@ -334,6 +345,16 @@ class EvalQuestion(BaseModel):
                 raise ValueError(f"answers must contain key '{key}'")
         return v
 
+    def is_free_form(self) -> bool:
+        """True for an open question with no real choices (e.g. the live UI).
+
+        The choice keys are always present (the validator requires them), so a
+        free-form question is signalled by every choice being blank. The MCQ
+        pipeline stages key off this to drop the four-option scaffolding from
+        retrieval, reranking, and generation.
+        """
+        return not any((value or "").strip() for value in self.answers.values())
+
 
 class Prediction(BaseModel):
     """Per-question prediction with optional evidence trace."""
@@ -345,8 +366,9 @@ class Prediction(BaseModel):
     top_evidence_ids: List[str] = Field(default_factory=list)
     raw_answer_text: Optional[str] = None
     confidence: Optional[float] = None
-    # False when the answer is an unsupported fallback guess — i.e. no evidence
-    # was retrieved or the reranker credited no choice with any support. Lets
-    # error analysis split retrieval failures from reasoning failures and the
-    # UI flag low-confidence answers.
+    # Diagnostic flag: False when the answer has no retrieval/reranker backing —
+    # i.e. no evidence was retrieved or the reranker credited no choice with any
+    # support. Recorded into evidence traces so error analysis can split
+    # retrieval failures from reasoning failures. Informational only — it does
+    # not alter the predicted answer (not yet consumed by the UI or metrics).
     is_supported: bool = True

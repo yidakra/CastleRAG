@@ -17,15 +17,16 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from castlerag.config import CastleRAGConfig, load_config
 from castlerag.embed.omniembed import OmniEmbedClient
 from castlerag.eval.io import (
-    compute_accuracy,
+    accuracy_breakdown,
     compute_diversity_metrics,
     export_submission,
     select_questions,
+    support_breakdown,
     write_evidence_traces,
     write_predictions,
 )
@@ -69,6 +70,14 @@ class EvalRunResult:
     output_paths: EvalOutputPaths
     accuracy: Optional[float] = None
     diversity: Optional[Dict[str, Any]] = None
+    # Number of correctly-answered and ground-truth-graded questions. These let
+    # callers display ``n_correct/n_graded`` rather than guessing a denominator.
+    n_correct: Optional[int] = None
+    n_graded: Optional[int] = None
+    # Evidence-backed vs unsupported-guess split (see io.support_breakdown):
+    # unsupported rate plus per-subset accuracy, for retrieval-vs-reasoning
+    # error analysis. Populated on every run; accuracy fields need ground truth.
+    support_split: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +104,129 @@ class EvalPipeline:
     generate: Callable[
         [EvalQuestion, RouteHints, List[RetrievalHit], Dict[str, float]], Prediction
     ]
+    # Optional direct Qdrant handle so the UI can fetch the cameras rolling at a
+    # given timestamp (synchronized angles / in-scene refine). None on the eval
+    # path and in injected test pipelines, which never touch it.
+    qdrant_client: Any = None
+    collection_name: Optional[str] = None
+    # Optional embed client so the UI can score those synchronized angles by
+    # relevance to the question (query-scored co-temporal cameras). None offline.
+    embed_client: Any = None
+
+
+@dataclass(frozen=True)
+class QuestionResult:
+    """All per-question pipeline outputs (used by run_eval and the dashboard)."""
+
+    prediction: Prediction
+    hints: RouteHints
+    retrieved: List[RetrievalHit]
+    evidence_rows: List[RetrievalHit]
+    support_priors: Dict[str, float]
+    rerank_result: RerankResult
+
+
+def run_question(
+    pipeline: EvalPipeline,
+    cfg: CastleRAGConfig,
+    question: EvalQuestion,
+    exclude_cameras: Sequence[str] = (),
+    *,
+    generate_prediction: bool = True,
+) -> QuestionResult:
+    """Run one question through route -> retrieve -> rerank -> generate.
+
+    Returns the prediction together with the retrieval hits, reranked evidence,
+    and support priors so callers (the eval loop and the UI ``RagEngine``) can
+    both reuse the exact same per-question path.
+
+    ``exclude_cameras`` hard-excludes those camera ids from dense retrieval (the
+    UI refine loop passes the angles the reviewer rejected); empty on the eval
+    path, so benchmark behaviour is unchanged.
+
+    ``generate_prediction=False`` skips the MCQ answer generator entirely and
+    returns a stub prediction. The free-form UI uses this: it answers open
+    questions with its own choice-free generator, so running the multiple-choice
+    generator here would only waste an LLM call and force a meaningless letter.
+    """
+    try:
+        hints = pipeline.route(question.query, question.answers)
+    except PipelineDependencyError as exc:
+        raise _stage_dependency_error("routing", question.question_id, exc) from exc
+    except NotImplementedError as exc:
+        raise _stage_error("routing", question.question_id, exc) from exc
+    except Exception as exc:
+        raise _stage_failure_error("routing", question.question_id, exc) from exc
+
+    if exclude_cameras:
+        hints.exclude_cameras = tuple(exclude_cameras)
+
+    try:
+        retrieved = pipeline.retrieve(question, hints)
+    except PipelineDependencyError as exc:
+        raise _stage_dependency_error("retrieval", question.question_id, exc) from exc
+    except NotImplementedError as exc:
+        raise _stage_error("retrieval", question.question_id, exc) from exc
+    except Exception as exc:
+        raise _stage_failure_error("retrieval", question.question_id, exc) from exc
+
+    candidate_packs = expand_candidates(
+        retrieved,
+        route=hints.route,
+        max_candidate_videos=cfg.retrieval.max_candidate_videos,
+        frames_per_candidate=cfg.retrieval.frames_per_candidate,
+    )
+    try:
+        reranked = pipeline.rerank(question, hints, candidate_packs)
+    except PipelineDependencyError as exc:
+        raise _stage_dependency_error("reranking", question.question_id, exc) from exc
+    except NotImplementedError as exc:
+        raise _stage_error("reranking", question.question_id, exc) from exc
+    except Exception as exc:
+        raise _stage_failure_error("reranking", question.question_id, exc) from exc
+
+    rerank_result = _coerce_rerank_result(reranked, hints.route)
+    evidence_rows = _flatten_reranked_evidence(
+        rerank_result,
+        fallback_hits=retrieved,
+        max_rows=cfg.retrieval.max_evidence_rows,
+    )
+    support_priors = _aggregate_support_priors(rerank_result)
+    if not generate_prediction:
+        prediction = Prediction(
+            question_id=question.question_id,
+            predicted_answer="a",  # placeholder; the caller supplies the real answer
+            route=hints.route,
+            support_priors=support_priors or None,
+            top_evidence_ids=[hit.record_id for hit in evidence_rows],
+            raw_answer_text="",
+            is_supported=bool(evidence_rows)
+            and max(support_priors.values(), default=0.0) > 0.0,
+        )
+    else:
+        try:
+            prediction = pipeline.generate(
+                question, hints, evidence_rows, support_priors
+            )
+        except PipelineDependencyError as exc:
+            raise _stage_dependency_error(
+                "generation", question.question_id, exc
+            ) from exc
+        except NotImplementedError as exc:
+            raise _stage_error("generation", question.question_id, exc) from exc
+        except Exception as exc:
+            raise _stage_failure_error(
+                "generation", question.question_id, exc
+            ) from exc
+
+    return QuestionResult(
+        prediction=prediction,
+        hints=hints,
+        retrieved=retrieved,
+        evidence_rows=evidence_rows,
+        support_priors=support_priors,
+        rerank_result=rerank_result,
+    )
 
 
 def run_eval(
@@ -107,6 +239,7 @@ def run_eval(
     question_ids: Optional[Iterable[str]] = None,
     max_questions: Optional[int] = None,
     pipeline: Optional[EvalPipeline] = None,
+    use_wandb: bool = False,
 ) -> EvalRunResult:
     """Run the full prediction loop and write output files.
 
@@ -131,82 +264,71 @@ def run_eval(
     )
     active_pipeline = pipeline or _build_default_pipeline(cfg)
 
+    from castlerag.eval.wandb_logger import WandbLogger
+
+    wb = (
+        WandbLogger(cfg, n_questions=len(selected))
+        if (use_wandb or cfg.wandb.enabled)
+        else None
+    )
+
     predictions: Dict[str, Prediction] = {}
     traces: List[dict] = []
+    failed_questions: List[str] = []
     for question in selected.values():
-        hints = active_pipeline.route(question.query, question.answers)
         try:
-            retrieved = active_pipeline.retrieve(question, hints)
-        except PipelineDependencyError as exc:
-            raise _stage_dependency_error(
-                "retrieval",
-                question.question_id,
-                exc,
-            ) from exc
-        except NotImplementedError as exc:
-            raise _stage_error("retrieval", question.question_id, exc) from exc
-        except Exception as exc:
-            raise _stage_failure_error("retrieval", question.question_id, exc) from exc
-
-        candidate_packs = expand_candidates(
-            retrieved,
-            route=hints.route,
-            max_candidate_videos=cfg.retrieval.max_candidate_videos,
-            frames_per_candidate=cfg.retrieval.frames_per_candidate,
-        )
-        try:
-            reranked = active_pipeline.rerank(question, hints, candidate_packs)
-        except PipelineDependencyError as exc:
-            raise _stage_dependency_error(
-                "reranking",
-                question.question_id,
-                exc,
-            ) from exc
-        except NotImplementedError as exc:
-            raise _stage_error("reranking", question.question_id, exc) from exc
-        except Exception as exc:
-            raise _stage_failure_error("reranking", question.question_id, exc) from exc
-
-        rerank_result = _coerce_rerank_result(reranked, hints.route)
-        evidence_rows = _flatten_reranked_evidence(
-            rerank_result,
-            fallback_hits=retrieved,
-            max_rows=cfg.retrieval.max_evidence_rows,
-        )
-        support_priors = _aggregate_support_priors(rerank_result)
-        try:
-            prediction = active_pipeline.generate(
-                question,
-                hints,
-                evidence_rows,
-                support_priors,
+            result = run_question(active_pipeline, cfg, question)
+        except Exception as exc:  # noqa: BLE001
+            # A single failing question (e.g. an over-long multimodal generation
+            # prompt the LLM server rejects) must not discard the predictions for
+            # every other question. Record it as an unanswered, unsupported
+            # prediction — deterministically wrong vs. the ground-truth letter so
+            # it grades incorrect — and carry on with the rest of the eval.
+            wrong = "a" if question.ground_truth != "a" else "b"
+            predictions[question.question_id] = Prediction(
+                question_id=question.question_id,
+                predicted_answer=wrong,  # type: ignore[arg-type]
+                route=None,
+                raw_answer_text="",
+                is_supported=False,
             )
-        except PipelineDependencyError as exc:
-            raise _stage_dependency_error(
-                "generation",
-                question.question_id,
-                exc,
-            ) from exc
-        except NotImplementedError as exc:
-            raise _stage_error("generation", question.question_id, exc) from exc
-        except Exception as exc:
-            raise _stage_failure_error("generation", question.question_id, exc) from exc
-
-        predictions[question.question_id] = prediction
+            failed_questions.append(question.question_id)
+            print(
+                f"[run_eval] question {question.question_id} failed, recording as "
+                f"unanswered (counts incorrect): {exc}",
+                flush=True,
+            )
+            continue
+        predictions[question.question_id] = result.prediction
         traces.append(
             {
                 "question_id": question.question_id,
-                "route": hints.route,
-                "retrieved_count": len(retrieved),
-                "reranked_count": len(rerank_result.kept_packs),
-                "top_evidence_ids": prediction.top_evidence_ids,
+                "route": result.hints.route,
+                "retrieved_count": len(result.retrieved),
+                "reranked_count": len(result.rerank_result.kept_packs),
+                "top_evidence_ids": result.prediction.top_evidence_ids,
                 "top_evidence_cameras": sorted(
-                    {h.camera_id for h in evidence_rows if h.camera_id is not None}
+                    {
+                        h.camera_id
+                        for h in result.evidence_rows
+                        if h.camera_id is not None
+                    }
                 ),
-                "support_priors": prediction.support_priors or support_priors,
-                "predicted_answer": prediction.predicted_answer,
-                "is_supported": prediction.is_supported,
+                "support_priors": (
+                    result.prediction.support_priors or result.support_priors
+                ),
+                "predicted_answer": result.prediction.predicted_answer,
+                "is_supported": result.prediction.is_supported,
             }
+        )
+        if wb is not None:
+            wb.log_question(question, result)
+
+    if failed_questions:
+        print(
+            f"[run_eval] {len(failed_questions)}/{len(selected)} question(s) failed "
+            f"and were counted incorrect: {', '.join(failed_questions)}",
+            flush=True,
         )
 
     write_predictions(predictions, outputs.predictions)
@@ -215,9 +337,19 @@ def run_eval(
 
     diversity = compute_diversity_metrics(traces)
 
+    # Compute accuracy from an explicit answer key, or fall back to embedded
+    # ground_truth (populated by the CSV loader) when available.
     accuracy: Optional[float] = None
-    if answers_path is not None:
-        accuracy = compute_accuracy(selected, predictions, answers_path)
+    n_correct: Optional[int] = None
+    n_graded: Optional[int] = None
+    has_gt = answers_path is not None or any(
+        q.ground_truth is not None for q in selected.values()
+    )
+    if has_gt:
+        n_correct, n_graded = accuracy_breakdown(selected, predictions, answers_path)
+        accuracy = n_correct / n_graded if n_graded > 0 else 0.0
+
+    support_split = support_breakdown(selected, predictions, answers_path)
 
     outputs.metrics.parent.mkdir(parents=True, exist_ok=True)
     outputs.metrics.write_text(
@@ -225,6 +357,7 @@ def run_eval(
             {
                 "accuracy": accuracy,
                 "num_questions": len(selected),
+                "support_split": support_split,
                 "diversity": diversity,
                 "predictions_path": str(outputs.predictions),
                 "submission_path": str(outputs.submissions),
@@ -233,12 +366,22 @@ def run_eval(
         )
     )
 
+    if wb is not None:
+        wb.log_summary(accuracy, diversity, len(selected), support_split=support_split)
+        wb.log_artifacts(
+            [outputs.predictions, outputs.submissions, outputs.evidence_traces]
+        )
+        wb.finish()
+
     return EvalRunResult(
         predictions=predictions,
         traces=traces,
         output_paths=outputs,
         accuracy=accuracy,
         diversity=diversity,
+        n_correct=n_correct,
+        n_graded=n_graded,
+        support_split=support_split,
     )
 
 
@@ -271,7 +414,7 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
-        vllm_base_url=_vllm_base_url(),
+        vllm_base_url=_omniembed_base_url(cfg),
         vllm_tensor_parallel=cfg.embedding.vllm_tensor_parallel,
         vllm_gpu_memory_utilization=cfg.embedding.vllm_gpu_memory_utilization,
     )
@@ -336,6 +479,10 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
             model=cfg.generation.model,
             max_evidence_rows=cfg.retrieval.max_evidence_rows,
             shuffle_choices=cfg.generation.shuffle_choices,
+            max_frames=cfg.generation.max_frames,
+            frame_max_pixels=cfg.generation.frame_max_pixels,
+            prompt_token_budget=cfg.generation.prompt_token_budget,
+            max_new_tokens=cfg.generation.max_new_tokens,
         )
 
     return EvalPipeline(
@@ -343,6 +490,9 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
         retrieve=_retrieve,
         rerank=_rerank,
         generate=_generate,
+        qdrant_client=qdrant_client,
+        collection_name=cfg.qdrant.collection,
+        embed_client=embed_client,
     )
 
 
@@ -440,6 +590,24 @@ def _stage_failure_error(
 def _vllm_base_url() -> Optional[str]:
     """Return the VLLM_BASE_URL environment variable value, or None if unset."""
     return os.getenv("VLLM_BASE_URL")
+
+
+def _omniembed_base_url(cfg: Optional[CastleRAGConfig] = None) -> Optional[str]:
+    """Return the base URL the OmniEmbed embeddings client should connect to.
+
+    Resolution order (issue #54):
+      1. ``OMNIEMBED_BASE_URL`` env var — explicit per-run override.
+      2. ``cfg.embedding.base_url`` — declared endpoint for two-endpoint
+         deployments (UI / eval / answer), so the embed client never depends on
+         remembering an env var.
+      3. ``VLLM_BASE_URL`` — back-compat fallback for single-endpoint / query-
+         cache setups where embeddings and generation share one server.
+
+    Without (1) or (2), a two-endpoint run would POST query embeddings to the
+    generation server and 404 on any query-cache miss.
+    """
+    cfg_url = cfg.embedding.base_url if cfg is not None else None
+    return os.getenv("OMNIEMBED_BASE_URL") or cfg_url or _vllm_base_url()
 
 
 def _prepare_default_runtime(
@@ -614,7 +782,7 @@ def _ensure_vllm_runtime_ready(cfg: CastleRAGConfig) -> None:
             "runtime dependency missing: openai package is required for the "
             f"vLLM-backed {', '.join(needed_stages)} stages."
         ) from exc
-    OpenAI(base_url=base_url, api_key="not-needed")
+    OpenAI(base_url=base_url, api_key=os.getenv("LLM_API_KEY", "not-needed"))
 
 
 def _dependency_failure_message(
@@ -640,16 +808,23 @@ def _dependency_failure_message(
 
 
 def _build_vllm_chat_client() -> Any:
-    """Instantiate and return an OpenAI client pointed at the local vLLM endpoint."""
+    """Instantiate and return an OpenAI-compatible client for the LLM endpoint.
+
+    Points at ``VLLM_BASE_URL`` (local vLLM, Mistral API, OpenAI, etc.).
+    Reads the API key from ``LLM_API_KEY`` when set; falls back to the
+    ``"not-needed"`` sentinel that local vLLM accepts without auth.
+    """
     base_url = _vllm_base_url()
     if not base_url:
         raise PipelineDependencyError(
-            "VLLM_BASE_URL is not set. Start the Qwen3-VL vLLM endpoint first."
+            "VLLM_BASE_URL is not set. Set it to the vLLM endpoint or a "
+            "remote API base URL (e.g. https://api.mistral.ai/v1)."
         )
     try:
         from openai import OpenAI
     except ImportError as exc:
         raise PipelineDependencyError(
-            "openai package is required to talk to the vLLM endpoint."
+            "openai package is required to talk to the LLM endpoint."
         ) from exc
-    return OpenAI(base_url=base_url, api_key="not-needed")
+    api_key = os.getenv("LLM_API_KEY", "not-needed")
+    return OpenAI(base_url=base_url, api_key=api_key)

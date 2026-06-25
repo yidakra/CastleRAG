@@ -1,9 +1,11 @@
-"""CastleRAG Dash UI: chat + YouTube evidence embeds + Plotly analytics shell.
+"""CastleRAG Dash UI: chat + synchronized YouTube embeds + a Plotly score chart.
 
-This is the placeholder backbone (meeting note item 1): the whole UI runs end to
-end on a stub :class:`~castlerag.ui.chat.PlaceholderEngine`, with no RAG, models,
-Qdrant, or vLLM wired in.  The real pipeline drops in later behind the
-:class:`~castlerag.ui.chat.ChatEngine` protocol.
+The whole UI runs end to end on a stub :class:`~castlerag.ui.chat.PlaceholderEngine`
+(no RAG, models, Qdrant, or vLLM required); the real
+:class:`~castlerag.ui.rag_engine.RagEngine` drops in behind the
+:class:`~castlerag.ui.chat.ChatEngine` protocol when the backend is reachable.
+The right-column viewer pairs the three synchronized camera embeds with a Plotly
+per-camera match-score bar (:mod:`castlerag.ui.figures`).
 """
 
 from __future__ import annotations

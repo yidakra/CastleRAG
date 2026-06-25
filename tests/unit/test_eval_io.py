@@ -9,11 +9,13 @@ import pytest
 
 from castlerag.config import CastleRAGConfig
 from castlerag.eval.io import (
+    accuracy_breakdown,
     compute_accuracy,
     compute_diversity_metrics,
     export_submission,
     load_predictions,
     load_questions,
+    load_questions_csv,
     select_questions,
     write_evidence_traces,
     write_predictions,
@@ -22,6 +24,7 @@ from castlerag.eval.run_eval import (
     EvalPipeline,
     PipelineDependencyError,
     run_eval,
+    run_question,
 )
 from castlerag.retrieval.candidate_expand import expand_candidates
 from castlerag.routing.question_router import RouteHints
@@ -135,6 +138,43 @@ def test_compute_accuracy_partial_answer_key(tmp_path: Path):
     ans_path = _write_answers(tmp_path, {"q1": "a"})
     acc = compute_accuracy(qs, preds, ans_path)
     assert acc == 1.0
+
+
+def test_accuracy_breakdown_returns_graded_denominator(tmp_path: Path):
+    """Breakdown reports (correct, graded), graded excluding ungraded questions."""
+    q_path = _write_questions(tmp_path, _QUESTIONS_RAW)
+    qs = load_questions(q_path)
+    preds = {"q1": Prediction(question_id="q1", predicted_answer="a")}
+    # Only q1 is in the answer key, so graded must be 1 (not 2) and correct 1.
+    ans_path = _write_answers(tmp_path, {"q1": "a"})
+    correct, graded = accuracy_breakdown(qs, preds, ans_path)
+    assert (correct, graded) == (1, 1)
+
+
+def test_load_questions_csv_disambiguates_id_collision(tmp_path: Path):
+    """Distinct questions that collide on question_id must both survive."""
+    import castlerag.eval.io as io_mod
+
+    # Force two different questions to hash to the same base id.
+    def _fixed_id(text: str) -> str:
+        return "castle_dupe"
+
+    orig = io_mod._question_id_from_text
+    io_mod._question_id_from_text = _fixed_id
+    try:
+        csv_path = tmp_path / "bank.csv"
+        csv_path.write_text(
+            "Question,Answer,Distractor 1,Distractor 2,Distractor 3\n"
+            "First question?,A1,B1,C1,D1\n"
+            "Second question?,A2,B2,C2,D2\n"
+        )
+        questions = load_questions_csv(csv_path)
+    finally:
+        io_mod._question_id_from_text = orig
+    # Both rows kept despite the colliding base id.
+    assert len(questions) == 2
+    queries = {q.query for q in questions.values()}
+    assert queries == {"First question?", "Second question?"}
 
 
 def test_load_predictions_rejects_bad_format(tmp_path: Path):
@@ -434,7 +474,7 @@ def test_run_eval_wraps_missing_reranker_as_dependency_error(tmp_path: Path):
         generate=_generate,
     )
     with pytest.raises(PipelineDependencyError, match="reranking.*q1"):
-        run_eval(qs, out_dir=tmp_path / "outputs", pipeline=pipeline)
+        run_question(pipeline, run_eval_module.load_config(), next(iter(qs.values())))
 
 
 def test_run_eval_wraps_retrieve_dependency_error_with_question_id(tmp_path: Path):
@@ -472,7 +512,7 @@ def test_run_eval_wraps_retrieve_dependency_error_with_question_id(tmp_path: Pat
         PipelineDependencyError,
         match="retrieval dependency failed for question q1: Qdrant collection is empty",
     ):
-        run_eval(qs, out_dir=tmp_path / "outputs", pipeline=pipeline)
+        run_question(pipeline, run_eval_module.load_config(), next(iter(qs.values())))
 
 
 def test_run_eval_default_pipeline_reports_missing_local_index_artifacts(
@@ -630,4 +670,126 @@ def test_run_eval_unexpected_retrieval_error_is_not_reclassified(
         PipelineDependencyError,
         match="retrieval failed for question q1",
     ):
-        run_eval(qs, out_dir=tmp_path / "outputs", pipeline=pipeline)
+        run_question(pipeline, run_eval_module.load_config(), next(iter(qs.values())))
+
+
+# ---------------------------------------------------------------------------
+# CSV loader tests
+# ---------------------------------------------------------------------------
+
+_CSV_HEADER = (
+    "Question,Answer,Anchor,Distractor 1,Distractor 2,Distractor 3,"
+    "Type,Day,Authored by,Verified By,Issue,Column 1\n"
+)
+_CSV_ROW1 = (
+    "What did Allie eat?,Sausages,Day1 14:00,Pizza,Pasta,Soup,what,1,Luca,Werner,,\n"
+)
+_CSV_ROW2 = (
+    "Where was Bjorn?,Kitchen,Day2 10:00,Meeting room,Living room,Garden,"
+    "where,2,Klaus,Allie,,\n"
+)
+
+
+def _write_csv(tmp_path: Path, content: str) -> Path:
+    p = tmp_path / "questions.csv"
+    p.write_text(content, encoding="utf-8")
+    return p
+
+
+def test_load_questions_csv_parses_rows(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1 + _CSV_ROW2)
+    qs = load_questions_csv(p)
+    assert len(qs) == 2
+
+
+def test_load_questions_csv_query_text(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions_csv(p)
+    q = next(iter(qs.values()))
+    assert q.query == "What did Allie eat?"
+
+
+def test_load_questions_csv_four_choices(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions_csv(p)
+    q = next(iter(qs.values()))
+    assert set(q.answers.keys()) == {"a", "b", "c", "d"}
+    assert set(q.answers.values()) == {"Sausages", "Pizza", "Pasta", "Soup"}
+
+
+def test_load_questions_csv_ground_truth_is_correct_answer(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions_csv(p)
+    q = next(iter(qs.values()))
+    assert q.ground_truth is not None
+    assert q.answers[q.ground_truth] == "Sausages"
+
+
+def test_load_questions_csv_shuffle_is_stable(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs1 = load_questions_csv(p)
+    qs2 = load_questions_csv(p)
+    q1 = next(iter(qs1.values()))
+    q2 = next(iter(qs2.values()))
+    assert q1.answers == q2.answers
+    assert q1.ground_truth == q2.ground_truth
+
+
+def test_load_questions_csv_skips_blank_rows(tmp_path: Path):
+    content = _CSV_HEADER + _CSV_ROW1 + ",,,,,,,,,,,\n" + _CSV_ROW2
+    p = _write_csv(tmp_path, content)
+    qs = load_questions_csv(p)
+    assert len(qs) == 2
+
+
+def test_load_questions_dispatches_csv(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions(p)
+    assert len(qs) == 1
+    q = next(iter(qs.values()))
+    assert q.answers[q.ground_truth] == "Sausages"
+
+
+def test_load_questions_csv_accuracy_with_perfect_predictions(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions_csv(p)
+    # Build a perfect predictions dict (predicted = ground_truth for every question)
+    perfect = {
+        qid: Prediction(question_id=qid, predicted_answer=q.ground_truth)  # type: ignore[arg-type]
+        for qid, q in qs.items()
+    }
+    acc = compute_accuracy(qs, perfect, answers_path=None)
+    assert acc == 1.0
+
+
+def test_load_questions_csv_accuracy_with_wrong_predictions(tmp_path: Path):
+    p = _write_csv(tmp_path, _CSV_HEADER + _CSV_ROW1)
+    qs = load_questions_csv(p)
+    q = next(iter(qs.values()))
+    wrong_letter = next(
+        letter for letter in ["a", "b", "c", "d"] if letter != q.ground_truth
+    )
+    wrong = {
+        qid: Prediction(question_id=qid, predicted_answer=wrong_letter)  # type: ignore[arg-type]
+        for qid in qs
+    }
+    acc = compute_accuracy(qs, wrong, answers_path=None)
+    assert acc == 0.0
+
+
+# ---------------------------------------------------------------------------
+# WandbLogger no-op tests (wandb not installed in CI)
+# ---------------------------------------------------------------------------
+
+def test_wandb_logger_noop_when_not_installed(monkeypatch):
+    """WandbLogger must be a silent no-op when wandb is absent."""
+    import castlerag.eval.wandb_logger as wl
+    monkeypatch.setattr(wl, "_wandb", lambda: None)
+    from castlerag.config import CastleRAGConfig
+    cfg = CastleRAGConfig()
+    logger = wl.WandbLogger(cfg, n_questions=5)
+    assert not logger._active
+    # All methods must be callable without error when inactive
+    logger.log_summary(0.5, {"mean_cameras": 2.0}, 5)
+    logger.log_artifacts([Path("/nonexistent/file.json")])
+    logger.finish()
