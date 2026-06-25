@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from castlerag.retrieval.candidate_expand import _collect_frame_paths
 from castlerag.retrieval.filters import build_filter
 from castlerag.retrieval.search import (
     _collapse_hits,
@@ -560,6 +561,13 @@ def _make_hit(
         source_type=source_type,
         modality="text",
     )
+
+
+def test_collect_frame_paths_max_frames_zero_disables_visual_inputs():
+    """max_frames=0 returns no frames even when hits have sampled frames."""
+    hit = _make_hit("vid_1", source_type="multimodal_frame")
+    hit.sampled_frame_paths = ["frame_0.jpg", "frame_1.jpg"]
+    assert _collect_frame_paths([hit], max_frames=0) == []
 
 
 def test_collapse_hits_stops_at_max_rows():

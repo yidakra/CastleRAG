@@ -87,9 +87,17 @@ def _install_basic_auth(app: "Dash") -> None:
     import os
 
     cred = os.getenv("CASTLERAG_UI_BASIC_AUTH", "").strip()
-    if not cred or ":" not in cred:
+    if not cred:
         return
+    if ":" not in cred:
+        raise ValueError(
+            "CASTLERAG_UI_BASIC_AUTH must be formatted as user:password"
+        )
     user, _, password = cred.partition(":")
+    if not user or not password:
+        raise ValueError(
+            "CASTLERAG_UI_BASIC_AUTH requires non-empty user and password"
+        )
 
     from flask import Response, request
 

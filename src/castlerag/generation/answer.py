@@ -174,6 +174,36 @@ def _gather_frame_paths(
     return paths
 
 
+def _build_user_content(
+    prompt: str,
+    evidence_rows: List[RetrievalHit],
+    max_frames: int,
+) -> Any:
+    """Return the user message content for a chat call.
+
+    When sampled frame JPEGs are available on disk they are base64-encoded and
+    appended as image_url items alongside the text, making the call multimodal.
+    Falls back to the plain prompt string when no frames are present or files
+    are missing.
+    """
+    encoded = [
+        b
+        for b in (_b64_frame(p) for p in _gather_frame_paths(evidence_rows, max_frames))
+        if b
+    ]
+    if not encoded:
+        return prompt
+    user_content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for b64 in encoded:
+        user_content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            }
+        )
+    return user_content
+
+
 def build_messages(
     question: EvalQuestion,
     hints: RouteHints,
@@ -195,22 +225,7 @@ def build_messages(
         support_priors=support_priors,
         max_evidence_rows=max_evidence_rows,
     )
-    encoded = [
-        b
-        for b in (_b64_frame(p) for p in _gather_frame_paths(evidence_rows, max_frames))
-        if b
-    ]
-    if encoded:
-        user_content: Any = [{"type": "text", "text": prompt}]
-        for b64 in encoded:
-            user_content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                }
-            )
-    else:
-        user_content = prompt
+    user_content = _build_user_content(prompt, evidence_rows, max_frames)
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
@@ -590,6 +605,7 @@ def generate_freeform_answer(
     *,
     model: str = "Qwen/Qwen3-VL-8B-Instruct",
     max_evidence_rows: int = 50,
+    max_frames: int = 8,
     refinement_context: Optional[str] = None,
 ) -> str:
     """Answer an open question directly from evidence (no MCQ sentinel).
@@ -597,6 +613,12 @@ def generate_freeform_answer(
     ``refinement_context`` — when set (refinement pass) — appends the
     human reviewer's camera verdicts and justifications after the evidence
     block, grounding the answer in human-validated signals.
+
+    Sampled frame JPEGs on the evidence rows are base64-encoded and attached
+    as image_url items (mirroring :func:`build_messages`), so static-visual
+    and mixed questions reach the Qwen3-VL model with the actual frame
+    evidence rather than text alone. Falls back to a plain-text message when
+    no frames are available.
     """
     rows = evidence_rows[:max_evidence_rows]
     evidence_text = "\n\n".join(_enumerate_evidence_rows(rows)) or _MISSING_EVIDENCE_ROW
@@ -614,9 +636,10 @@ def generate_freeform_answer(
         evidence=evidence_text,
         context_block=context_block,
     )
+    user_content = _build_user_content(user, rows, max_frames)
     messages = [
         {"role": "system", "content": _FREEFORM_SYSTEM_PROMPT},
-        {"role": "user", "content": user},
+        {"role": "user", "content": user_content},
     ]
     raw = _call_generation_llm_with_model(llm_client, messages, model=model)
     return clean_answer_text(raw)

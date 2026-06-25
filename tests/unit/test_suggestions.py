@@ -84,6 +84,23 @@ def test_suggest_justification_text_calls_client_and_strips():
     assert "Bjorn" in user
 
 
+def test_suggest_justification_text_ignored_returns_empty():
+    # An ignored angle is deliberately set aside: no justification, and the LLM
+    # is never called (so no contradictory "flagged as inconclusive" draft).
+    client = FakeClient("FLAGGED this camera angle as inconclusive.")
+    out = suggest_justification_text(
+        claim="X did Y",
+        camera_id="Bjorn",
+        verdict="ignored",
+        evidence_text="doorway handoff at 12:29",
+        meta=None,
+        llm_client=client,
+        model="test-model",
+    )
+    assert out == ""
+    assert client.calls == []  # short-circuited before reaching the client
+
+
 def test_suggest_refined_query_text_includes_weak_cameras():
     client = FakeClient("Re-examine the doorway handoff with a clearer Luca angle.")
     reviews = {

@@ -258,6 +258,38 @@ def test_rerank_candidates_skips_parse_failures_and_low_relevance(caplog):
     assert "parse failure" in caplog.text
 
 
+def test_rerank_candidates_zeroes_support_for_pruned_fallback(caplog):
+    # The only candidate is rejected by min_relevance but reports non-zero
+    # support. Keeping it as fallback must zero its support so it does not flow
+    # into support_priors and mislead generate_answer() into "supported".
+    pack_low = _pack("pack_low", 0.6)
+    client = _FakeLLMClient(
+        [
+            (
+                '{"relevance": 1, "support": {"a": 0, "b": 0, "c": 4, "d": 0}, '
+                '"keep": true, "rationale": "Weak but only option"}'
+            ),
+        ]
+    )
+    with caplog.at_level(logging.WARNING):
+        result = rerank_candidates(
+            question=_question(),
+            hints=RouteHints(route="speech_text"),
+            candidate_packs=[pack_low],
+            llm_client=client,
+            min_relevance=1,
+        )
+    assert [item.pack.pack_id for item in result.kept_packs] == ["pack_low"]
+    fallback = result.kept_packs[0]
+    assert fallback.reranker_output.support == {"a": 0, "b": 0, "c": 0, "d": 0}
+    assert result.support_priors == {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}
+    # final score recomputed without the support term (relevance only).
+    assert fallback.final_rerank_score == compute_rerank_score(
+        fallback.reranker_output
+    )
+    assert "fallback" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # format_candidate_pack — ValueError when neither pack nor route+hit provided
 # ---------------------------------------------------------------------------

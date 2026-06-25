@@ -159,7 +159,10 @@ class RagEngine:
         )
         query_vector = self._embed_query(question)
         moments = self._hits_to_moments(
-            evidence_rows, claim.support, query_vector=query_vector
+            evidence_rows,
+            claim.support,
+            query_vector=query_vector,
+            exclude_cameras=exclude_cameras,
         ) or [self._no_evidence_moment(claim.support)]
         # Append clickable time-evidence citations grounded in the surfaced
         # moments, so the answer carries seekable links into the camera embeds.
@@ -172,8 +175,11 @@ class RagEngine:
                 for h in result.evidence_rows
                 if h.camera_id and h.day
             }),
+            # The no-evidence placeholder carries the "--:--" clock sentinel (its
+            # moment_id is "m0", same as a real first moment), so count real
+            # displayed moments by that sentinel — matching _append_evidence_citations.
             "displayed": sum(
-                1 for m in moments if m.moment_id != "no-evidence"
+                1 for m in moments if m.clock_label != "--:--"
             ),
         }
         return ChatTurnResult(
@@ -451,6 +457,7 @@ class RagEngine:
         hits: List[RetrievalHit],
         support: SupportLevel,
         query_vector: Optional[List[float]] = None,
+        exclude_cameras: Sequence[str] = (),
     ) -> List[EvidenceMoment]:
         """Cluster hits into synchronized 3-camera moments, ranked by relevance.
 
@@ -458,6 +465,8 @@ class RagEngine:
         the focused moment is the evidence the answer is built on, not the bucket
         with the highest raw RRF. ``query_vector`` (when given) lets the
         synchronized-angle fill score the co-temporal cameras by relevance.
+        ``exclude_cameras`` (rejected during review) are kept out of the
+        synchronized-angle fill so a rejected camera can't reappear as a sync tile.
         """
         buckets: "OrderedDict[Tuple[str, int, int], List[RetrievalHit]]" = OrderedDict()
         for hit in hits:
@@ -528,7 +537,13 @@ class RagEngine:
                 for cam, hit in list(by_camera.items())[:_FIXED_CAMERA_COUNT]
             ]
             cameras = self._fill_synchronized_cameras(
-                real, day, hour, start, anchor.absolute_start, query_vector
+                real,
+                day,
+                hour,
+                start,
+                anchor.absolute_start,
+                query_vector,
+                exclude_cameras=exclude_cameras,
             )
             # Normalise the tiles within the moment so the best angle reads 1.0 and
             # the others are comparable fractions of it (relative angle relevance),
@@ -573,6 +588,7 @@ class RagEngine:
         start: float,
         abs_start_ms: Optional[int],
         query_vector: Optional[List[float]] = None,
+        exclude_cameras: Sequence[str] = (),
     ) -> List[CameraAngle]:
         """Fill a moment's camera slots with the angles actually rolling then.
 
@@ -580,14 +596,21 @@ class RagEngine:
         with the OTHER cameras rolling at this timestamp, fetched from the index.
         With a ``query_vector`` they are scored by relevance to the question (real
         match scores); without one they are ``is_context`` fillers (the "sync"
-        tile). Only when no co-temporal data is available (offline / no Qdrant) do
+        tile). ``exclude_cameras`` (rejected during review) are unioned into the
+        excluded set so a rejected camera can never be pulled back in as a sync
+        tile. Only when no co-temporal data is available (offline / no Qdrant) do
         we fall back to the old ego-roster padding so the tiles still render.
         """
         cameras = list(real[:_FIXED_CAMERA_COUNT])
         present = {cam.camera_id for cam in cameras}
         if len(cameras) < _FIXED_CAMERA_COUNT:
+            # Exclude both already-shown cameras and the rejected ones, so a
+            # rejected angle is never re-pulled as a synchronized fill.
             cotemporal = self._cotemporal_cameras(
-                day, abs_start_ms, exclude=present, query_vector=query_vector
+                day,
+                abs_start_ms,
+                exclude=present | set(exclude_cameras),
+                query_vector=query_vector,
             )
             for cam in cotemporal:
                 if len(cameras) >= _FIXED_CAMERA_COUNT:

@@ -368,6 +368,20 @@ def test_basic_auth_absent_when_env_unset(monkeypatch):
     assert app.server.test_client().get("/").status_code != 401  # no gate
 
 
+def test_basic_auth_rejects_malformed_credentials(monkeypatch):
+    import pytest
+    from dash import Dash, html
+
+    from castlerag.ui.app import _install_basic_auth
+
+    for bad in (":", "user:", ":password", "  :  ", "nocolon"):
+        monkeypatch.setenv("CASTLERAG_UI_BASIC_AUTH", bad)
+        app = Dash(__name__)
+        app.layout = html.Div("ok")
+        with pytest.raises(ValueError):
+            _install_basic_auth(app)
+
+
 def test_should_converge_true_when_all_confirmed_or_ignored():
     from castlerag.ui.callbacks import _should_converge
 

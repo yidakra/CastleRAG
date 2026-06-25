@@ -159,6 +159,8 @@ def _collect_frame_paths(
     rows: List[RetrievalHit], max_frames: Optional[int] = None
 ) -> List[str]:
     """Return deduplicated sampled frame JPEG paths from all hits, capped at max_frames."""  # noqa: E501
+    if max_frames is not None and max_frames <= 0:
+        return []
     paths: List[str] = []
     seen: set = set()
     for row in rows:

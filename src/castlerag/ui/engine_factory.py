@@ -18,6 +18,10 @@ log = logging.getLogger("castlerag.ui")
 # Short budget for the liveness probe; a real local vLLM answers in well under this.
 _PROBE_TIMEOUT_SECONDS = 3.0
 
+# Budget for the 1-token generation completion probe. A served-model mismatch or a
+# stalled endpoint must not hang startup, so the request itself is time-bounded.
+_GEN_PROBE_TIMEOUT_SECONDS = 15.0
+
 
 class EngineUnavailable(RuntimeError):
     """Raised when ``require_live`` is set but the real backend cannot be built.
@@ -82,14 +86,19 @@ def build_engine(
         from castlerag.ui.rag_engine import RagEngine
 
         engine = RagEngine.from_config(cfg=cfg, mirror=mirror)
-        if require_live:
-            # Catch a served-model-name / config mismatch (and other call-time
-            # faults) up front rather than on the first question.
-            _verify_generation_model(engine, base_url)
+        # Catch a served-model-name / config mismatch (and other call-time faults)
+        # up front rather than on the first question. This runs in both modes: in
+        # strict mode it raises; otherwise EngineUnavailable is routed to fallback
+        # below so a mismatched endpoint yields the offline engine, not a live one
+        # that fails on the first query.
+        _verify_generation_model(engine, base_url)
         log.info("RagEngine active (real route->retrieve->rerank->generate).")
         return engine
-    except EngineUnavailable:
-        raise
+    except EngineUnavailable as exc:
+        # Served-model verification failed. In strict mode re-raise; otherwise fall
+        # back to offline rather than returning a live engine that would fail on the
+        # first query.
+        return _fallback_or_raise(str(exc), mirror, require_live)
     except Exception as exc:  # noqa: BLE001 - any infra failure must not crash the UI
         return _fallback_or_raise(
             f"RagEngine unavailable ({type(exc).__name__}: {exc}).",
@@ -113,6 +122,7 @@ def _verify_generation_model(engine: Any, base_url: str) -> None:
             messages=[{"role": "user", "content": "ping"}],
             max_tokens=1,
             temperature=0.0,
+            timeout=_GEN_PROBE_TIMEOUT_SECONDS,
         )
     except Exception as exc:  # noqa: BLE001
         served = ""

@@ -41,8 +41,8 @@ PY="${VENV}/bin/python"
 
 mkdir -p "${QDRANT_SNAPSHOTS}"
 
-wait_ready() { # url label logfile [pid]
-    local url="$1" label="$2" logfile="$3" pid="${4:-}"
+wait_ready() { # url label logfile [pid] [container]
+    local url="$1" label="$2" logfile="$3" pid="${4:-}" container="${5:-}"
     for _ in $(seq 1 240); do
         if curl -sf "${url}" >/dev/null 2>&1; then
             echo "[vps] ${label} ready"
@@ -51,6 +51,12 @@ wait_ready() { # url label logfile [pid]
         if [ -n "${pid}" ] && ! kill -0 "${pid}" 2>/dev/null; then
             echo "[vps] ERROR: ${label} process died"
             tail -40 "${logfile}" 2>/dev/null || true
+            return 1
+        fi
+        if [ -n "${container}" ] \
+            && [ "$(sudo docker inspect -f '{{.State.Running}}' "${container}" 2>/dev/null)" != "true" ]; then
+            echo "[vps] ERROR: ${label} container not running"
+            sudo docker logs --tail 40 "${container}" 2>/dev/null || true
             return 1
         fi
         sleep 5
@@ -78,7 +84,7 @@ sudo docker run -d --name castle_qdrant --restart unless-stopped \
     --user "$(id -u):$(id -g)" \
     "${QDRANT_IMAGE}" >/dev/null
 
-wait_ready "http://localhost:6333/readyz" qdrant "/dev/null"
+wait_ready "http://localhost:6333/readyz" qdrant "/dev/null" "" castle_qdrant
 
 PTS=$(curl -s "http://localhost:6333/collections/${COLL}" \
     | "${PY}" -c 'import sys,json; print(json.load(sys.stdin)["result"]["points_count"])' 2>/dev/null)

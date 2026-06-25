@@ -46,6 +46,9 @@ source "${VENV}/bin/activate"
 # the collection survives the job and is reachable from the eval node.  No `cd`
 # (keeps the relative --config path valid); storage path set via env override.
 export QDRANT__STORAGE__STORAGE_PATH="/scratch-shared/${USER}/qdrant_storage/storage"
+# Raise the client httpx timeout (default 60s) for bulk upserts on scratch I/O,
+# which otherwise raise ResponseHandlingException: timed out under heavy load.
+export QDRANT_CLIENT_TIMEOUT="${QDRANT_CLIENT_TIMEOUT:-300}"
 "${HOME}/qdrant/qdrant" &
 QDRANT_PID=$!
 trap 'kill $QDRANT_PID 2>/dev/null' EXIT

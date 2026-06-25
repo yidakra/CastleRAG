@@ -93,6 +93,10 @@ def suggest_justification_text(
     evidence = evidence or "(no retrieved text for this angle)"
 
     verdict_lower = (verdict or "").lower()
+    # An ignored angle was deliberately set aside; no justification is needed and
+    # the generic "flagged as inconclusive" fall-through would contradict that.
+    if verdict_lower == "ignored":
+        return ""
     if verdict_lower == "confirmed":
         instruction = (
             "The reviewer has CONFIRMED this camera angle. "

@@ -286,6 +286,30 @@ def rerank_candidates(
             "All reranker candidates filtered (best relevance=%d); keeping as fallback.",  # noqa: E501
             best_fallback.reranker_output.relevance,
         )
+        fallback_output = best_fallback.reranker_output
+        was_rejected = (
+            not fallback_output.keep
+            or fallback_output.relevance <= min_relevance
+        )
+        if was_rejected:
+            # The fallback was pruned by keep/min_relevance, so reranking does not
+            # actually trust it as grounding. Zero its support before it flows into
+            # support_priors, otherwise generate_answer() would mark the answer
+            # "supported" even though every candidate was rejected.
+            zeroed_output = fallback_output.model_copy(
+                update={"support": {"a": 0, "b": 0, "c": 0, "d": 0}}
+            )
+            zeroed_score = compute_rerank_score(
+                zeroed_output,
+                relevance_weight=relevance_weight,
+                support_weight=support_weight,
+            )
+            best_fallback = best_fallback.model_copy(
+                update={
+                    "reranker_output": zeroed_output,
+                    "final_rerank_score": zeroed_score,
+                }
+            )
         ranked.append(best_fallback)
 
     ranked.sort(

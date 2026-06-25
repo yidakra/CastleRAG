@@ -634,6 +634,39 @@ def test_cotemporal_cameras_excludes_rejected():
     assert {c.camera_id for c in cams} == {"Allie", "Cathal"}
 
 
+def test_hits_to_moments_excludes_rejected_from_synchronized_fill():
+    """A rejected camera must not reappear as a synchronized 'sync' fill tile."""
+    # Four cameras rolling co-temporally, but an EMPTY ego roster so the only way a
+    # camera reaches a slot is the synchronized fill (no roster padding can re-add a
+    # rejected one). Only Allie is a real hit; Bjorn is rejected, so the two open
+    # slots must come from Cathal/Dima — never Bjorn.
+    eng = _build_cotemporal_engine(cameras=("Allie", "Bjorn", "Cathal", "Dima"))
+    eng.ego_cameras = ()  # disable roster padding fallback
+    hit = _clip_hit("Allie", 0.7, start=120.0)
+    moments = eng._hits_to_moments(
+        [hit], SupportLevel.PARTIAL, exclude_cameras=("Bjorn",)
+    )
+    cams = {c.camera_id for c in moments[0].cameras}
+    assert "Bjorn" not in cams  # rejected camera never re-pulled as a sync tile
+    assert "Allie" in cams  # the real hit is kept
+    assert cams <= {"Allie", "Cathal", "Dima"}  # fills came from non-rejected angles
+
+
+def test_answer_no_evidence_reports_zero_displayed(tmp_path):
+    """A no-hit query reports displayed: 0, not 1 (the placeholder isn't evidence)."""
+    engine = _build_stub_engine(tmp_path)
+    # A question whose retrieval finds nothing: force _hits_to_moments to yield the
+    # no-evidence placeholder by stubbing it to return no real moments.
+    engine._hits_to_moments = lambda *a, **k: []  # type: ignore[method-assign]
+    result = engine.answer(
+        "Who balances a cup of water on the door?",
+        {"a": "Allie", "b": "Bjorn", "c": "Cathal", "d": "Luca"},
+    )
+    assert len(result.moments) == 1
+    assert result.moments[0].clock_label == "--:--"  # the no-evidence placeholder
+    assert result.pipeline_stats["displayed"] == 0
+
+
 def test_cotemporal_cameras_query_scored_are_scored_not_sync():
     """With a query vector, synchronized angles get real scores (no '0.00 sync')."""
     eng = _build_cotemporal_engine()

@@ -163,6 +163,7 @@ if [ -n "${NAMED_TUNNEL_TOKEN:-}" ]; then
 
 EOF
     wait "$UI_PID"
+    exit 0
 fi
 
 # --- quick tunnel (ephemeral URL) + basic auth, or default SSH-tunnel serve ---

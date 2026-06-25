@@ -629,3 +629,50 @@ def test_generate_freeform_answer_has_no_mcq_sentinel():
     )
     assert "FINAL_ANSWER" not in text
     assert text.startswith("Cathal taught Allie the guitar")
+
+
+def test_generate_freeform_answer_attaches_sampled_frames(tmp_path):
+    """Free-form path sends frame images when rows carry sampled_frame_paths."""
+    frame = tmp_path / "frame_0.jpg"
+    frame.write_bytes(b"\xff\xd8\xff\xe0fakejpeg")
+    hit = _make_hit().model_copy(update={"sampled_frame_paths": [str(frame)]})
+
+    captured = {}
+
+    def _fake_llm(messages):
+        captured["messages"] = messages
+        return "Allie walked to the office."
+
+    generate_freeform_answer(
+        question=_make_question(),
+        hints=RouteHints(route="static_visual"),
+        evidence_rows=[hit],
+        llm_client=_fake_llm,
+        model="test-model",
+    )
+
+    content = captured["messages"][1]["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text"
+    image_items = [item for item in content if item["type"] == "image_url"]
+    assert len(image_items) == 1
+    assert image_items[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+def test_generate_freeform_answer_plain_text_without_frames():
+    """Free-form path stays plain-text when no frames are present."""
+    captured = {}
+
+    def _fake_llm(messages):
+        captured["messages"] = messages
+        return "Allie walked to the office."
+
+    generate_freeform_answer(
+        question=_make_question(),
+        hints=RouteHints(route="speech_text"),
+        evidence_rows=[_make_hit()],
+        llm_client=_fake_llm,
+        model="test-model",
+    )
+
+    assert isinstance(captured["messages"][1]["content"], str)
