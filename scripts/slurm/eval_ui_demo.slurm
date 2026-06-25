@@ -33,7 +33,32 @@ require_ready() {  # name url logfile
   fi
 }
 
-CUDA_VISIBLE_DEVICES=0 python scripts/omniembed_server.py --port 8200 > logs/eval_embed_${SLURM_JOB_ID}.log 2>&1 &
+# The OmniEmbed server intermittently dies with a silent SIGKILL right as model
+# load finishes (reaches "Loading weights: 100%" but never prints "model ready"),
+# with no Python traceback — transient per-node state on shared gpu_a100 nodes, not
+# our code (the same binary succeeds ~half the time). A SIGKILL can't be caught
+# in-process, so retry the whole launch here. Poll for readiness but bail the
+# instant the server PID dies, so a crash retries within seconds instead of after
+# the full 20-minute readiness window.
+EMBED_LOG="logs/eval_embed_${SLURM_JOB_ID}.log"
+require_embed() {  # url
+  for attempt in 1 2 3; do
+    CUDA_VISIBLE_DEVICES=0 python scripts/omniembed_server.py --port 8200 > "${EMBED_LOG}" 2>&1 &
+    local pid=$!
+    for i in $(seq 1 120); do
+      curl -sf "$1" >/dev/null 2>&1 && { echo "[eval] embed ready (attempt ${attempt})"; return 0; }
+      kill -0 "$pid" 2>/dev/null || break  # process died → stop polling, retry now
+      sleep 10
+    done
+    echo "[eval] embed launch attempt ${attempt} failed; last 20 log lines:" >&2
+    grep -av "Loading weights" "${EMBED_LOG}" 2>/dev/null | tail -20 >&2 || true
+    kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+    sleep 5
+  done
+  echo "[eval] FATAL: embed never became ready at $1 after 3 attempts" >&2
+  exit 1
+}
+
 CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-VL-8B-Instruct --port 8201 \
     --served-model-name Qwen/Qwen3-VL-8B-Instruct qwen3vl \
     --gpu-memory-utilization 0.90 --max-model-len 49152 --trust-remote-code \
@@ -43,7 +68,7 @@ export QDRANT__STORAGE__STORAGE_PATH="${SC}/qdrant_storage/storage"
 trap 'kill $(jobs -p) 2>/dev/null' EXIT
 
 require_ready qdrant http://localhost:6333/readyz   logs/eval_qdrant_${SLURM_JOB_ID}.log
-require_ready embed  http://localhost:8200/v1/models logs/eval_embed_${SLURM_JOB_ID}.log
+require_embed http://localhost:8200/v1/models
 require_ready vllm   http://localhost:8201/v1/models logs/eval_vllm_${SLURM_JOB_ID}.log
 
 export VLLM_BASE_URL=http://localhost:8201/v1
