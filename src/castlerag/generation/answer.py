@@ -365,16 +365,6 @@ def extract_answer(
     return _fallback_answer(support_priors, question_id=question_id)
 
 
-def _has_explicit_answer(raw_text: str) -> bool:
-    """True when the model emitted a single, unambiguous ``FINAL_ANSWER: <letter>``.
-
-    Distinguishes a real committed choice from a fallback/abstain/truncation case,
-    so callers can respect the model's answer instead of overriding it.
-    """
-    matches = {m.group(1).lower() for m in _FINAL_ANSWER_RE.finditer(raw_text)}
-    return len(matches) == 1
-
-
 def _fallback_answer(
     support_priors: Dict[str, float],
     question_id: Optional[str] = None,
@@ -538,19 +528,13 @@ def generate_answer(
     )
     predicted_answer: AnswerChoice = presented_to_original[presented_answer]  # type: ignore[assignment]
 
-    # When nothing supports any choice — no evidence retrieved, or the reranker
-    # credited no choice with support — a forced MCQ answer is just a guess, and
-    # the LLM reliably defaults to "a". Override it with a deterministic uniform
-    # pick so the guess is unbiased, and record that the answer is unsupported.
-    #
-    # But only when the model did NOT actually commit to a letter: an explicit,
-    # evidence-grounded FINAL_ANSWER must be respected even if the reranker
-    # assigned zero support — otherwise a working generator's real answer is
-    # discarded as if it were a random guess (the dominant accuracy bug when the
-    # reranker frequently returns all-zero support).
+    # ``is_supported`` is a recorded diagnostic only — it flags answers with no
+    # retrieval/reranker backing (no evidence, or the reranker credited no
+    # choice) so error analysis can separate retrieval failures from reasoning
+    # failures. It does NOT mutate the answer: extract_answer already routes
+    # missing/abstained answers through a deterministic fallback, so the model's
+    # explicit, evidence-grounded choice is always respected.
     is_supported = bool(rows) and max(support_priors.values(), default=0.0) > 0.0
-    if not is_supported and not _has_explicit_answer(raw_answer_text):
-        predicted_answer = _fallback_answer({}, question_id=question.question_id)
 
     return Prediction(
         question_id=question.question_id,
