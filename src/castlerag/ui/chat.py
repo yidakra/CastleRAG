@@ -539,6 +539,7 @@ _JUSTIFICATION_TEMPLATE = {
     "confirmed": "{cam}'s angle clearly supports the claim",
     "flagged": "{cam}'s view is inconclusive — a clearer angle is needed",
     "rejected": "{cam}'s angle does not support the claim",
+    "ignored": "{cam} was set aside — its footage doesn't bear on the claim",
 }
 
 
@@ -550,8 +551,10 @@ def compose_justification(
 ) -> str:
     """Build an editable per-camera justification draft (deterministic, offline).
 
-    ``verdict`` is the stored state (``confirmed`` / ``flagged`` / ``rejected``).
-    A live engine replaces this with an LLM-composed, evidence-grounded draft.
+    ``verdict`` is the stored state (``confirmed`` / ``flagged`` / ``rejected`` /
+    ``ignored``). A live engine replaces this with an LLM-composed,
+    evidence-grounded draft (and returns this template for ``ignored``, since the
+    LLM path intentionally drafts nothing for a deliberately set-aside angle).
     """
     base = _JUSTIFICATION_TEMPLATE.get(
         verdict, "{cam} was reviewed for the claim"

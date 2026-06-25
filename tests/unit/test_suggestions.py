@@ -180,11 +180,13 @@ def test_suggestions_reject_non_openai_client():
 # --- offline / deterministic drafts ---------------------------------------
 
 
-@pytest.mark.parametrize("verdict", ["confirmed", "flagged", "rejected"])
+@pytest.mark.parametrize("verdict", ["confirmed", "flagged", "rejected", "ignored"])
 def test_compose_justification_is_nonempty_per_verdict(verdict: str):
     text = compose_justification("the claim", "Bjorn", verdict, evidence_text="x" * 200)
     assert text and text.endswith(".")
     assert "Bjorn" in text
+    # Every known verdict gets a specific draft, not the generic catch-all.
+    assert "was reviewed for the claim" not in text
 
 
 def test_placeholder_engine_suggestions_are_deterministic():
