@@ -13,13 +13,12 @@ Anti-confabulation rules (SPEC §6.1.1 — mandatory, not optional style):
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import re
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+from castlerag.frame_encoding import encode_frame, estimate_text_tokens
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import AnswerChoice, EvalQuestion, Prediction, RetrievalHit
 
@@ -147,17 +146,6 @@ def build_prompt(
     )
 
 
-def _b64_frame(path: str) -> Optional[str]:
-    """Read a frame JPEG and return its base64 string, or None if missing/unreadable."""
-    p = Path(path)
-    if not p.exists():
-        return None
-    try:
-        return base64.b64encode(p.read_bytes()).decode()
-    except OSError:
-        return None
-
-
 def _gather_frame_paths(
     evidence_rows: List[RetrievalHit], max_frames: int = 8
 ) -> List[str]:
@@ -178,19 +166,38 @@ def _build_user_content(
     prompt: str,
     evidence_rows: List[RetrievalHit],
     max_frames: int,
+    *,
+    frame_max_pixels: int = 768,
+    image_token_budget: Optional[int] = None,
 ) -> Any:
     """Return the user message content for a chat call.
 
-    When sampled frame JPEGs are available on disk they are base64-encoded and
-    appended as image_url items alongside the text, making the call multimodal.
-    Falls back to the plain prompt string when no frames are present or files
-    are missing.
+    Sampled frame JPEGs are downscaled to ``frame_max_pixels`` on their longest
+    edge, base64-encoded, and appended as image_url items alongside the text,
+    making the call multimodal; the call falls back to the plain prompt string
+    when no frames are present or files are missing.
+
+    Downscaling caps each frame to a small, known visual-token cost (full 4K
+    frames otherwise cost ~10k tokens each, blowing the model context). When
+    ``image_token_budget`` is given, frames are packed only while their estimated
+    visual tokens stay within it, guaranteeing the prompt fits the served
+    context — the failure that previously rejected 21/40 generation calls with
+    66k-72k-token prompts against a 49k limit.
     """
-    encoded = [
-        b
-        for b in (_b64_frame(p) for p in _gather_frame_paths(evidence_rows, max_frames))
-        if b
-    ]
+    remaining = image_token_budget
+    encoded: List[str] = []
+    if (remaining is None or remaining > 0) and max_frames > 0:
+        for path in _gather_frame_paths(evidence_rows, max_frames):
+            enc = encode_frame(path, max_pixels=frame_max_pixels)
+            if enc is None:
+                continue
+            b64, image_tokens = enc
+            if remaining is not None:
+                if image_tokens > remaining:
+                    # Adding this frame would exceed the budget; stop packing.
+                    break
+                remaining -= image_tokens
+            encoded.append(b64)
     if not encoded:
         return prompt
     user_content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
@@ -211,21 +218,58 @@ def build_messages(
     support_priors: Dict[str, float],
     max_evidence_rows: int = 50,
     max_frames: int = 8,
+    frame_max_pixels: int = 768,
+    prompt_token_budget: int = 40000,
+    reserved_output_tokens: int = 512,
 ) -> List[Dict[str, Any]]:
     """Return the system+user message list for the generation LLM.
 
-    When sampled frame JPEGs are available on disk they are base64-encoded and
-    appended as image_url items in the user message, making the call multimodal.
-    Falls back to plain text when no frames are present or files are missing.
+    Sampled frame JPEGs are downscaled, base64-encoded, and appended as image_url
+    items, making the call multimodal; the call falls back to plain text when no
+    frames are present or files are missing.
+
+    Frames and evidence text are packed under ``prompt_token_budget`` (which must
+    sit below the served ``--max-model-len`` with ``reserved_output_tokens`` of
+    headroom for the completion): evidence rows are trimmed if the text alone is
+    too large, then frames are added only while the running token estimate stays
+    within budget. This keeps prompts from overrunning the model context — the
+    failure that previously rejected 21/40 generation calls with 66k-72k-token
+    prompts against a 49k limit.
     """
+    usable_budget = prompt_token_budget - reserved_output_tokens
+    system_tokens = estimate_text_tokens(_SYSTEM_PROMPT)
+
+    # Trim evidence rows from the tail until the text portion fits the budget,
+    # keeping at least the single strongest row so the prompt is never empty.
+    rows = list(evidence_rows[:max_evidence_rows])
     prompt = build_prompt(
         question=question,
         hints=hints,
-        evidence_rows=evidence_rows,
+        evidence_rows=rows,
         support_priors=support_priors,
         max_evidence_rows=max_evidence_rows,
     )
-    user_content = _build_user_content(prompt, evidence_rows, max_frames)
+    while (
+        len(rows) > 1
+        and system_tokens + estimate_text_tokens(prompt) > usable_budget
+    ):
+        rows = rows[:-1]
+        prompt = build_prompt(
+            question=question,
+            hints=hints,
+            evidence_rows=rows,
+            support_priors=support_priors,
+            max_evidence_rows=max_evidence_rows,
+        )
+
+    image_budget = usable_budget - system_tokens - estimate_text_tokens(prompt)
+    user_content = _build_user_content(
+        prompt,
+        rows,
+        max_frames,
+        frame_max_pixels=frame_max_pixels,
+        image_token_budget=max(0, image_budget),
+    )
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
@@ -436,6 +480,9 @@ def generate_answer(
     model: str = "Qwen/Qwen3-VL-8B-Instruct",
     max_evidence_rows: int = 50,
     shuffle_choices: bool = False,
+    max_frames: int = 8,
+    frame_max_pixels: int = 768,
+    prompt_token_budget: int = 40000,
 ) -> Prediction:
     """Run grounded answer generation and return a normalized Prediction."""
     rows = evidence_rows[:max_evidence_rows]
@@ -465,6 +512,9 @@ def generate_answer(
         evidence_rows=rows,
         support_priors=prompt_priors,
         max_evidence_rows=max_evidence_rows,
+        max_frames=max_frames,
+        frame_max_pixels=frame_max_pixels,
+        prompt_token_budget=prompt_token_budget,
     )
     raw_answer_text = _call_generation_llm_with_model(llm_client, messages, model=model)
     presented_answer = extract_answer(
@@ -606,6 +656,8 @@ def generate_freeform_answer(
     model: str = "Qwen/Qwen3-VL-8B-Instruct",
     max_evidence_rows: int = 50,
     max_frames: int = 8,
+    frame_max_pixels: int = 768,
+    prompt_token_budget: int = 40000,
     refinement_context: Optional[str] = None,
 ) -> str:
     """Answer an open question directly from evidence (no MCQ sentinel).
@@ -636,7 +688,19 @@ def generate_freeform_answer(
         evidence=evidence_text,
         context_block=context_block,
     )
-    user_content = _build_user_content(user, rows, max_frames)
+    image_budget = (
+        prompt_token_budget
+        - 512
+        - estimate_text_tokens(_FREEFORM_SYSTEM_PROMPT)
+        - estimate_text_tokens(user)
+    )
+    user_content = _build_user_content(
+        user,
+        rows,
+        max_frames,
+        frame_max_pixels=frame_max_pixels,
+        image_token_budget=max(0, image_budget),
+    )
     messages = [
         {"role": "system", "content": _FREEFORM_SYSTEM_PROMPT},
         {"role": "user", "content": user_content},

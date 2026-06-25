@@ -6,12 +6,11 @@ Ablation: OpenGVLab/InternVL3-8B.
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
-from pathlib import Path
 from typing import Any, List, Mapping, Optional, Sequence
 
+from castlerag.frame_encoding import encode_frame
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import (
     EvalQuestion,
@@ -350,20 +349,26 @@ def _coerce_pack(
     return EvidencePack.model_validate(data)
 
 
-def _b64_frame(path: str) -> Optional[str]:
-    """Read a frame JPEG and return its base64 string, or None if missing/unreadable."""
-    p = Path(path)
-    if not p.exists():
-        return None
-    try:
-        return base64.b64encode(p.read_bytes()).decode()
-    except OSError:
-        return None
+def _build_content(
+    prompt: str,
+    frame_paths: List[str],
+    max_frames: int = 4,
+    frame_max_pixels: int = 768,
+) -> Any:
+    """Return a plain string or a multimodal content list, depending on frames.
 
-
-def _build_content(prompt: str, frame_paths: List[str], max_frames: int = 4) -> Any:
-    """Return a plain string or a multimodal content list, depending on frames."""
-    encoded = [b for b in (_b64_frame(p) for p in frame_paths[:max_frames]) if b]
+    Frames are downscaled to ``frame_max_pixels`` on their longest edge before
+    encoding so a few candidate frames cannot push the reranker prompt past the
+    model context (full-resolution frames previously produced 33k-token prompts).
+    """
+    encoded = [
+        enc[0]
+        for enc in (
+            encode_frame(p, max_pixels=frame_max_pixels)
+            for p in frame_paths[:max_frames]
+        )
+        if enc is not None
+    ]
     if not encoded:
         return prompt
     items: List[Any] = [{"type": "text", "text": prompt}]

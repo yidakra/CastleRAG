@@ -24,6 +24,7 @@ from castlerag.eval.run_eval import (
     EvalPipeline,
     PipelineDependencyError,
     run_eval,
+    run_question,
 )
 from castlerag.retrieval.candidate_expand import expand_candidates
 from castlerag.routing.question_router import RouteHints
@@ -473,7 +474,7 @@ def test_run_eval_wraps_missing_reranker_as_dependency_error(tmp_path: Path):
         generate=_generate,
     )
     with pytest.raises(PipelineDependencyError, match="reranking.*q1"):
-        run_eval(qs, out_dir=tmp_path / "outputs", pipeline=pipeline)
+        run_question(pipeline, run_eval_module.load_config(), next(iter(qs.values())))
 
 
 def test_run_eval_wraps_retrieve_dependency_error_with_question_id(tmp_path: Path):
@@ -511,7 +512,7 @@ def test_run_eval_wraps_retrieve_dependency_error_with_question_id(tmp_path: Pat
         PipelineDependencyError,
         match="retrieval dependency failed for question q1: Qdrant collection is empty",
     ):
-        run_eval(qs, out_dir=tmp_path / "outputs", pipeline=pipeline)
+        run_question(pipeline, run_eval_module.load_config(), next(iter(qs.values())))
 
 
 def test_run_eval_default_pipeline_reports_missing_local_index_artifacts(
@@ -669,7 +670,7 @@ def test_run_eval_unexpected_retrieval_error_is_not_reclassified(
         PipelineDependencyError,
         match="retrieval failed for question q1",
     ):
-        run_eval(qs, out_dir=tmp_path / "outputs", pipeline=pipeline)
+        run_question(pipeline, run_eval_module.load_config(), next(iter(qs.values())))
 
 
 # ---------------------------------------------------------------------------

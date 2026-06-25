@@ -633,8 +633,12 @@ def test_generate_freeform_answer_has_no_mcq_sentinel():
 
 def test_generate_freeform_answer_attaches_sampled_frames(tmp_path):
     """Free-form path sends frame images when rows carry sampled_frame_paths."""
+    # A real (decodable) JPEG — the generator downscales frames before encoding,
+    # so the image must actually open, not just carry a JPEG magic number.
+    from PIL import Image
+
     frame = tmp_path / "frame_0.jpg"
-    frame.write_bytes(b"\xff\xd8\xff\xe0fakejpeg")
+    Image.new("RGB", (64, 48), (120, 90, 200)).save(frame, "JPEG")
     hit = _make_hit().model_copy(update={"sampled_frame_paths": [str(frame)]})
 
     captured = {}

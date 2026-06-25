@@ -114,6 +114,15 @@ class GenerationConfig(BaseModel):
     temperature: float = 0.0
     vllm_tensor_parallel: int = 1
     vllm_gpu_memory_utilization: float = 0.90
+    # Multimodal prompt budgeting. Frames are downscaled to `frame_max_pixels` on
+    # their longest edge before encoding, then packed into the generation prompt
+    # only while the running token estimate stays under `prompt_token_budget`
+    # (which must leave headroom below the served --max-model-len for the
+    # `max_new_tokens` completion). Without this, full-resolution frames produced
+    # 66k-72k-token prompts that the server rejected (>49k context).
+    max_frames: int = 8
+    frame_max_pixels: int = 768
+    prompt_token_budget: int = 40000
     # When True, generate_answer presents the four answer choices in a
     # deterministic per-question permutation (sha1(question_id)) and maps the
     # model's predicted letter back to the original letter.  Counteracts the

@@ -28,6 +28,7 @@ from castlerag.eval.run_eval import (
     _qdrant_collection_count,
     _qdrant_collection_exists,
     run_eval,
+    run_question,
 )
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import (
@@ -158,7 +159,14 @@ def _default_pipeline() -> EvalPipeline:
 
 
 class TestRunEvalErrorPaths:
-    """Test that stage failures are wrapped as PipelineDependencyError."""
+    """Stage failures are wrapped by ``run_question`` as PipelineDependencyError.
+
+    ``run_question`` (the shared per-question path) raises a wrapped, well-labelled
+    dependency error for any failing stage. ``run_eval`` then *absorbs* that
+    per-question failure — recording the question as an unsupported, incorrect
+    prediction and continuing — so one bad question never discards the predictions
+    for the rest of the batch (see ``TestRunEvalResilience``).
+    """
 
     def test_retrieve_not_implemented_raises_dependency_error(self, tmp_path: Path):
         def _bad_retrieve(question, hints):
@@ -171,7 +179,7 @@ class TestRunEvalErrorPaths:
             generate=_default_generate,
         )
         with pytest.raises(PipelineDependencyError, match="retrieval.*q1"):
-            run_eval(_questions_dict(), out_dir=tmp_path / "out", pipeline=pipeline)
+            run_question(pipeline, load_config(), _make_question())
 
     def test_retrieve_pipeline_dependency_error_is_re_wrapped(self, tmp_path: Path):
         def _bad_retrieve(question, hints):
@@ -187,7 +195,7 @@ class TestRunEvalErrorPaths:
             PipelineDependencyError,
             match="retrieval dependency failed for question q1",
         ):
-            run_eval(_questions_dict(), out_dir=tmp_path / "out", pipeline=pipeline)
+            run_question(pipeline, load_config(), _make_question())
 
     def test_retrieve_generic_exception_is_wrapped(self, tmp_path: Path):
         def _bad_retrieve(question, hints):
@@ -202,7 +210,7 @@ class TestRunEvalErrorPaths:
         with pytest.raises(
             PipelineDependencyError, match="retrieval failed for question q1"
         ):
-            run_eval(_questions_dict(), out_dir=tmp_path / "out", pipeline=pipeline)
+            run_question(pipeline, load_config(), _make_question())
 
     def test_rerank_not_implemented_raises_dependency_error(self, tmp_path: Path):
         def _bad_rerank(question, hints, packs):
@@ -215,7 +223,7 @@ class TestRunEvalErrorPaths:
             generate=_default_generate,
         )
         with pytest.raises(PipelineDependencyError, match="reranking.*q1"):
-            run_eval(_questions_dict(), out_dir=tmp_path / "out", pipeline=pipeline)
+            run_question(pipeline, load_config(), _make_question())
 
     def test_rerank_pipeline_dependency_error_is_re_wrapped(self, tmp_path: Path):
         def _bad_rerank(question, hints, packs):
@@ -231,7 +239,7 @@ class TestRunEvalErrorPaths:
             PipelineDependencyError,
             match="reranking dependency failed for question q1",
         ):
-            run_eval(_questions_dict(), out_dir=tmp_path / "out", pipeline=pipeline)
+            run_question(pipeline, load_config(), _make_question())
 
     def test_rerank_generic_exception_is_wrapped(self, tmp_path: Path):
         def _bad_rerank(question, hints, packs):
@@ -246,7 +254,7 @@ class TestRunEvalErrorPaths:
         with pytest.raises(
             PipelineDependencyError, match="reranking failed for question q1"
         ):
-            run_eval(_questions_dict(), out_dir=tmp_path / "out", pipeline=pipeline)
+            run_question(pipeline, load_config(), _make_question())
 
     def test_generate_not_implemented_raises_dependency_error(self, tmp_path: Path):
         def _bad_generate(question, hints, evidence_rows, support_priors):
@@ -259,7 +267,7 @@ class TestRunEvalErrorPaths:
             generate=_bad_generate,
         )
         with pytest.raises(PipelineDependencyError, match="generation.*q1"):
-            run_eval(_questions_dict(), out_dir=tmp_path / "out", pipeline=pipeline)
+            run_question(pipeline, load_config(), _make_question())
 
     def test_generate_pipeline_dependency_error_is_re_wrapped(self, tmp_path: Path):
         def _bad_generate(question, hints, evidence_rows, support_priors):
@@ -275,7 +283,7 @@ class TestRunEvalErrorPaths:
             PipelineDependencyError,
             match="generation dependency failed for question q1",
         ):
-            run_eval(_questions_dict(), out_dir=tmp_path / "out", pipeline=pipeline)
+            run_question(pipeline, load_config(), _make_question())
 
     def test_generate_generic_exception_is_wrapped(self, tmp_path: Path):
         def _bad_generate(question, hints, evidence_rows, support_priors):
@@ -290,11 +298,63 @@ class TestRunEvalErrorPaths:
         with pytest.raises(
             PipelineDependencyError, match="generation failed for question q1"
         ):
-            run_eval(_questions_dict(), out_dir=tmp_path / "out", pipeline=pipeline)
+            run_question(pipeline, load_config(), _make_question())
 
     def test_no_questions_selected_raises_value_error(self, tmp_path: Path):
         with pytest.raises(ValueError, match="No questions selected"):
             run_eval({}, out_dir=tmp_path / "out", pipeline=_default_pipeline())
+
+
+# ---------------------------------------------------------------------------
+# run_eval resilience: a single failing question must not abort the batch
+# ---------------------------------------------------------------------------
+
+
+class TestRunEvalResilience:
+    """A failing question is recorded incorrect; the rest of the batch survives."""
+
+    def test_single_failing_question_does_not_raise(self, tmp_path: Path):
+        def _bad_generate(question, hints, evidence_rows, support_priors):
+            raise OSError("disk full")
+
+        pipeline = EvalPipeline(
+            route=_default_route,
+            retrieve=_default_retrieve,
+            rerank=_default_rerank,
+            generate=_bad_generate,
+        )
+        # Must NOT raise — the failure is absorbed into the prediction set.
+        result = run_eval(
+            _questions_dict(), out_dir=tmp_path / "out", pipeline=pipeline
+        )
+        assert "q1" in result.predictions
+        pred = result.predictions["q1"]
+        assert pred.is_supported is False
+        assert pred.raw_answer_text == ""
+
+    def test_failure_does_not_discard_other_predictions(self, tmp_path: Path):
+        # q2 fails generation; q1 and q3 must still produce real predictions.
+        def _selective_generate(question, hints, evidence_rows, support_priors):
+            if question.question_id == "q2":
+                raise PipelineDependencyError("VLLM server crashed")
+            return _default_generate(question, hints, evidence_rows, support_priors)
+
+        pipeline = EvalPipeline(
+            route=_default_route,
+            retrieve=_default_retrieve,
+            rerank=_default_rerank,
+            generate=_selective_generate,
+        )
+        result = run_eval(
+            _questions_dict(["q1", "q2", "q3"]),
+            out_dir=tmp_path / "out",
+            pipeline=pipeline,
+        )
+        # All three questions get a prediction; only q2 is the unsupported stub.
+        assert set(result.predictions) == {"q1", "q2", "q3"}
+        assert result.predictions["q2"].is_supported is False
+        assert result.predictions["q1"].is_supported is True
+        assert result.predictions["q3"].is_supported is True
 
 
 # ---------------------------------------------------------------------------

@@ -269,8 +269,31 @@ def run_eval(
 
     predictions: Dict[str, Prediction] = {}
     traces: List[dict] = []
+    failed_questions: List[str] = []
     for question in selected.values():
-        result = run_question(active_pipeline, cfg, question)
+        try:
+            result = run_question(active_pipeline, cfg, question)
+        except Exception as exc:  # noqa: BLE001
+            # A single failing question (e.g. an over-long multimodal generation
+            # prompt the LLM server rejects) must not discard the predictions for
+            # every other question. Record it as an unanswered, unsupported
+            # prediction — deterministically wrong vs. the ground-truth letter so
+            # it grades incorrect — and carry on with the rest of the eval.
+            wrong = "a" if question.ground_truth != "a" else "b"
+            predictions[question.question_id] = Prediction(
+                question_id=question.question_id,
+                predicted_answer=wrong,  # type: ignore[arg-type]
+                route=None,
+                raw_answer_text="",
+                is_supported=False,
+            )
+            failed_questions.append(question.question_id)
+            print(
+                f"[run_eval] question {question.question_id} failed, recording as "
+                f"unanswered (counts incorrect): {exc}",
+                flush=True,
+            )
+            continue
         predictions[question.question_id] = result.prediction
         traces.append(
             {
@@ -295,6 +318,13 @@ def run_eval(
         )
         if wb is not None:
             wb.log_question(question, result)
+
+    if failed_questions:
+        print(
+            f"[run_eval] {len(failed_questions)}/{len(selected)} question(s) failed "
+            f"and were counted incorrect: {', '.join(failed_questions)}",
+            flush=True,
+        )
 
     write_predictions(predictions, outputs.predictions)
     write_evidence_traces(traces, outputs.evidence_traces)
@@ -440,6 +470,9 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
             model=cfg.generation.model,
             max_evidence_rows=cfg.retrieval.max_evidence_rows,
             shuffle_choices=cfg.generation.shuffle_choices,
+            max_frames=cfg.generation.max_frames,
+            frame_max_pixels=cfg.generation.frame_max_pixels,
+            prompt_token_budget=cfg.generation.prompt_token_budget,
         )
 
     return EvalPipeline(
