@@ -84,6 +84,30 @@ def test_answer_populates_claim_and_moments():
         assert sum(1 for c in moment.cameras if c.is_best) == 1
 
 
+def test_answer_cites_top_moment_best_and_corroborating_angles():
+    from castlerag.ui.callbacks import _CITE_MARKER_RE
+
+    result = PlaceholderEngine().answer("Who pranks Bjorn when he returns?")
+    top = result.moments[0]
+    cited = [
+        (m.group(1), m.group(2))
+        for m in _CITE_MARKER_RE.finditer(result.answer_text)
+    ]
+    # Corroborating angles are the SAME moment from each synchronized camera
+    # (same timestamp, different viewpoint) — not the best camera at other times.
+    assert {moment_id for moment_id, _ in cited} == {top.moment_id}
+    assert {cam for _, cam in cited} == {c.camera_id for c in top.cameras}
+    # Distinct cameras, so no "Bjorn, Bjorn, Bjorn" repetition.
+    assert len({cam for _, cam in cited}) == len(top.cameras)
+
+
+def test_refine_answer_embeds_a_citation_marker():
+    from castlerag.ui.callbacks import _CITE_MARKER_RE
+
+    result = PlaceholderEngine().refine("a claim", "sharper query", 2)
+    assert _CITE_MARKER_RE.search(result.answer_text)
+
+
 def test_answer_keeps_legacy_contract():
     result = PlaceholderEngine().answer("How many cups are on the table?")
     assert result.predicted_choice in {"a", "b", "c", "d"}
@@ -389,3 +413,71 @@ def test_strip_internal_links_preserves_real_urls():
 
     text = "See [YouTube](https://www.youtube.com/watch?v=abc) for details."
     assert _strip_internal_links(text) == text
+
+
+def test_render_answer_turns_cite_markers_into_clickable_chips():
+    from castlerag.ui.callbacks import _render_answer
+
+    text = (
+        "The footage shows **Luca** at the kitchen "
+        "[[cite:m0:Luca:12:29]]. Corroborating angle [[cite:m1:Klaus:12:31]]."
+    )
+    answer = _render_answer("g1", text)
+    chips = [
+        child
+        for child in answer.children
+        if getattr(child, "className", None) == "cite-chip"
+    ]
+    assert len(chips) == 2
+    # Bold survived as an html.Strong somewhere in the rendered nodes.
+    assert any(type(c).__name__ == "Strong" for c in answer.children)
+    # Each chip's id carries the group-namespaced moment id and camera so the
+    # click callback can focus the moment and autoplay that camera.
+    first = chips[0]
+    assert first.id == {"type": "cite", "gid": "g1", "mid": "g1-m0", "cam": "Luca"}
+    # The raw marker text must not leak into the rendered prose.
+    assert all(
+        "[[cite:" not in child
+        for child in answer.children
+        if isinstance(child, str)
+    )
+
+
+def test_render_answer_without_citations_is_plain_prose():
+    from castlerag.ui.callbacks import _render_answer
+
+    answer = _render_answer("g1", "A plain answer with no citations.")
+    assert not any(
+        getattr(child, "className", None) == "cite-chip"
+        for child in answer.children
+    )
+
+
+def test_camera_grid_autoplays_only_the_cited_camera():
+    from castlerag.ui.callbacks import _render_camera_grid
+
+    moment = {
+        "clock_label": "12:29",
+        "cameras": [
+            {"camera_id": "Luca", "is_best": True, "match_score": 0.8,
+             "embed_url": "https://example.test/embed?start=10&rel=0"},
+            {"camera_id": "Klaus", "is_best": False, "match_score": 0.4,
+             "embed_url": "https://example.test/embed?start=10&rel=0"},
+        ],
+    }
+    tiles = _render_camera_grid(moment, autoplay_camera="Klaus")
+
+    def _iframe_srcs(node, acc):
+        if type(node).__name__ == "Iframe":
+            acc.append(getattr(node, "src", ""))
+        children = getattr(node, "children", None)
+        if isinstance(children, (list, tuple)):
+            for child in children:
+                _iframe_srcs(child, acc)
+        elif children is not None and hasattr(children, "children"):
+            _iframe_srcs(children, acc)
+        return acc
+
+    srcs = [s for tile in tiles for s in _iframe_srcs(tile, [])]
+    autoplaying = [s for s in srcs if "autoplay=1" in s]
+    assert len(autoplaying) == 1  # only the cited camera autoplays

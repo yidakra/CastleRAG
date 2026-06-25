@@ -66,6 +66,34 @@ _PLACES = ("Doorway", "Hallway", "Kitchen", "Living room", "Stairwell", "Reading
 _MOMENT_MINUTES = (29, 31, 44, 52)
 
 
+def cite_marker(moment_id: str, camera_id: str, label: str) -> str:
+    """Return an inline evidence-citation marker for an answer string.
+
+    The UI renders ``[[cite:{moment_id}:{camera_id}:{label}]]`` as a clickable
+    link that focuses the moment and plays that camera's clip seeked to the cited
+    time.  ``label`` is the human-readable clock (e.g. ``12:29``); it must not
+    contain ``]`` so the marker stays unambiguous to parse.
+    """
+    return f"[[cite:{moment_id}:{camera_id}:{label}]]"
+
+
+def _corroborating_clause(moment: "EvidenceMoment") -> str:
+    """Return a ' Corroborating angles: …' clause citing the moment's other cameras.
+
+    Corroboration means the *same* moment seen from the other synchronized
+    cameras (same timestamp, different viewpoint) — not the best camera at other
+    times. Returns an empty string when the moment has no second angle.
+    """
+    others = [cam for cam in moment.cameras if not cam.is_best]
+    if not others:
+        return ""
+    markers = " ".join(
+        cite_marker(moment.moment_id, cam.camera_id, moment.clock_label)
+        for cam in others
+    )
+    return f" Corroborating angles (same moment, other cameras): {markers}."
+
+
 class SupportLevel(str, Enum):
     """How strongly the gathered evidence backs the claim.
 
@@ -278,14 +306,17 @@ class PlaceholderEngine:
         moments = self._fabricate_moments(
             rng, day, hour, SupportLevel.PARTIAL, kind="rank", boost=0.0
         )
-        best_cam = moments[0].best_camera().camera_id
+        top = moments[0]
+        best_cam = top.best_camera().camera_id
         claim = Claim(
             text=f"The footage confirms {best_cam}'s involvement in the answer.",
             support=SupportLevel.PARTIAL,
         )
         answer_text = (
             f"The strongest footage places **{best_cam}** at the "
-            f"{moments[0].place_label.lower()} around {moments[0].clock_label}."
+            f"{top.place_label.lower()} around {top.clock_label} "
+            f"{cite_marker(top.moment_id, best_cam, top.clock_label)}."
+            + _corroborating_clause(top)
         )
         return ChatTurnResult(
             answer_text=answer_text,
@@ -323,14 +354,17 @@ class PlaceholderEngine:
         moments = self._fabricate_moments(
             rng, day, hour, support, kind=kind, boost=boost, count=1
         )
-        best_cam = moments[0].best_camera().camera_id
+        top = moments[0]
+        best_cam = top.best_camera().camera_id
         priors = _support_priors(rng)
         predicted = max(_CHOICES, key=lambda key: (priors[key], key))
         answer_text = (
-            f"A clearer {moments[0].place_label.lower()} angle shows **{best_cam}** "
-            f"at {moments[0].clock_label} — "
+            f"A clearer {top.place_label.lower()} angle shows **{best_cam}** "
+            f"at {top.clock_label} "
+            f"{cite_marker(top.moment_id, best_cam, top.clock_label)} — "
             + ("the claim is supported." if support is SupportLevel.SUPPORTED
                else "the angle is sharper but still partial.")
+            + _corroborating_clause(top)
         )
         return ChatTurnResult(
             answer_text=answer_text,

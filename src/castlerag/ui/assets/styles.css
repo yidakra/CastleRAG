@@ -166,6 +166,26 @@ body {
     margin-bottom: 0;
 }
 
+/* inline, clickable evidence citation in an answer (an html.Button shell) */
+.cite-chip {
+    display: inline;
+    border: none;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    margin: 0 1px;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+.cite-chip:hover {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
 
 /* ---- ask-new bar (DMC group + raw dcc.Input) ---- */
 .ask-new {
@@ -225,6 +245,10 @@ body {
     border-radius: 4px;
 }
 .best-badge { position: absolute; left: 6px; top: 6px; z-index: 1; }
+.playing-badge { position: absolute; left: 6px; bottom: 6px; z-index: 1; }
+.camera-tile.playing .camera-media {
+    box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--accent) 70%, #fff);
+}
 
 .evidence-figure { width: 100%; }
 

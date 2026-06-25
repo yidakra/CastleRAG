@@ -29,6 +29,7 @@ from castlerag.ui.chat import (
     EvidenceMoment,
     EvidenceRef,
     SupportLevel,
+    cite_marker,
     compose_justification,
     compose_refined_query,
 )
@@ -160,6 +161,9 @@ class RagEngine:
         moments = self._hits_to_moments(
             evidence_rows, claim.support, query_vector=query_vector
         ) or [self._no_evidence_moment(claim.support)]
+        # Append clickable time-evidence citations grounded in the surfaced
+        # moments, so the answer carries seekable links into the camera embeds.
+        answer_text = _append_evidence_citations(answer_text, moments)
         pipeline_stats = {
             "retrieved": len(result.retrieved),
             "reranked": len(result.evidence_rows),
@@ -858,6 +862,28 @@ def _format_review_context(
 def _question_id(question: str) -> str:
     """Return a stable short id for a question string."""
     return "ui_" + hashlib.sha1(question.strip().lower().encode()).hexdigest()[:16]
+
+
+def _append_evidence_citations(
+    answer_text: str, moments: List[EvidenceMoment]
+) -> str:
+    """Append a clickable time-evidence line citing each surfaced moment.
+
+    Each real moment contributes one ``[[cite:...]]`` marker for its best camera;
+    the UI renders these as links that focus the moment and play that camera's
+    clip from its timestamp. The no-evidence placeholder moment is skipped.
+    """
+    markers = [
+        cite_marker(
+            moment.moment_id, moment.best_camera().camera_id, moment.clock_label
+        )
+        for moment in moments
+        # Skip the no-evidence placeholder (sentinel "--:--" clock, no real clip).
+        if moment.cameras and moment.clock_label != "--:--"
+    ]
+    if not markers:
+        return answer_text
+    return f"{answer_text.rstrip()} Evidence: {' '.join(markers)}"
 
 
 def _hour_of(hit: RetrievalHit) -> int:

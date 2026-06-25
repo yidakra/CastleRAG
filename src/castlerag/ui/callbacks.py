@@ -57,6 +57,11 @@ _REVIEW_STATE_DISPLAY = {
 }
 
 _INTERNAL_LINK_RE = re.compile(r"\[([^\]]+)\]\((?!https?://)([^)]*)\)")
+# Inline evidence citation the placeholder/engine answer embeds:
+# [[cite:{moment_id}:{camera_id}:{label}]] — rendered as a clickable link.
+_CITE_MARKER_RE = re.compile(r"\[\[cite:([^:\]]+):([^:\]]+):([^\]]*)\]\]")
+# Minimal inline markdown the answer prose uses (only **bold**).
+_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +235,64 @@ def _focused_question_text(
 # ---------------------------------------------------------------------------
 
 
+def _inline_markdown(text: str) -> List[object]:
+    """Render the answer's minimal inline markdown (only ``**bold**``)."""
+    nodes: List[object] = []
+    pos = 0
+    for match in _BOLD_RE.finditer(text):
+        if match.start() > pos:
+            nodes.append(text[pos:match.start()])
+        nodes.append(html.Strong(match.group(1)))
+        pos = match.end()
+    if pos < len(text):
+        nodes.append(text[pos:])
+    return nodes
+
+
+def _citation_chip(
+    group_id: str, moment_id: str, camera_id: str, label: str
+) -> html.Button:
+    """Render one inline evidence citation as a clickable, seekable link.
+
+    Clicking the chip focuses the cited moment and autoplays that camera's clip
+    from the cited timestamp (see ``on_citation_click``). The moment id is
+    namespaced with the group, matching the moment-button ids.
+    """
+    return html.Button(
+        f"▶ {camera_id} · {label}",
+        id={
+            "type": "cite",
+            "gid": group_id,
+            "mid": f"{group_id}-{moment_id}",
+            "cam": camera_id,
+        },
+        n_clicks=0,
+        className="cite-chip",
+        title=f"Play {camera_id} at {label}",
+    )
+
+
+def _render_answer(group_id: str, answer_text: str) -> dmc.Text:
+    """Render an answer string with inline, clickable evidence citations.
+
+    Internal (non-http) reference links are stripped first; ``[[cite:...]]``
+    markers become clickable chips that seek the matching camera embed, and the
+    surrounding prose keeps its ``**bold**`` emphasis.
+    """
+    text = _strip_internal_links(str(answer_text))
+    nodes: List[object] = []
+    pos = 0
+    for match in _CITE_MARKER_RE.finditer(text):
+        if match.start() > pos:
+            nodes.extend(_inline_markdown(text[pos:match.start()]))
+        moment_id, camera_id, label = match.group(1), match.group(2), match.group(3)
+        nodes.append(_citation_chip(group_id, moment_id, camera_id, label))
+        pos = match.end()
+    if pos < len(text):
+        nodes.extend(_inline_markdown(text[pos:]))
+    return dmc.Text(nodes, className="answer-text", size="sm")
+
+
 def _render_moment(
     group_id: str, moment: Dict[str, object], focused: bool
 ) -> html.Button:
@@ -341,10 +404,7 @@ def _render_group(
                 ],
             ),
             dmc.Text("Answer", size="xs", c="dimmed", mt="sm"),
-            dcc.Markdown(
-                _strip_internal_links(str(group["answer_text"])),
-                className="answer-text",
-            ),
+            _render_answer(str(group["group_id"]), str(group["answer_text"])),
             *funnel_section,
             dmc.Text("Top evidence moments", size="xs", fw=600, mt="sm", mb="xs"),
             dmc.Stack(moments, gap="xs", className="moment-list"),
@@ -369,20 +429,31 @@ def _render_thread(
     return [_render_group(group, focus, i) for i, group in enumerate(thread)]
 
 
-def _render_camera_grid(moment: Dict[str, object]) -> List[dmc.Card]:
-    """Render the synchronized camera tiles (live embeds or a no-footage tile)."""
+def _render_camera_grid(
+    moment: Dict[str, object], autoplay_camera: Optional[str] = None
+) -> List[dmc.Card]:
+    """Render the synchronized camera tiles (live embeds or a no-footage tile).
+
+    When ``autoplay_camera`` matches a camera id (set by a citation click), that
+    tile's embed autoplays from its seeked start and is flagged as ``playing``.
+    """
     tiles: List[dmc.Card] = []
     for cam in moment["cameras"]:  # type: ignore[index]
         is_best = bool(cam["is_best"])
+        is_playing = autoplay_camera is not None and cam["camera_id"] == autoplay_camera
         embed_url = cam.get("embed_url")  # type: ignore[union-attr]
         if embed_url:
+            src = str(embed_url)
+            if is_playing:
+                # The stored embed already carries ?start=…&rel=0, so append.
+                src += "&autoplay=1"
             # referrerpolicy=strict-origin gives YouTube a usable Referer (the
             # bare origin) instead of the full tunnel URL, slightly nudging the
             # cross-site cookie/anti-bot heuristics in the embed's favour.
             inner: object = html.Iframe(
-                src=str(embed_url),
+                src=src,
                 className="camera-frame",
-                allow="encrypted-media; picture-in-picture",
+                allow="autoplay; encrypted-media; picture-in-picture",
                 referrerPolicy="strict-origin",
             )
         else:
@@ -402,6 +473,12 @@ def _render_camera_grid(moment: Dict[str, object]) -> List[dmc.Card]:
         if is_best:
             media_children.append(
                 dmc.Badge("best", color="indigo", size="xs", className="best-badge")
+            )
+        if is_playing:
+            media_children.append(
+                dmc.Badge(
+                    "▶ playing", color="indigo", size="xs", className="playing-badge"
+                )
             )
         # "Open on YouTube" fallback — useful when a tunneled deployment hits
         # the cross-site bot gate on the embed. None when the mirror has no
@@ -435,9 +512,14 @@ def _render_camera_grid(moment: Dict[str, object]) -> List[dmc.Card]:
                     className="camera-watch-link",
                 ),
             )
+        tile_class = "camera-tile"
+        if is_best:
+            tile_class += " best"
+        if is_playing:
+            tile_class += " playing"
         tiles.append(
             dmc.Card(
-                className="camera-tile best" if is_best else "camera-tile",
+                className=tile_class,
                 withBorder=True,
                 radius="md",
                 p=6,
@@ -668,6 +750,7 @@ def _viewer_outputs(
     review: Dict[str, Dict[str, str]],
     iteration: int,
     frozen: bool = False,
+    autoplay_camera: Optional[str] = None,
 ) -> tuple:
     """Build the seven viewer outputs for a focused (group, moment).
 
@@ -675,6 +758,7 @@ def _viewer_outputs(
     hidden, evidence figure. (The compose box and its prefilled query are managed
     separately, as they appear only once all three cameras have a verdict.) When
     ``frozen`` the review controls render read-only for a past iteration.
+    ``autoplay_camera`` (set by a citation click) autoplays that camera's clip.
     """
     if frozen:
         title = f"Iteration {iteration} · frozen"
@@ -691,7 +775,7 @@ def _viewer_outputs(
     return (
         title,
         subtitle,
-        _render_camera_grid(moment),
+        _render_camera_grid(moment, autoplay_camera),
         _render_review_row(review, frozen, sent_query),
         [],  # converged banner: managed by on_submit_reviews
         True,  # converged banner hidden
@@ -1072,6 +1156,58 @@ def register_callbacks(
             review,
             _render_thread(thread, focus),
             *_viewer_outputs(group, moment, review, iteration, frozen),
+            True,  # compose hidden
+            "",  # refined query cleared
+        )
+
+    @app.callback(  # type: ignore[attr-defined,untyped-decorator]
+        Output("focus-store", "data", allow_duplicate=True),
+        Output("review-store", "data", allow_duplicate=True),
+        Output("thread", "children", allow_duplicate=True),
+        *_viewer_output_specs(),
+        Output("compose-wrap", "hidden", allow_duplicate=True),
+        Output("refined-query-input", "value", allow_duplicate=True),
+        Input({"type": "cite", "gid": ALL, "mid": ALL, "cam": ALL}, "n_clicks"),
+        State("thread-store", "data"),
+        prevent_initial_call=True,
+    )
+    def on_citation_click(
+        n_clicks: List[int],
+        thread: Optional[List[Dict[str, object]]],
+    ) -> tuple:
+        """Focus a cited moment and autoplay the cited camera from its timestamp.
+
+        Mirrors ``on_moment_click`` (focus + re-seek the synchronized cameras) but
+        also autoplays the specific camera the answer's citation pointed at, so a
+        click on an inline evidence link starts that clip in place.
+        """
+        triggered = ctx.triggered_id
+        if not triggered or not thread:
+            raise PreventUpdate
+        # Freshly injected citation chips fire with n_clicks 0/None; ignore those.
+        if not ctx.triggered or not ctx.triggered[0].get("value"):
+            raise PreventUpdate
+        group = _find_group(thread, triggered["gid"])
+        if group is None:
+            raise PreventUpdate
+        moment = _find_moment(group, triggered["mid"])
+        if moment is None:
+            raise PreventUpdate
+        focus = {"group_id": triggered["gid"], "moment_id": triggered["mid"]}
+        iteration = int(group["iteration"])  # type: ignore[index]
+        frozen = not _is_live_group(thread, triggered["gid"])
+
+        saved = (group.get("reviews") or {}).get(triggered["mid"])  # type: ignore[union-attr]
+        review = dict(saved) if saved else _pending_review(moment)
+
+        return (
+            focus,
+            review,
+            _render_thread(thread, focus),
+            *_viewer_outputs(
+                group, moment, review, iteration, frozen,
+                autoplay_camera=triggered["cam"],
+            ),
             True,  # compose hidden
             "",  # refined query cleared
         )

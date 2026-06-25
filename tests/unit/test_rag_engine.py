@@ -198,6 +198,35 @@ def test_no_evidence_moment_keeps_focus_contract():
     assert all(cam.match_score == 0.0 for cam in moment.cameras)
 
 
+def test_append_evidence_citations_cites_each_real_moment():
+    from castlerag.ui.chat import CameraAngle, EvidenceMoment
+    from castlerag.ui.rag_engine import _append_evidence_citations
+
+    def _moment(mid, cam, clock):
+        return EvidenceMoment(
+            moment_id=mid,
+            clock_label=clock,
+            place_label="Kitchen",
+            camera_count=1,
+            aggregate_score=0.8,
+            score_caption="match 0.80",
+            dot_color="#000",
+            cameras=[CameraAngle(cam, "day1", 12, 10.0, 0.8, is_best=True)],
+        )
+
+    moments = [_moment("m0", "Luca", "12:29"), _moment("m1", "Klaus", "12:31")]
+    out = _append_evidence_citations("The footage is clear.", moments)
+    assert "[[cite:m0:Luca:12:29]]" in out
+    assert "[[cite:m1:Klaus:12:31]]" in out
+
+
+def test_append_evidence_citations_skips_no_evidence_moment():
+    from castlerag.ui.rag_engine import _append_evidence_citations
+
+    moment = _engine()._no_evidence_moment(SupportLevel.UNSUPPORTED)
+    assert _append_evidence_citations("Nothing found.", [moment]) == "Nothing found."
+
+
 # ---------------------------------------------------------------------------
 # RetrievalHit timing fields plumb through _dense_search
 # ---------------------------------------------------------------------------
