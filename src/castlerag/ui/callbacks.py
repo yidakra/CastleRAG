@@ -853,6 +853,34 @@ def register_callbacks(
         prevent_initial_call=True,
     )
 
+    # ---- 2b. Optimistic submit: clear the box + show the question instantly --
+    # Runs in the browser the moment Send is hit, so the typed text leaves the
+    # input and appears as a "searching" card immediately — instead of lingering
+    # in the box until the (possibly slow) pipeline returns. The question is
+    # stashed in ``pending-question`` for the server callback to pick up, so the
+    # value is never lost to a clear/read race.
+    app.clientside_callback(
+        """
+        function(n_clicks, value) {
+            const dc = window.dash_clientside;
+            if (!n_clicks || !value || !value.trim()) {
+                return [dc.no_update, dc.no_update, dc.no_update, dc.no_update];
+            }
+            const q = value.trim();
+            // n is included so re-asking the identical question still changes
+            // the store and re-triggers the server callback.
+            return ["", {q: q, n: n_clicks}, q, false];
+        }
+        """,
+        Output("new-question-input", "value", allow_duplicate=True),
+        Output("pending-question", "data"),
+        Output("pending-card", "children"),
+        Output("pending-card", "hidden"),
+        Input("ask-new-button", "n_clicks"),
+        State("new-question-input", "value"),
+        prevent_initial_call=True,
+    )
+
     # ---- 3. Clear thread -----------------------------------------------------
     @app.callback(  # type: ignore[attr-defined,untyped-decorator]
         Output("thread-store", "data", allow_duplicate=True),
@@ -940,9 +968,9 @@ def register_callbacks(
 
     @app.callback(  # type: ignore[attr-defined,untyped-decorator]
         *_thread_outputs(),
-        Output("new-question-input", "value", allow_duplicate=True),
-        Input("ask-new-button", "n_clicks"),
-        State("new-question-input", "value"),
+        Output("pending-card", "children", allow_duplicate=True),
+        Output("pending-card", "hidden", allow_duplicate=True),
+        Input("pending-question", "data"),
         State("thread-store", "data"),
         State("iteration-store", "data"),
         State("focus-store", "data"),
@@ -950,8 +978,7 @@ def register_callbacks(
         prevent_initial_call=True,
     )
     def on_ask_new(
-        n_clicks: Optional[int],
-        question: Optional[str],
+        pending: Optional[Dict[str, object]],
         thread: Optional[List[Dict[str, object]]],
         iteration_store: Optional[Dict[str, object]],
         focus: Optional[Dict[str, object]],
@@ -959,13 +986,16 @@ def register_callbacks(
     ) -> tuple:
         """Append a new investigation block, freezing the current iteration.
 
-        A new question never wipes the thread: the previous iteration is frozen
-        (kept read-only) and the new question is appended as its own block so the
-        whole history stays visible.
+        Triggered by the ``pending-question`` store (set by the optimistic
+        clientside callback), which already cleared the input and showed the
+        question. A new question never wipes the thread: the previous iteration
+        is frozen (kept read-only) and the new question is appended as its own
+        block so the whole history stays visible.
         """
-        if not question or not question.strip():
+        question = (pending or {}).get("q") if isinstance(pending, dict) else pending
+        if not question or not str(question).strip():
             raise PreventUpdate
-        question = question.strip()
+        question = str(question).strip()
         thread = list(thread or [])
         store = iteration_store or {}
 
@@ -1015,7 +1045,8 @@ def register_callbacks(
             *_viewer_outputs(group, moment, new_review, 1),
             True,  # compose-wrap hidden until all cameras are reviewed
             "",  # clear any prior refined query
-            "",  # clear the new-question box
+            [],  # clear the optimistic pending-question card…
+            True,  # …and hide it now the real result group is rendered
         )
 
     @app.callback(  # type: ignore[attr-defined,untyped-decorator]

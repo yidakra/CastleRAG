@@ -201,6 +201,33 @@ body {
 }
 
 
+/* in-flight question shown optimistically while the pipeline runs */
+.pending-card {
+    flex: none;
+    margin: 0 14px 10px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+    border-radius: 10px;
+    background: var(--accent-soft);
+    color: #3a3a44;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+.pending-card::after {
+    content: "Searching the recordings…";
+    display: block;
+    margin-top: 5px;
+    font-weight: 400;
+    font-size: 11px;
+    color: var(--faint);
+    animation: pendingPulse 1.1s ease-in-out infinite;
+}
+@keyframes pendingPulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
+
 /* ---- ask-new bar (DMC group + raw dcc.Input) ---- */
 .ask-new {
     flex: none;

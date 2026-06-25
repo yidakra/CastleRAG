@@ -139,6 +139,11 @@ def _thread_column() -> html.Div:
                 children=[_thread_hint()],
             ),
 
+            # Optimistic in-flight question: shown the instant Send is hit (the
+            # box clears and the question lands here with a "searching" shimmer),
+            # then hidden once the real result group renders.
+            html.Div(id="pending-card", className="pending-card", hidden=True),
+
             dmc.Group(
                 className="ask-new",
                 gap="sm",
@@ -337,6 +342,9 @@ def build_layout(
                 id="iteration-store",
                 data={"claim": None, "iteration": 0, "next_seq": 1},
             ),
+            # Carries the just-submitted question from the optimistic clientside
+            # callback to the (slower) server callback that runs the pipeline.
+            dcc.Store(id="pending-question"),
             # Hidden sink used by the auto-focus clientside callback.
             html.Div(id="_focus-dummy", style={"display": "none"}),
         ],
