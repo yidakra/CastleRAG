@@ -37,6 +37,13 @@ print(
 )
 _processor = AutoProcessor.from_pretrained(PROCESSOR)
 _processor.tokenizer.padding_side = "left"
+# disable_mmap=True: transformers>=5.x loads safetensors with a 4-thread parallel
+# materializer that memory-maps each shard. On the Lustre/GPFS /scratch-shared
+# mount, mmap + concurrent page-faults deadlock — the load reaches "Loading
+# weights: 100%" then hangs indefinitely (no error, no "model ready"). transformers
+# only auto-disables mmap for 'hf-mount' FUSE mounts (_is_on_hf_mount), not network
+# filesystems, so we force it: read each shard fully into RAM (one-time ~16 GB
+# sequential read, which Lustre handles fine) instead of mmap-faulting it.
 if LOAD_IN_8BIT:
     # 8-bit (bitsandbytes) fits the 7B Thinker into ~9 GB on a 16 GB A2.
     # device_map="cuda" required: bnb int8 layers must live on GPU at load time
@@ -48,10 +55,11 @@ if LOAD_IN_8BIT:
         quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         device_map="cuda",
         attn_implementation="sdpa",
+        disable_mmap=True,
     ).eval()
 else:
     _model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
-        BASE, dtype=torch.bfloat16, attn_implementation="sdpa"
+        BASE, dtype=torch.bfloat16, attn_implementation="sdpa", disable_mmap=True
     ).to(_device).eval()
 _model = PeftModel.from_pretrained(_model, ADAPTER).eval()
 _model.padding_side = "left"

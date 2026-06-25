@@ -59,25 +59,16 @@ require_embed() {  # url
   exit 1
 }
 
-export QDRANT__STORAGE__STORAGE_PATH="${SC}/qdrant_storage/storage"
-"${HOME}/qdrant/qdrant" > logs/eval_qdrant_${SLURM_JOB_ID}.log 2>&1 &
-trap 'kill $(jobs -p) 2>/dev/null' EXIT
-
-# Bring the embedding server fully up BEFORE launching vLLM. OmniEmbed's bf16
-# load onto GPU 0 intermittently hangs for 20+ min when vLLM is concurrently
-# initializing a 49152-token model on GPU 1 — both processes hammer the CUDA
-# driver during startup and the loser stalls (a race, hence the intermittency,
-# and why the proven launchers ui_live/full_day1 never hit it: they keep vLLM
-# lighter and embed loads cleanly). Serializing removes the contention window.
-# Generation still needs the 49152 context for the 40k prompt-token budget, so
-# we keep it — we just don't start vLLM until embed is already serving.
-require_ready qdrant http://localhost:6333/readyz   logs/eval_qdrant_${SLURM_JOB_ID}.log
-require_embed http://localhost:8200/v1/models
-
 CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-VL-8B-Instruct --port 8201 \
     --served-model-name Qwen/Qwen3-VL-8B-Instruct qwen3vl \
     --gpu-memory-utilization 0.90 --max-model-len 49152 --trust-remote-code \
     > logs/eval_vllm_${SLURM_JOB_ID}.log 2>&1 &
+export QDRANT__STORAGE__STORAGE_PATH="${SC}/qdrant_storage/storage"
+"${HOME}/qdrant/qdrant" > logs/eval_qdrant_${SLURM_JOB_ID}.log 2>&1 &
+trap 'kill $(jobs -p) 2>/dev/null' EXIT
+
+require_ready qdrant http://localhost:6333/readyz   logs/eval_qdrant_${SLURM_JOB_ID}.log
+require_embed http://localhost:8200/v1/models
 require_ready vllm   http://localhost:8201/v1/models logs/eval_vllm_${SLURM_JOB_ID}.log
 
 export VLLM_BASE_URL=http://localhost:8201/v1
