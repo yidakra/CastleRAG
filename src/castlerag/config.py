@@ -110,7 +110,11 @@ class GenerationConfig(BaseModel):
     model: str = "Qwen/Qwen3-VL-8B-Instruct"
     ablation_model: str = "OpenGVLab/InternVL3-8B"
     backend: Literal["vllm", "transformers"] = "vllm"
-    max_new_tokens: int = 512
+    # The MCQ generator answers first (FINAL_ANSWER line) then justifies; this
+    # budget must cover that justification. 512 truncated long chain-of-thought
+    # before the answer line was ever emitted, so 13/19 questions were graded on
+    # a fallback guess instead of the model's real answer.
+    max_new_tokens: int = 1024
     temperature: float = 0.0
     vllm_tensor_parallel: int = 1
     vllm_gpu_memory_utilization: float = 0.90

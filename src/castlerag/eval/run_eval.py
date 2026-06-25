@@ -473,6 +473,7 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
             max_frames=cfg.generation.max_frames,
             frame_max_pixels=cfg.generation.frame_max_pixels,
             prompt_token_budget=cfg.generation.prompt_token_budget,
+            max_new_tokens=cfg.generation.max_new_tokens,
         )
 
     return EvalPipeline(

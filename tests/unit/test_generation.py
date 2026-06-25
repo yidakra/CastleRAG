@@ -203,11 +203,29 @@ def test_generate_answer_shuffle_maps_back_to_original_letter():
     assert prediction.is_supported is True
 
 
-def test_generate_answer_overrides_biased_guess_when_unsupported():
+def test_generate_answer_respects_explicit_answer_when_unsupported():
     # Evidence was retrieved but the reranker credited no choice (all-zero
-    # priors). The LLM defaults to "a"; the pipeline must override that biased
-    # guess with a deterministic uniform pick and mark the answer unsupported.
-    client = _FakeChatClient("No choice is supported.\nFINAL_ANSWER: a")
+    # priors). The model still committed to an explicit FINAL_ANSWER — that
+    # evidence-grounded choice must be respected, not discarded as a random
+    # guess. is_supported still reflects the (absent) reranker support.
+    client = _FakeChatClient("FINAL_ANSWER: c\nThe fridge logo reads Bosch.")
+    zero = {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}
+    pred = generate_answer(
+        question=_make_question(),
+        hints=RouteHints(route="static_visual"),
+        evidence_rows=[_make_hit()],
+        support_priors=zero,
+        llm_client=client,
+    )
+    assert pred.predicted_answer == "c"
+    assert pred.is_supported is False
+
+
+def test_generate_answer_uniform_fallback_when_unsupported_and_no_answer():
+    # The model gave no FINAL_ANSWER (abstained / cut off) AND the reranker
+    # credited no choice. The unavoidable guess must be a deterministic uniform
+    # pick (not a constant "a") and marked unsupported.
+    client = _FakeChatClient("The evidence is insufficient to decide.")
     zero = {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}
     seen = set()
     for i in range(64):

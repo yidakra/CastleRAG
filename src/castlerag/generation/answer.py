@@ -62,11 +62,21 @@ _SYSTEM_PROMPT = """\
 You are CastleRAG's final answer generator for CASTLE multiple-choice questions.
 Target model contract: Qwen/Qwen3-VL-8B-Instruct served through vLLM.
 
+Output format (MANDATORY — answer first so it is never lost):
+- Your VERY FIRST line MUST be exactly one of, with a single letter:
+    FINAL_ANSWER: a
+    FINAL_ANSWER: b
+    FINAL_ANSWER: c
+    FINAL_ANSWER: d
+  Never substitute "abstain", "none", "insufficient", or any other token, and
+  always commit to a letter even when the evidence is weak.
+- After that line, give a brief justification (a few sentences) citing evidence.
+
 Rules:
 - Use only the provided evidence.
 - Prefer direct evidence over speculation.
 - If evidence is weak, say so briefly but still choose the most supported option.
-- Every factual claim used in the decision must cite at least one evidence item.
+- Every factual claim used in the justification must cite at least one evidence item.
 - Citations must use the format [camera={{camera_id}} time={{day}} {{start}}-{{end}}] \
 or [aux={{source_type}} id={{record_id}}].
 - Follow the route-specific instruction block exactly.
@@ -74,19 +84,10 @@ or [aux={{source_type}} id={{record_id}}].
 - Anti-confabulation rules are mandatory:
   - no_echo: do not quote the question, answer options, route hints,
     or prompt instructions as evidence.
-  - abstain: when no clip supports a claim, explicitly say the evidence
-    is insufficient and mark the rationale low-confidence — but you must
-    still commit to a letter; never write FINAL_ANSWER: abstain.
   - localise: every count, object-location, or spatial claim must cite
     a specific camera and timestamp.
   - ground: confidence must come from cited evidence,
     not from option plausibility or outside knowledge.
-- You MUST end with exactly one line, and the value MUST be a single letter:
-    FINAL_ANSWER: a
-    FINAL_ANSWER: b
-    FINAL_ANSWER: c
-    FINAL_ANSWER: d
-  Never substitute "abstain", "none", "insufficient", or any other token.
 """
 
 _USER_PROMPT_TEMPLATE = """\
@@ -364,6 +365,16 @@ def extract_answer(
     return _fallback_answer(support_priors, question_id=question_id)
 
 
+def _has_explicit_answer(raw_text: str) -> bool:
+    """True when the model emitted a single, unambiguous ``FINAL_ANSWER: <letter>``.
+
+    Distinguishes a real committed choice from a fallback/abstain/truncation case,
+    so callers can respect the model's answer instead of overriding it.
+    """
+    matches = {m.group(1).lower() for m in _FINAL_ANSWER_RE.finditer(raw_text)}
+    return len(matches) == 1
+
+
 def _fallback_answer(
     support_priors: Dict[str, float],
     question_id: Optional[str] = None,
@@ -409,7 +420,9 @@ def _estimate_confidence(
     return round(max(0.0, min(confidence, 1.0)), 4)
 
 
-def _call_generation_llm(llm_client: Any, messages: List[Dict[str, str]]) -> str:
+def _call_generation_llm(
+    llm_client: Any, messages: List[Dict[str, str]], *, max_tokens: int = 512
+) -> str:
     """Dispatch a chat-completion request via the LLM client's available interface."""
     if hasattr(llm_client, "generate_from_messages"):
         return str(llm_client.generate_from_messages(messages))
@@ -417,7 +430,7 @@ def _call_generation_llm(llm_client: Any, messages: List[Dict[str, str]]) -> str
         response = llm_client.chat.completions.create(
             model="Qwen/Qwen3-VL-8B-Instruct",
             messages=messages,
-            max_tokens=512,
+            max_tokens=max_tokens,
             temperature=0.0,
         )
         if not response.choices:
@@ -483,6 +496,7 @@ def generate_answer(
     max_frames: int = 8,
     frame_max_pixels: int = 768,
     prompt_token_budget: int = 40000,
+    max_new_tokens: int = 1024,
 ) -> Prediction:
     """Run grounded answer generation and return a normalized Prediction."""
     rows = evidence_rows[:max_evidence_rows]
@@ -516,7 +530,9 @@ def generate_answer(
         frame_max_pixels=frame_max_pixels,
         prompt_token_budget=prompt_token_budget,
     )
-    raw_answer_text = _call_generation_llm_with_model(llm_client, messages, model=model)
+    raw_answer_text = _call_generation_llm_with_model(
+        llm_client, messages, model=model, max_tokens=max_new_tokens
+    )
     presented_answer = extract_answer(
         raw_answer_text, prompt_priors, question_id=question.question_id
     )
@@ -526,8 +542,14 @@ def generate_answer(
     # credited no choice with support — a forced MCQ answer is just a guess, and
     # the LLM reliably defaults to "a". Override it with a deterministic uniform
     # pick so the guess is unbiased, and record that the answer is unsupported.
+    #
+    # But only when the model did NOT actually commit to a letter: an explicit,
+    # evidence-grounded FINAL_ANSWER must be respected even if the reranker
+    # assigned zero support — otherwise a working generator's real answer is
+    # discarded as if it were a random guess (the dominant accuracy bug when the
+    # reranker frequently returns all-zero support).
     is_supported = bool(rows) and max(support_priors.values(), default=0.0) > 0.0
-    if not is_supported:
+    if not is_supported and not _has_explicit_answer(raw_answer_text):
         predicted_answer = _fallback_answer({}, question_id=question.question_id)
 
     return Prediction(
@@ -552,6 +574,7 @@ def _call_generation_llm_with_model(
     messages: List[Dict[str, str]],
     *,
     model: str,
+    max_tokens: int = 512,
 ) -> str:
     """Dispatch a chat-completion for a specific model, falling back as needed."""
     if hasattr(llm_client, "generate_from_messages"):
@@ -560,13 +583,13 @@ def _call_generation_llm_with_model(
         response = llm_client.chat.completions.create(
             model=model,
             messages=messages,
-            max_tokens=512,
+            max_tokens=max_tokens,
             temperature=0.0,
         )
         if not response.choices:
             return ""
         return str(response.choices[0].message.content or "")
-    return _call_generation_llm(llm_client, messages)
+    return _call_generation_llm(llm_client, messages, max_tokens=max_tokens)
 
 
 # ---------------------------------------------------------------------------
