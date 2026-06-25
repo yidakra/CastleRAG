@@ -395,14 +395,7 @@ def _render_group(
         p="md",
         children=[
             *header,
-            dmc.Group(
-                gap="xs",
-                wrap="nowrap",
-                children=[
-                    html.Span(className="question-icon"),
-                    dmc.Text(str(group["question"]), fw=600, className="question-text"),
-                ],
-            ),
+            dmc.Text(str(group["question"]), fw=600, className="question-text"),
             dmc.Text("Answer", size="xs", c="dimmed", mt="sm"),
             _render_answer(str(group["group_id"]), str(group["answer_text"])),
             *funnel_section,
