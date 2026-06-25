@@ -8,8 +8,11 @@ logger is a no-op and nothing is logged.  Enable logging by setting
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+log = logging.getLogger("castlerag.eval.wandb")
 
 if TYPE_CHECKING:
     from castlerag.config import CastleRAGConfig
@@ -98,7 +101,11 @@ class WandbLogger:
             self._active = True
             self._n_correct = 0
             self._n_graded = 0
-        except Exception:  # pragma: no cover
+        except Exception as exc:  # pragma: no cover
+            # Surface the cause instead of silently disabling — a swallowed
+            # init error (bad entity, offline node, auth) is otherwise invisible
+            # and looks like "wandb just didn't log".
+            log.warning("wandb init failed (%s): %s", type(exc).__name__, exc)
             self._active = False
 
     # ------------------------------------------------------------------
