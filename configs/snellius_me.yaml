@@ -21,13 +21,6 @@ embedding:
   # Declaring it here keeps query embeddings off the generation server on a
   # query-cache miss, instead of relying on an OMNIEMBED_BASE_URL export. (#54)
   base_url: "http://localhost:8200/v1"
-generation:
-  # CASTLE has many fine-detail visual questions (logos, label text, small
-  # counts, coats of arms) that are unreadable at the 768px default and make
-  # the model abstain/guess. Snellius vLLM serves a 49152-token context, so
-  # raise the read resolution; build_messages still trims frames to fit
-  # prompt_token_budget. Kept out of base.yaml so the 16 GB VPS/UI stay at 768.
-  frame_max_pixels: 1536
 qdrant:
   host: "localhost"
   port: 6333

@@ -230,7 +230,6 @@ def rerank_candidates(
 ) -> RerankResult:
     """Rerank evidence packs with a local Qwen3-VL-compatible chat client."""
     ranked: list[RerankedEvidencePack] = []
-    all_candidates: list[RerankedEvidencePack] = []
     best_fallback: Optional[RerankedEvidencePack] = None
 
     # Free-form (open) questions have no choices to support, so rank purely on
@@ -271,8 +270,7 @@ def rerank_candidates(
             reranker_output=reranker_output,
             final_rerank_score=final_score,
         )
-        # Track every candidate (regardless of filter) for the fallback below.
-        all_candidates.append(candidate)
+        # Track best regardless of filter — used as fallback if everything is pruned.
         if best_fallback is None or final_score > best_fallback.final_rerank_score:
             best_fallback = candidate
 
@@ -280,24 +278,24 @@ def rerank_candidates(
             continue
         ranked.append(candidate)
 
-    # When the reranker prunes everything, don't collapse to a single ungrounded
-    # row — that left the generator with one (often wrong) frame and nothing to
-    # read. Keep the top-k candidates by score so the (high-res) generator has
-    # several frames/transcripts to actually look at. Their support is zeroed so
-    # the answer is still honestly flagged unsupported (the reranker endorsed
-    # nothing), but it becomes a *grounded* attempt instead of a blind guess.
-    if not ranked and all_candidates:
+    # Guarantee at least one candidate survives so the generator always has
+    # grounding. Without this, a weak retrieval set causes total hallucination.
+    if not ranked and best_fallback is not None:
         LOGGER.warning(
-            "All reranker candidates filtered (best relevance=%d); keeping top-%d "
-            "as ungrounded fallback.",
+            "All reranker candidates filtered (best relevance=%d); keeping as fallback.",  # noqa: E501
             best_fallback.reranker_output.relevance,
-            top_k,
         )
-        fallback = sorted(
-            all_candidates, key=lambda c: -c.final_rerank_score
-        )[:top_k]
-        for cand in fallback:
-            zeroed_output = cand.reranker_output.model_copy(
+        fallback_output = best_fallback.reranker_output
+        was_rejected = (
+            not fallback_output.keep
+            or fallback_output.relevance <= min_relevance
+        )
+        if was_rejected:
+            # The fallback was pruned by keep/min_relevance, so reranking does not
+            # actually trust it as grounding. Zero its support before it flows into
+            # support_priors, otherwise generate_answer() would mark the answer
+            # "supported" even though every candidate was rejected.
+            zeroed_output = fallback_output.model_copy(
                 update={"support": {"a": 0, "b": 0, "c": 0, "d": 0}}
             )
             zeroed_score = compute_rerank_score(
@@ -305,14 +303,13 @@ def rerank_candidates(
                 relevance_weight=relevance_weight,
                 support_weight=support_weight,
             )
-            ranked.append(
-                cand.model_copy(
-                    update={
-                        "reranker_output": zeroed_output,
-                        "final_rerank_score": zeroed_score,
-                    }
-                )
+            best_fallback = best_fallback.model_copy(
+                update={
+                    "reranker_output": zeroed_output,
+                    "final_rerank_score": zeroed_score,
+                }
             )
+        ranked.append(best_fallback)
 
     ranked.sort(
         key=lambda item: (
