@@ -599,7 +599,6 @@ def _review_column(
     actions = (
         ("confirm", "✓ Confirm"),
         ("refine", "↻ Refine"),
-        ("reject", "✕"),
         ("ignore", "— Ignore"),
     )
     buttons = [
