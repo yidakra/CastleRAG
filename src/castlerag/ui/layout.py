@@ -28,6 +28,33 @@ from dash import dcc, html
 from castlerag.ui.figures import empty_figure
 from castlerag.ui.youtube import YouTubeMirror
 
+
+def info_icon(
+    tooltip_text: str,
+    *,
+    size: str = "xs",
+    position: str = "top-start",
+    width: int = 380,
+) -> dmc.Tooltip:
+    """Return a small ⓘ glyph that reveals ``tooltip_text`` on hover.
+
+    Used to attach hover explanations to section headers across the UI.
+    """
+    return dmc.Tooltip(
+        label=tooltip_text,
+        multiline=True,
+        w=width,
+        withArrow=True,
+        position=position,
+        children=dmc.Text(
+            "ⓘ",
+            size=size,
+            c="dimmed",
+            style={"cursor": "default", "lineHeight": 1},
+        ),
+    )
+
+
 _SCORE_MODE_TOOLTIP: dict[str, str] = {
     "rrf_normalized": (
         "RRF-normalised rank score (score_mode = rrf_normalized). "
@@ -218,19 +245,7 @@ def _viewer_column(score_mode: str = "rrf_normalized") -> html.Div:
                         mb=4,
                         children=[
                             dmc.Text("Camera match scores", size="sm", fw=600),
-                            dmc.Tooltip(
-                                label=tooltip_text,
-                                multiline=True,
-                                w=380,
-                                withArrow=True,
-                                position="top-start",
-                                children=dmc.Text(
-                                    "ⓘ",
-                                    size="sm",
-                                    c="dimmed",
-                                    style={"cursor": "default", "lineHeight": 1},
-                                ),
-                            ),
+                            info_icon(tooltip_text, size="sm"),
                         ],
                     ),
                     dcc.Graph(
