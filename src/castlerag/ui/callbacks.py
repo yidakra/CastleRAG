@@ -301,7 +301,7 @@ def _render_moment(
     The clickable shell stays an ``html.Button`` (so the pattern-matching
     ``n_clicks`` callback keeps working); its content is DMC.
     """
-    meta = f"{moment['camera_count']} cameras · {moment['score_caption']}"
+    meta = f"{moment['camera_count']} cameras"
     return html.Button(
         id={"type": "moment", "gid": group_id, "mid": moment["moment_id"]},
         n_clicks=0,
