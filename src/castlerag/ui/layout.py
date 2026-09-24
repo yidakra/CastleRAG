@@ -36,9 +36,11 @@ def info_icon(
     position: str = "top-start",
     width: int = 380,
 ) -> dmc.Tooltip:
-    """Return a small ⓘ glyph that reveals ``tooltip_text`` on hover.
+    """Return a small ⓘ glyph that reveals ``tooltip_text`` on hover or focus.
 
-    Used to attach hover explanations to section headers across the UI.
+    Used to attach hover explanations to section headers across the UI.  The
+    glyph is wrapped in a focusable, labelled span so keyboard and screen-reader
+    users can reach the tooltip too (Mantine only opens on focus when asked).
     """
     return dmc.Tooltip(
         label=tooltip_text,
@@ -46,11 +48,13 @@ def info_icon(
         w=width,
         withArrow=True,
         position=position,
-        children=dmc.Text(
-            "ⓘ",
-            size=size,
-            c="dimmed",
-            style={"cursor": "default", "lineHeight": 1},
+        events={"hover": True, "focus": True, "touch": True},
+        children=html.Span(
+            dmc.Text("ⓘ", size=size, c="dimmed", style={"lineHeight": 1}),
+            tabIndex=0,
+            role="button",
+            style={"cursor": "help", "display": "inline-flex"},
+            **{"aria-label": "More info"},
         ),
     )
 
