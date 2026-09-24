@@ -30,6 +30,7 @@ from castlerag.ui.figures import (
     empty_figure,
     pipeline_funnel_figure,
 )
+from castlerag.ui.layout import info_icon
 from castlerag.ui.youtube import YouTubeMirror
 
 _MAX_ITERATIONS = 5
@@ -346,6 +347,38 @@ _SUPPORT_BADGE: Dict[str, Tuple[str, str]] = {
     "unsupported": ("Low confidence", "red"),
 }
 
+_SUPPORT_TOOLTIP = (
+    "How strongly the surfaced evidence backs the answer, as a support score "
+    "in [0, 1]. Multiple-choice: the Qwen3-VL-8B reranker's support prior for "
+    "the chosen option. Open questions: the strongest normalised reranker "
+    "score, or the top dense cosine when the reranker scored nothing. "
+    "Well supported: score >= 0.7. Partial support: 0.4 to 0.7. "
+    "Low confidence: below 0.4, so treat the answer as a guess."
+)
+
+_FUNNEL_TOOLTIP = (
+    "Clip counts across the four pipeline stages for this question. "
+    "Retrieved: union of hits from the BM25 transcript lane and the dense "
+    "lanes (transcript, event-summary, clip, photo, aux video, heart-rate, "
+    "gaze, thermal), fused with reciprocal-rank fusion. "
+    "Reranked: rows from the packs the Qwen3-VL-8B reranker kept "
+    "(keep=true and relevance > 1); if none pass, the single best pack is "
+    "kept as a fallback so the answer still has grounding. "
+    "Candidates: distinct ~60-second time buckets formed by collapsing "
+    "kept rows by (day, hour, minute). "
+    "Displayed: real moments rendered in this card "
+    "(excludes the no-evidence placeholder)."
+)
+
+_MOMENTS_TOOLTIP = (
+    "Evidence moments the answer is grounded on, ranked by reranker "
+    "relevance (score_mode = reranker; falls back to RRF rank when the "
+    "reranker did not run). Hits within the same ~60-second window are "
+    "merged into one moment so cameras observing the same event collapse "
+    "into a single row. Click a moment to focus its synchronized cameras "
+    "in the right-hand viewer."
+)
+
 
 def _support_badge(support: str) -> dmc.Badge:
     """Return a coloured confidence badge for a claim's support level."""
@@ -395,7 +428,15 @@ def _render_group(
     stats = group.get("pipeline_stats") or {}
     if stats and stats.get("retrieved", 0) > 0:
         funnel_section = [
-            dmc.Text("Retrieval pipeline", size="xs", c="dimmed", mt="sm"),
+            dmc.Group(
+                [
+                    dmc.Text("Retrieval pipeline", size="xs", c="dimmed"),
+                    info_icon(_FUNNEL_TOOLTIP),
+                ],
+                gap=4,
+                align="center",
+                mt="sm",
+            ),
             dcc.Graph(
                 id=f"funnel-{group['group_id']}",
                 figure=pipeline_funnel_figure(stats),  # type: ignore[arg-type]
@@ -421,6 +462,7 @@ def _render_group(
                             (group.get("claim") or {}).get("support", "partial")  # type: ignore[union-attr]
                         )
                     ),
+                    info_icon(_SUPPORT_TOOLTIP),
                 ],
                 gap="xs",
                 align="center",
@@ -428,7 +470,16 @@ def _render_group(
             ),
             _render_answer(str(group["group_id"]), str(group["answer_text"])),
             *funnel_section,
-            dmc.Text("Top evidence moments", size="xs", fw=600, mt="sm", mb="xs"),
+            dmc.Group(
+                [
+                    dmc.Text("Top evidence moments", size="xs", fw=600),
+                    info_icon(_MOMENTS_TOOLTIP),
+                ],
+                gap=4,
+                align="center",
+                mt="sm",
+                mb="xs",
+            ),
             dmc.Stack(moments, gap="xs", className="moment-list"),
         ],
     )
