@@ -431,6 +431,7 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
                 bm25_index=bm25_index,
                 embed_client=embed_client,
                 retrieval_cfg=cfg.retrieval,
+                known_participants=cfg.dataset.ego_cameras,
             )
         except (
             ConnectionError,

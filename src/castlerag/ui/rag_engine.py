@@ -51,6 +51,20 @@ _MAX_MOMENTS = 3
 _BUCKET_SECONDS = 60  # cluster width when grouping hits into one moment
 
 
+def padding_roster(dataset_cfg: Any) -> Tuple[str, ...]:
+    """Camera names used to pad a moment's tiles when the index has too few.
+
+    The ego roster always; the fixed room cameras too once they are ingested
+    (``camera_scope="all"``) — they are mirrored on YouTube, so they resolve a
+    real embed. Ego cameras stay first so ego-only behaviour is unchanged.
+    """
+    ego = tuple(getattr(dataset_cfg, "ego_cameras", ()) or ())
+    if getattr(dataset_cfg, "camera_scope", "ego") != "all":
+        return ego
+    exo = tuple(getattr(dataset_cfg, "exo_cameras", ()) or ())
+    return ego + tuple(cam for cam in exo if cam not in ego)
+
+
 @dataclass
 class RagEngine:
     """Chat engine backed by the real CastleRAG retrieval/generation pipeline."""
@@ -85,8 +99,12 @@ class RagEngine:
         if cfg is None:
             cfg = load_config(override_path=os.getenv("CASTLERAG_CONFIG"))
         pipeline = _build_default_pipeline(cfg)
-        ego = tuple(getattr(cfg.dataset, "ego_cameras", ()) or ())
-        return cls(cfg=cfg, pipeline=pipeline, ego_cameras=ego, mirror=mirror)
+        return cls(
+            cfg=cfg,
+            pipeline=pipeline,
+            ego_cameras=padding_roster(cfg.dataset),
+            mirror=mirror,
+        )
 
     # -- public protocol ----------------------------------------------------
 

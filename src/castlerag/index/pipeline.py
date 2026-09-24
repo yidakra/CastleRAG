@@ -311,24 +311,35 @@ def load_dense_caches(
     records: LoadedArtifacts,
     *,
     pattern: str = "*.npz",
+    scope: Optional[LoadedArtifacts] = None,
 ) -> List[CacheArtifact]:
     """Load available dense embedding caches and join them back to typed records.
 
     ``pattern`` restricts which cache files are read; the default loads every
     ``*.npz`` under ``cache_dir``.  Pass ``*_day{N}.npz`` when only the
     day-N subset should be upserted.
+
+    Every cached id must resolve in ``records`` (else ``KeyError`` — a stale
+    cache). When ``scope`` is given, cached rows whose ids are not in ``scope``
+    are dropped, so a cache that also holds out-of-scope rows (e.g. fixed-camera
+    clips appended by a ``camera_scope="all"`` run) can still be indexed under
+    a narrower scope without error.
     """
     index = _record_index(records)
+    allowed = set(_record_index(scope)) if scope is not None else None
     artifacts: List[CacheArtifact] = []
     cache_paths = sorted(cache_dir.glob(pattern))
     for path in cache_paths:
         record_ids, vectors = load_embedding_cache(path)
-        typed_records = [
-            index[record_id] for record_id in record_ids if record_id in index
-        ]
-        if len(typed_records) != len(record_ids):
-            missing = [record_id for record_id in record_ids if record_id not in index]
+        missing = [record_id for record_id in record_ids if record_id not in index]
+        if missing:
             raise KeyError(f"Missing records for cached ids in {path}: {missing[:5]}")
+        if allowed is not None:
+            keep = [i for i, record_id in enumerate(record_ids) if record_id in allowed]
+            if len(keep) != len(record_ids):
+                record_ids = [record_ids[i] for i in keep]
+                vectors = vectors[keep] if keep else vectors[:0]
+        typed_records = [index[record_id] for record_id in record_ids]
         artifacts.append(
             CacheArtifact(
                 name=path.stem,
@@ -357,7 +368,9 @@ def build_qdrant_index(
     cache_dir = Path(cfg.embedding.cache_dir)
     scoped = filter_records(records, cfg, day=day)
     pattern = f"*_day{day}.npz" if day is not None else "*.npz"
-    cache_artifacts = load_dense_caches(cache_dir, scoped, pattern=pattern)
+    cache_artifacts = load_dense_caches(
+        cache_dir, records, pattern=pattern, scope=scoped
+    )
     if not cache_artifacts:
         raise FileNotFoundError(f"No embedding caches found under {cache_dir}")
 
@@ -410,21 +423,51 @@ def _cache_records(
     record_id_fn: Callable[[Record], str],
     force: bool,
 ) -> Path:
-    """Cache one homogeneous record set to an NPZ bundle."""
+    """Cache one homogeneous record set to an NPZ bundle, incrementally.
+
+    When ``cache_path`` already exists (and ``force`` is False), the cached
+    rows are kept verbatim and only records whose id is not yet cached are
+    embedded and appended. Re-running with the same records is therefore a
+    no-op, and widening the scope (e.g. adding the fixed room cameras to an
+    ego-only ``clips_day1.npz``) embeds just the new records instead of being
+    silently skipped because the file exists (issue #43 / #50 Bug B).
+    Cached rows outside the current scope are preserved, never dropped.
+    """
+    existing_ids: List[str] = []
+    existing_vectors: Optional[np.ndarray] = None
     if cache_path.exists() and not force:
-        return cache_path
-    if not records:
+        existing_ids, existing_vectors = load_embedding_cache(cache_path)
+    have = set(existing_ids)
+
+    pending: List[Record] = []
+    pending_ids: List[str] = []
+    for record in records:
+        record_id = record_id_fn(record)
+        if record_id in have:
+            continue
+        have.add(record_id)  # de-duplicate repeated ids within this call
+        pending.append(record)
+        pending_ids.append(record_id)
+    if not pending:
         return cache_path
 
-    payloads = [payload_fn(record) for record in records]
-    record_ids = [record_id_fn(record) for record in records]
+    payloads = [payload_fn(record) for record in pending]
     vectors = _batched_embed(embed_fn, payloads, batch_size)
-    if len(record_ids) != vectors.shape[0]:
+    if len(pending_ids) != vectors.shape[0]:
         raise ValueError(
             f"{name} cache size mismatch: "
-            f"record_ids={len(record_ids)} vectors={vectors.shape[0]}"
+            f"record_ids={len(pending_ids)} vectors={vectors.shape[0]}"
         )
-    return write_embedding_cache(record_ids, vectors, cache_path)
+    if existing_vectors is not None and existing_vectors.size:
+        if existing_vectors.shape[1] != vectors.shape[1]:
+            raise ValueError(
+                f"{name} cache dim mismatch in {cache_path}: cached "
+                f"{existing_vectors.shape[1]} vs new {vectors.shape[1]} — "
+                "embedding model changed? Delete the cache to rebuild."
+            )
+        vectors = np.concatenate([existing_vectors, vectors], axis=0)
+        pending_ids = existing_ids + pending_ids
+    return write_embedding_cache(pending_ids, vectors, cache_path)
 
 
 def _batched_embed(

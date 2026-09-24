@@ -28,6 +28,7 @@ _ROOM_PATTERNS = {
     "living2": "Living2",
     "meeting room": "Meeting",
     "reading room": "Reading",
+    "reading area": "Reading",
 }
 _DAY_PATTERNS = (
     (re.compile(r"\bday\s*([1-4])\b"), "digit"),

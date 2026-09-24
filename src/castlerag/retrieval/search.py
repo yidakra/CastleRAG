@@ -72,8 +72,17 @@ def retrieve(
     bm25_index: Any,
     embed_client: Any,
     retrieval_cfg: Any,
+    known_participants: Optional[Sequence[str]] = None,
 ) -> List[RetrievalHit]:
-    """Full dual-path retrieval for one question."""
+    """Full dual-path retrieval for one question.
+
+    ``known_participants`` is the ego roster actually indexed (normally
+    ``cfg.dataset.ego_cameras``). A participant hint naming someone outside it
+    (e.g. "Bao", who has no day-1 ego stream) would make the dense
+    participant filter match no ego points at all, so it is dropped from the
+    dense lanes; BM25 still uses it as a soft bonus. ``None`` keeps every hint.
+    """
+    dense_participant = _dense_participant_hint(hints.participant, known_participants)
     query_variants = _query_variants(question, hints)
     transcript_bm25 = score_windows(
         bm25_index=bm25_index,
@@ -119,7 +128,7 @@ def retrieve(
             source_type="transcript_window",
             modality="text",
             day=hints.day,
-            participant_id=hints.participant,
+            participant_id=dense_participant,
             # room is deliberately NOT a hard dense filter: ego clips/windows
             # carry room=None (only fixed cameras set it), so filtering dense
             # retrieval by hints.room zeroes out all ego evidence in ego scope
@@ -159,7 +168,7 @@ def retrieve(
                 source_type=source_type,
                 modality=modality,
                 day=hints.day,
-                participant_id=hints.participant,
+                participant_id=dense_participant,
                 # room intentionally omitted as a hard filter; see transcript
                 # lane above and issue #50.
                 exclude_camera_ids=hints.exclude_cameras,
@@ -193,6 +202,17 @@ def retrieve(
         weights=final_weights,
     )
     return _collapse_hits(merged, hints, retrieval_cfg)
+
+
+def _dense_participant_hint(
+    participant: Optional[str],
+    known_participants: Optional[Sequence[str]],
+) -> Optional[str]:
+    """Return the participant hint to filter dense lanes by, or None to skip."""
+    if participant is None or known_participants is None:
+        return participant
+    known = {name.lower() for name in known_participants}
+    return participant if participant.lower() in known else None
 
 
 def _query_variants(question: EvalQuestion, hints: RouteHints) -> List[str]:
@@ -272,6 +292,9 @@ def _dense_search(
         time_range_end_ms=time_range_end_ms,
         has_speech=has_speech,
         exclude_camera_ids=exclude_camera_ids,
+        # A participant hint must not hard-exclude fixed room cameras (their
+        # participant_id is None but they film the participant) — issue #50.
+        participant_includes_fixed=True,
     )
     response = qdrant_client.query_points(
         collection_name=collection_name,
