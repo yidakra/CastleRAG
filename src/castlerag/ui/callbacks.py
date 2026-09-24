@@ -348,12 +348,12 @@ _SUPPORT_BADGE: Dict[str, Tuple[str, str]] = {
 }
 
 _SUPPORT_TOOLTIP = (
-    "How strongly the surfaced evidence backs the chosen answer, derived from "
-    "the per-choice support scores produced by the Qwen3-VL-8B reranker. "
-    "Well supported: high-relevance evidence concentrates on the chosen "
-    "option. Partial support: evidence is mixed across options. "
-    "Low confidence: every reranked pack scored at or below the keep "
-    "threshold — treat the answer as a guess."
+    "How strongly the surfaced evidence backs the answer, as a support score "
+    "in [0, 1]. Multiple-choice: the Qwen3-VL-8B reranker's support prior for "
+    "the chosen option. Open questions: the strongest normalised reranker "
+    "score, or the top dense cosine when the reranker scored nothing. "
+    "Well supported: score >= 0.7. Partial support: 0.4 to 0.7. "
+    "Low confidence: below 0.4, so treat the answer as a guess."
 )
 
 _FUNNEL_TOOLTIP = (
@@ -361,8 +361,9 @@ _FUNNEL_TOOLTIP = (
     "Retrieved: union of hits from the BM25 transcript lane and the dense "
     "lanes (transcript, event-summary, clip, photo, aux video, heart-rate, "
     "gaze, thermal), fused with reciprocal-rank fusion. "
-    "Reranked: rows the Qwen3-VL-8B reranker chose to keep "
-    "(keep=true and relevance > 1). "
+    "Reranked: rows from the packs the Qwen3-VL-8B reranker kept "
+    "(keep=true and relevance > 1); if none pass, the single best pack is "
+    "kept as a fallback so the answer still has grounding. "
     "Candidates: distinct ~60-second time buckets formed by collapsing "
     "kept rows by (day, hour, minute). "
     "Displayed: real moments rendered in this card "
