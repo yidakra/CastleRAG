@@ -51,7 +51,19 @@ def _anchors(csv_path: Path) -> Dict[str, str]:
 
 
 def _load_run(run_dir: Path):
-    preds = load_predictions(run_dir / "predictions.json")
+    """Return (predictions, traces, ids whose support is unknown).
+
+    Compact submission-format predictions ({"qid": "a"}) carry no
+    ``is_supported`` field, so ``Prediction`` would default them to supported;
+    those ids are reported separately instead of trusting the default.
+    """
+    ppath = run_dir / "predictions.json"
+    preds = load_predictions(ppath)
+    raw = json.loads(ppath.read_text())
+    unknown = {
+        qid for qid, val in raw.items()
+        if not (isinstance(val, dict) and "is_supported" in val)
+    }
     traces = {}
     tpath = run_dir / "evidence_traces.jsonl"
     if tpath.exists():
@@ -59,21 +71,25 @@ def _load_run(run_dir: Path):
             if line.strip():
                 t = json.loads(line)
                 traces[t["question_id"]] = t
-    return preds, traces
+    return preds, traces, unknown
 
 
-def _row(qid: str, q, preds, traces, anchor: str) -> Optional[dict]:
+def _row(qid: str, q, preds, traces, anchor: str, unknown=()) -> Optional[dict]:
     p = preds.get(qid)
     if p is None:
         return None
     cams = traces.get(qid, {}).get("top_evidence_cameras") or []
     return {
-        "supported": bool(p.is_supported),
+        "supported": None if qid in unknown else bool(p.is_supported),
         "correct": q.ground_truth is not None and p.predicted_answer == q.ground_truth,
         "cams": cams,
         "fixed": [c for c in cams if c in FIXED],
         "anchor_hit": bool(anchor) and anchor in cams,
     }
+
+
+def _support_tag(supported: Optional[bool]) -> str:
+    return "????" if supported is None else ("EVID" if supported else "ZERO")
 
 
 def main() -> int:
@@ -85,14 +101,15 @@ def main() -> int:
 
     questions = load_questions(args.questions)
     anchors = _anchors(args.questions) if args.questions.suffix == ".csv" else {}
-    preds, traces = _load_run(args.run_dir)
+    preds, traces, unknown = _load_run(args.run_dir)
     base = _load_run(args.baseline_dir) if args.baseline_dir else None
 
     graded = [qid for qid in preds if qid in questions]
     n_correct = sum(
         preds[q].predicted_answer == questions[q].ground_truth for q in graded
     )
-    n_zero = sum(not preds[q].is_supported for q in graded)
+    n_zero = sum(not preds[q].is_supported for q in graded if q not in unknown)
+    n_unknown = sum(q in unknown for q in graded)
     n_fixed = sum(
         any(c in FIXED for c in traces.get(q, {}).get("top_evidence_cameras") or [])
         for q in graded
@@ -105,10 +122,15 @@ def main() -> int:
           "count as wrong)")
     print(f"  coverage          : {len(graded)}/{n_total} questions have a prediction")
     # Same denominator as accuracy: a missing prediction surfaced no evidence
-    # and no room camera, so it counts as zero-evidence / no fixed-cam.
+    # (so it adds to n_zero) and no room camera (so it adds nothing to
+    # n_fixed, whose denominator is already n_total). Predictions with unknown
+    # support (compact format) are left out of the zero-evidence rate.
     n_zero += n_total - len(graded)
-    print(f"  zero-evidence     : {n_zero}/{n_total}  (missing predictions count; "
-          "issue #50 baseline 8/40, post-#53 ~11/40)")
+    if n_unknown:
+        print(f"  WARN: {n_unknown} predictions carry no is_supported field "
+              "(compact format); excluded from zero-evidence")
+    print(f"  zero-evidence     : {n_zero}/{n_total - n_unknown}  (missing "
+          "predictions count; issue #50 baseline 8/40, post-#53 ~11/40)")
     print(
         f"  fixed-cam evidence: {n_fixed}/{n_total} questions cite "
         ">=1 room camera"
@@ -122,21 +144,21 @@ def main() -> int:
             continue
         qid, q = match[0]
         anchor = anchors.get(q.query, "")
-        r = _row(qid, q, preds, traces, anchor)
+        r = _row(qid, q, preds, traces, anchor, unknown)
         if r is None:
             print(f"  -- not run: {prefix}")
             continue
         line = (
-            f"  {'EVID' if r['supported'] else 'ZERO'} "
+            f"  {_support_tag(r['supported'])} "
             f"{'OK ' if r['correct'] else 'BAD'} anchor={anchor or '-':<8} "
             f"anchor_in_evidence={'Y' if r['anchor_hit'] else 'n'} "
             f"fixed={','.join(r['fixed']) or '-':<16} {prefix[:48]}"
         )
         if base is not None:
-            b = _row(qid, q, base[0], base[1], anchor)
+            b = _row(qid, q, base[0], base[1], anchor, base[2])
             if b is not None:
                 line += (
-                    f"   [baseline {'EVID' if b['supported'] else 'ZERO'}"
+                    f"   [baseline {_support_tag(b['supported'])}"
                     f"/{'OK' if b['correct'] else 'BAD'}]"
                 )
         print(line)
