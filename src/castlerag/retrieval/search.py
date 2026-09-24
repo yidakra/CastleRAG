@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -76,13 +76,22 @@ def retrieve(
 ) -> List[RetrievalHit]:
     """Full dual-path retrieval for one question.
 
-    ``known_participants`` is the ego roster actually indexed (normally
-    ``cfg.dataset.ego_cameras``). A participant hint naming someone outside it
-    (e.g. "Bao", who has no day-1 ego stream) would make the dense
-    participant filter match no ego points at all, so it is dropped from the
-    dense lanes; BM25 still uses it as a soft bonus. ``None`` keeps every hint.
+    The dense participant filter is only kept when that participant actually
+    has indexed ego evidence for the hinted day, judged from the loaded BM25
+    transcript windows (each carries ``participant_id`` and ``day``). A hint
+    naming someone with no indexed stream (e.g. "Bao" on day 1, or an ego
+    camera not yet ingested by a ``--camera``-scoped run) would otherwise make
+    the dense lanes match zero ego points, so it is dropped there; BM25 still
+    uses it as a soft bonus. ``known_participants`` (normally
+    ``cfg.dataset.ego_cameras``) is only a fallback when the index carries no
+    participant-tagged windows; ``None`` then keeps every hint.
     """
-    dense_participant = _dense_participant_hint(hints.participant, known_participants)
+    dense_participant = _dense_participant_hint(
+        hints.participant,
+        hints.day,
+        _indexed_participant_days(bm25_index),
+        known_participants,
+    )
     query_variants = _query_variants(question, hints)
     transcript_bm25 = score_windows(
         bm25_index=bm25_index,
@@ -204,15 +213,39 @@ def retrieve(
     return _collapse_hits(merged, hints, retrieval_cfg)
 
 
+def _indexed_participant_days(bm25_index: Any) -> Set[Tuple[str, str]]:
+    """Return the ``(participant_id.lower(), day)`` pairs present in the index."""
+    return {
+        (w.participant_id.lower(), w.day)
+        for w in (getattr(bm25_index, "windows", None) or [])
+        if getattr(w, "participant_id", None)
+    }
+
+
 def _dense_participant_hint(
     participant: Optional[str],
-    known_participants: Optional[Sequence[str]],
+    day: Optional[str],
+    indexed: Set[Tuple[str, str]],
+    known_participants: Optional[Sequence[str]] = None,
 ) -> Optional[str]:
-    """Return the participant hint to filter dense lanes by, or None to skip."""
-    if participant is None or known_participants is None:
+    """Return the participant hint to filter dense lanes by, or None to skip.
+
+    ``indexed`` (from :func:`_indexed_participant_days`) is authoritative when
+    non-empty: the hint survives only if that participant has windows on
+    ``day`` (or on any day when no day was hinted). With no indexed windows to
+    go on, fall back to the static ``known_participants`` roster.
+    """
+    if participant is None:
+        return None
+    name = participant.lower()
+    if indexed:
+        if day is None:
+            return participant if any(p == name for p, _ in indexed) else None
+        return participant if (name, day) in indexed else None
+    if known_participants is None:
         return participant
-    known = {name.lower() for name in known_participants}
-    return participant if participant.lower() in known else None
+    known = {n.lower() for n in known_participants}
+    return participant if name in known else None
 
 
 def _query_variants(question: EvalQuestion, hints: RouteHints) -> List[str]:

@@ -97,7 +97,12 @@ if ! [[ "${PTS}" =~ ^[0-9]+$ ]] || [ "${PTS}" -lt "${MIN_POINTS}" ]; then
 fi
 python scripts/qdrant_camera_counts.py --collection "${COLL}" --day day1 | tee "logs/fixed_counts_before_${J}.txt"
 if [ "${CAMS}" = "auto" ]; then
-  CAMS="$(python scripts/qdrant_camera_counts.py --collection "${COLL}" --day day1 --missing-only)"
+  # Check the count's exit status explicitly: with no `set -e`, a crashed
+  # count would print nothing and be misread as "nothing to ingest" (exit 0).
+  if ! CAMS="$(python scripts/qdrant_camera_counts.py --collection "${COLL}" --day day1 --missing-only)"; then
+    echo "[fixed] ABORT: camera count failed; cannot auto-select missing cameras."
+    exit 2
+  fi
   echo "[fixed] auto-selected missing fixed cameras: '${CAMS}'"
   if [ -z "${CAMS// /}" ]; then
     echo "[fixed] all 5 fixed cameras already have main_clip points — nothing to ingest."
@@ -105,6 +110,10 @@ if [ "${CAMS}" = "auto" ]; then
   fi
 fi
 read -r -a CAM_ARR <<< "${CAMS}"
+# Duplicate selectors would launch workers that rewrite the same output files.
+if [ "$(printf '%s\n' "${CAM_ARR[@]}" | sort | uniq -d)" ]; then
+  echo "[fixed] ABORT: duplicate camera in CAMS='${CAMS}'"; exit 1
+fi
 CAM_FLAGS=(); for c in "${CAM_ARR[@]}"; do CAM_FLAGS+=(--camera "$c"); done
 # Fail fast on a typo / wrong scope before any GPU time is spent.
 castlerag preprocess --config "${CONF}" --day 1 "${CAM_FLAGS[@]}" --dry-run || exit 1
@@ -159,6 +168,9 @@ wait_ready "http://localhost:8202/v1/models" gen1 "logs/fixed_gen1_${J}.log" "${
 # 10). One camera alone (e.g. Reading) -> 10 workers, not 1.
 HOURS="${HOURS:-8 9 10 11 12 13 14 15 16 17 18 19 20}"
 read -r -a HOUR_ARR <<< "${HOURS}"
+if [ "$(printf '%s\n' "${HOUR_ARR[@]}" | sort | uniq -d)" ]; then
+  echo "[fixed] ABORT: duplicate hour in HOURS='${HOURS}'"; exit 1
+fi
 TARGET_WORKERS="${TARGET_WORKERS:-10}"
 if [ "${SPLIT:-auto}" = "auto" ]; then
   SPLIT=$(( (TARGET_WORKERS + ${#CAM_ARR[@]} - 1) / ${#CAM_ARR[@]} ))
@@ -211,7 +223,7 @@ for cam in cams:
     pct = 100 * cap / max(tot, 1)
     print(f"  {cam}: clips={tot} captioned={cap} ({pct:.0f}%) events={ev} bad={bad} "
           f"camera_type={types} room={rooms}")
-    if bad or tot == 0 or pct < 98 or types != {"fixed"} or rooms != {cam}:
+    if bad or tot == 0 or ev == 0 or pct < 98 or types != {"fixed"} or rooms != {cam}:
         ok = False
 sys.exit(0 if ok else 1)
 PY

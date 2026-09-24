@@ -15,6 +15,7 @@ Exit code 0 always, unless --fail-if-missing is set and a fixed camera has no
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 FIXED = ["Kitchen", "Living1", "Living2", "Meeting", "Reading"]
@@ -50,7 +51,9 @@ def main() -> int:
 
     from qdrant_client import QdrantClient
 
-    client = QdrantClient(host=args.host, port=args.port, timeout=120)
+    # Honour the same bound the Slurm jobs export for the pipeline client.
+    timeout = float(os.getenv("QDRANT_CLIENT_TIMEOUT", "120"))
+    client = QdrantClient(host=args.host, port=args.port, timeout=timeout)
     c = args.collection
     missing = [
         cam for cam in args.cameras

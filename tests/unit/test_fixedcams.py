@@ -328,6 +328,52 @@ def test_cache_preserves_out_of_scope_rows(tmp_path: Path):
     assert set(ids) == {"day1_Allie_08_0000", "day1_Kitchen_08_0000"}
 
 
+def test_cache_force_reembeds_scope_but_keeps_out_of_scope_rows(tmp_path: Path):
+    """``--force`` under the ego config must not delete cached fixed rows."""
+    ego_clips = [_clip("Allie", 0)]
+    fixed_clips = [_clip("Kitchen", 0, fixed=True)]
+    embed = _CountingEmbed()
+    cache_dense_embeddings(
+        _records(ego_clips + fixed_clips),
+        _cfg(tmp_path, "all"),
+        embed,
+        modality="video",
+        day=1,
+    )
+    cache = tmp_path / "embeddings" / "clips_day1.npz"
+    _, before = load_embedding_cache(cache)
+    cache_dense_embeddings(
+        _records(ego_clips + fixed_clips),
+        _cfg(tmp_path, "ego"),
+        embed,
+        modality="video",
+        day=1,
+        force=True,
+    )
+    ids, vecs = load_embedding_cache(cache)
+    assert sorted(ids) == ["day1_Allie_08_0000", "day1_Kitchen_08_0000"]
+    # The ego row was re-embedded (second call), the fixed row kept verbatim.
+    assert len(embed.video_calls[-1]) == 1
+    rows = dict(zip(ids, vecs))
+    assert rows["day1_Allie_08_0000"][1] == 2.0
+    np.testing.assert_array_equal(rows["day1_Kitchen_08_0000"], before[1])
+
+
+def test_write_embedding_cache_is_atomic(tmp_path: Path, monkeypatch):
+    """A crash mid-write must leave the previous good cache untouched."""
+    cache = tmp_path / "clips_day1.npz"
+    write_embedding_cache(["a"], np.ones((1, 2), dtype=np.float32), cache)
+
+    def _boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(np, "savez_compressed", _boom)
+    with pytest.raises(OSError):
+        write_embedding_cache(["a", "b"], np.ones((2, 2), dtype=np.float32), cache)
+    assert load_embedding_cache(cache)[0] == ["a"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["clips_day1.npz"]
+
+
 def test_cache_rejects_dim_mismatch(tmp_path: Path):
     cache_dir = tmp_path / "embeddings"
     write_embedding_cache(
@@ -526,7 +572,7 @@ def test_padding_roster_adds_fixed_cameras_only_in_all_scope():
 # ---------------------------------------------------------------------------
 
 
-def _run_retrieve(question_text: str, known_participants):
+def _run_retrieve(question_text: str, known_participants, windows=()):
     from castlerag.retrieval.search import retrieve
     from castlerag.schemas import EvalQuestion
 
@@ -539,7 +585,7 @@ def _run_retrieve(question_text: str, known_participants):
 
     class _BM25:
         def get_scores(self, tokens):
-            return np.zeros(0, dtype=np.float32)
+            return np.zeros(len(windows), dtype=np.float32)
 
     class _Embed:
         def embed_texts(self, texts):
@@ -571,7 +617,7 @@ def _run_retrieve(question_text: str, known_participants):
         hints=route_question(question.query, question.answers),
         qdrant_client=_Client(),
         collection_name="c",
-        bm25_index=SimpleNamespace(bm25=_BM25(), windows=[]),
+        bm25_index=SimpleNamespace(bm25=_BM25(), windows=list(windows)),
         embed_client=_Embed(),
         retrieval_cfg=retrieval_cfg,
         known_participants=known_participants,
@@ -610,3 +656,49 @@ def test_retrieve_without_roster_keeps_hint():
     calls = _run_retrieve("What did Bao cook?", known_participants=None)
     assert calls
     assert all(_participant_values(f) == {"Bao"} for f in calls)
+
+
+def _window(participant: str, day: str = "day1"):
+    return SimpleNamespace(
+        participant_id=participant,
+        day=day,
+        camera_id=participant,
+        hour=8,
+        room=None,
+        transcript_text="",
+        transcript_window_id=f"{day}_{participant}_08_w0",
+        absolute_start=0,
+        absolute_end=1,
+    )
+
+
+def test_retrieve_uses_indexed_windows_over_config_roster():
+    # Bao is in the configured roster but has no indexed day-1 windows.
+    calls = _run_retrieve(
+        "On day 1, what did Bao cook?",
+        known_participants=["Allie", "Bao", "Werner"],
+        windows=[_window("Allie"), _window("Werner"), _window("Bao", "day2")],
+    )
+    assert calls
+    assert all(not _participant_values(f) for f in calls)
+
+
+def test_retrieve_keeps_hint_for_participant_with_indexed_windows():
+    calls = _run_retrieve(
+        "On day 1, what organisation's logo is on Werner's apron?",
+        known_participants=["Allie"],  # stale roster is ignored
+        windows=[_window("Werner")],
+    )
+    assert calls
+    assert all(_participant_values(f) == {"Werner"} for f in calls)
+
+
+def test_retrieve_drops_hint_for_camera_not_yet_ingested():
+    # A --camera scoped ingest indexed only Allie so far.
+    calls = _run_retrieve(
+        "What organisation's logo is on Werner's apron?",
+        known_participants=["Allie", "Werner"],
+        windows=[_window("Allie")],
+    )
+    assert calls
+    assert all(not _participant_values(f) for f in calls)

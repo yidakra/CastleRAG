@@ -97,8 +97,13 @@ def main() -> int:
         any(c in FIXED for c in traces.get(q, {}).get("top_evidence_cameras") or [])
         for q in graded
     )
+    # Score against every loaded question so a partial run (crashed job,
+    # missing predictions) can't look better than it is; coverage is separate.
+    n_total = len(questions)
     print(f"run: {args.run_dir}")
-    print(f"  accuracy          : {n_correct}/{len(graded)}")
+    print(f"  accuracy          : {n_correct}/{n_total}  (missing predictions "
+          "count as wrong)")
+    print(f"  coverage          : {len(graded)}/{n_total} questions have a prediction")
     print(f"  zero-evidence     : {n_zero}/{len(graded)}  (issue #50 baseline 8/40; "
           f"post-#53 ~11/40)")
     print(

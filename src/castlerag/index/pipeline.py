@@ -432,12 +432,15 @@ def _cache_records(
     ego-only ``clips_day1.npz``) embeds just the new records instead of being
     silently skipped because the file exists (issue #43 / #50 Bug B).
     Cached rows outside the current scope are preserved, never dropped.
+    ``force`` re-embeds the records passed in (replacing their cached rows)
+    but still keeps every other cached row, so a forced run under a narrow
+    scope can never shrink the cache below the union of scopes.
     """
     existing_ids: List[str] = []
     existing_vectors: Optional[np.ndarray] = None
-    if cache_path.exists() and not force:
+    if cache_path.exists():
         existing_ids, existing_vectors = load_embedding_cache(cache_path)
-    have = set(existing_ids)
+    have = set() if force else set(existing_ids)
 
     pending: List[Record] = []
     pending_ids: List[str] = []
@@ -450,6 +453,14 @@ def _cache_records(
         pending_ids.append(record_id)
     if not pending:
         return cache_path
+    if force and existing_ids:
+        # Drop the cached rows being re-embedded; keep everything else.
+        replaced = set(pending_ids)
+        keep = [i for i, rid in enumerate(existing_ids) if rid not in replaced]
+        existing_ids = [existing_ids[i] for i in keep]
+        existing_vectors = (
+            existing_vectors[keep] if existing_vectors is not None else None
+        )
 
     payloads = [payload_fn(record) for record in pending]
     vectors = _batched_embed(embed_fn, payloads, batch_size)
