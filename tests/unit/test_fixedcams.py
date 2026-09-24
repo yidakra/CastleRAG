@@ -359,6 +359,29 @@ def test_cache_force_reembeds_scope_but_keeps_out_of_scope_rows(tmp_path: Path):
     np.testing.assert_array_equal(rows["day1_Kitchen_08_0000"], before[1])
 
 
+def test_cache_force_prunes_stale_ids(tmp_path: Path):
+    """``--force`` stays the repair path: ids with no chunk record are dropped."""
+    cache = tmp_path / "embeddings" / "clips_day1.npz"
+    write_embedding_cache(
+        ["day1_Allie_08_9999", "day1_Kitchen_08_0000"],
+        np.zeros((2, 2), dtype=np.float32),
+        cache,
+    )
+    ego_clips = [_clip("Allie", 0)]
+    fixed_clips = [_clip("Kitchen", 0, fixed=True)]
+    cache_dense_embeddings(
+        _records(ego_clips + fixed_clips),
+        _cfg(tmp_path, "ego"),
+        _CountingEmbed(),
+        modality="video",
+        day=1,
+        force=True,
+    )
+    ids, _ = load_embedding_cache(cache)
+    # Stale ego id gone, live out-of-scope fixed row kept, in-scope re-embedded.
+    assert sorted(ids) == ["day1_Allie_08_0000", "day1_Kitchen_08_0000"]
+
+
 def test_write_embedding_cache_is_atomic(tmp_path: Path, monkeypatch):
     """A crash mid-write must leave the previous good cache untouched."""
     cache = tmp_path / "clips_day1.npz"

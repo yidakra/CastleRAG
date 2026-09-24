@@ -171,6 +171,11 @@ def cache_dense_embeddings(
     cache_dir = Path(cfg.embedding.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     scoped = filter_records(records, cfg, day=day)
+    # Every id that still resolves to a chunk record on disk, in or out of the
+    # current scope. ``force`` keeps out-of-scope rows only if they are live,
+    # so it both preserves e.g. fixed rows under an ego config and prunes
+    # stale ids that would make ``load_dense_caches`` raise later.
+    live_ids = frozenset(_record_index(records))
     suffix = _cache_suffix(day)
     day_label = f"day{day}" if day is not None else None
 
@@ -186,6 +191,7 @@ def cache_dense_embeddings(
                 payload_fn=lambda row: row.transcript_text,
                 record_id_fn=lambda row: row.transcript_window_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
 
@@ -201,6 +207,7 @@ def cache_dense_embeddings(
                 payload_fn=lambda row: row.event_summary or "",
                 record_id_fn=lambda row: row.event_summary_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
 
@@ -236,6 +243,7 @@ def cache_dense_embeddings(
                 ),
                 record_id_fn=lambda row: row.clip_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
         aux_video_records = [
@@ -257,6 +265,7 @@ def cache_dense_embeddings(
                 payload_fn=_aux_video_payload,
                 record_id_fn=lambda row: row.clip_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
 
@@ -274,6 +283,7 @@ def cache_dense_embeddings(
                 payload_fn=lambda row: row.asset_path or "",
                 record_id_fn=lambda row: row.clip_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
 
@@ -291,6 +301,7 @@ def cache_dense_embeddings(
                 payload_fn=lambda row: row.summary_text or "",
                 record_id_fn=lambda row: row.clip_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
 
@@ -422,6 +433,7 @@ def _cache_records(
     payload_fn: Callable[[Record], str | List[str]],
     record_id_fn: Callable[[Record], str],
     force: bool,
+    live_ids: Optional[frozenset[str]] = None,
 ) -> Path:
     """Cache one homogeneous record set to an NPZ bundle, incrementally.
 
@@ -432,9 +444,13 @@ def _cache_records(
     ego-only ``clips_day1.npz``) embeds just the new records instead of being
     silently skipped because the file exists (issue #43 / #50 Bug B).
     Cached rows outside the current scope are preserved, never dropped.
-    ``force`` re-embeds the records passed in (replacing their cached rows)
-    but still keeps every other cached row, so a forced run under a narrow
-    scope can never shrink the cache below the union of scopes.
+    ``force`` re-embeds the records passed in (replacing their cached rows).
+    Other cached rows survive a forced run only if their id is in
+    ``live_ids`` (still backed by a chunk record on disk): out-of-scope rows
+    are kept, so a forced run under a narrow scope never deletes e.g. fixed
+    camera rows, while stale ids are pruned so ``--force`` stays the repair
+    path for a cache that no longer matches the chunks. With ``live_ids``
+    unset, a forced run keeps every other cached row.
     """
     existing_ids: List[str] = []
     existing_vectors: Optional[np.ndarray] = None
@@ -451,16 +467,25 @@ def _cache_records(
         have.add(record_id)  # de-duplicate repeated ids within this call
         pending.append(record)
         pending_ids.append(record_id)
-    if not pending:
+    if not pending and not force:
         return cache_path
     if force and existing_ids:
-        # Drop the cached rows being re-embedded; keep everything else.
+        # Drop the rows being re-embedded and any stale (no longer live) ids.
         replaced = set(pending_ids)
-        keep = [i for i, rid in enumerate(existing_ids) if rid not in replaced]
+        keep = [
+            i
+            for i, rid in enumerate(existing_ids)
+            if rid not in replaced and (live_ids is None or rid in live_ids)
+        ]
         existing_ids = [existing_ids[i] for i in keep]
         existing_vectors = (
             existing_vectors[keep] if existing_vectors is not None else None
         )
+    if not pending:
+        # Forced run with nothing in scope: only the stale-id prune applies.
+        if existing_vectors is None or not cache_path.exists():
+            return cache_path
+        return write_embedding_cache(existing_ids, existing_vectors, cache_path)
 
     payloads = [payload_fn(record) for record in pending]
     vectors = _batched_embed(embed_fn, payloads, batch_size)

@@ -128,8 +128,16 @@ done
 # --- Phase 0b: rollback material -----------------------------------------
 BK="${SC}/castle_derived/embeddings_backup_pre_fixedcams_${J}"
 mkdir -p "${BK}"
-cp -p "${EMB}"/*_day1.npz "${EMB}"/manifest_day1.json "${EMB}"/transcripts.pkl "${BK}/" 2>/dev/null
-echo "[fixed] embedding caches backed up -> ${BK}"
+# The later additive index upsert + transcripts.pkl rebuild are only safe with
+# real rollback material, so verify the copy instead of trusting it.
+if ! cp -p "${EMB}"/*_day1.npz "${EMB}"/manifest_day1.json "${EMB}"/transcripts.pkl "${BK}/"; then
+  echo "[fixed] ABORT: backing up embedding caches from ${EMB} failed"; exit 2
+fi
+if ! ls "${BK}"/*_day1.npz >/dev/null 2>&1 \
+   || [ ! -s "${BK}/manifest_day1.json" ] || [ ! -s "${BK}/transcripts.pkl" ]; then
+  echo "[fixed] ABORT: backup in ${BK} is incomplete:"; ls -la "${BK}"; exit 2
+fi
+echo "[fixed] embedding caches backed up -> ${BK}:"; ls "${BK}"
 if [ "${SNAPSHOT}" = "1" ]; then
   curl -sf -X POST "http://localhost:6333/collections/${COLL}/snapshots?wait=true" \
     | python3 -c 'import sys,json;print("[fixed] qdrant snapshot:",json.load(sys.stdin)["result"]["name"])' \
@@ -137,9 +145,21 @@ if [ "${SNAPSHOT}" = "1" ]; then
 fi
 EGO_SUM="$(pwd)/logs/fixed_ego_sha_${J}.txt"
 is_target() { local x; for x in "${CAM_ARR[@]}"; do [ "$1" = "$x" ] && return 0; done; return 1; }
-( cd "${CHUNKS}" && for d in */; do
+# An empty baseline would make the later `sha1sum -c` pass vacuously, so the
+# build must succeed and cover every non-target camera dir that exists.
+if ! ( cd "${CHUNKS}" && for d in */; do
     d="${d%/}"; is_target "$d" || find "$d" -name '*.jsonl' -print0
-  done | sort -z | xargs -0 -r sha1sum ) > "${EGO_SUM}"
+  done | sort -z | xargs -0 -r sha1sum ) > "${EGO_SUM}"; then
+  echo "[fixed] ABORT: building the ego checksum baseline in ${CHUNKS} failed"; exit 2
+fi
+NON_TARGET=0
+for d in "${CHUNKS}"/*/; do
+  d="$(basename "$d")"; is_target "$d" || NON_TARGET=$((NON_TARGET + 1))
+done
+if [ "${NON_TARGET}" -eq 0 ] || [ ! -s "${EGO_SUM}" ]; then
+  echo "[fixed] ABORT: ego checksum baseline is empty (${NON_TARGET} non-target dirs in ${CHUNKS})"
+  exit 2
+fi
 echo "[fixed] checksummed $(wc -l < "${EGO_SUM}") non-target chunk files"
 
 # --- GPU servers: 2x Qwen3-VL (caption/events) + OmniEmbed (embed) --------
@@ -159,6 +179,8 @@ EMBP=$!
 PIDS_TO_KILL="${QP} ${G0} ${G1} ${EMBP}"
 wait_ready "http://localhost:8201/v1/models" gen0 "logs/fixed_gen0_${J}.log" "${G0}" || exit 1
 wait_ready "http://localhost:8202/v1/models" gen1 "logs/fixed_gen1_${J}.log" "${G1}" || exit 1
+# Check OmniEmbed now, not after the multi-hour caption phase (re-checked before embed).
+wait_ready "http://localhost:8200/v1/models" embed "logs/fixed_omni_${J}.log" "${EMBP}" || exit 1
 
 # --- Phase 1: base + caption + events, (camera x hour-group) workers --------
 # Safe in parallel now that caption/events are camera- AND hour-scoped: each
