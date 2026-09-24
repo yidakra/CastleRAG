@@ -13,6 +13,12 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# uv lockfile (CI installs with pip; drop this line if the team adopts uv)
+uv.lock
 
 # Build
 dist/
@@ -45,6 +51,9 @@ logs/
 /report.blg
 /report.out
 /report.synctex.gz
+
+# Course lecture slides (third-party material)
+/slides/
 .qdrant-initialized
 
 # W&B local run artifacts
@@ -53,3 +62,12 @@ wandb/
 # VPS demo deployment — local-only files, never commit
 .vps_basic_auth_password
 configs/vps_local.yaml
+
+# Claude Code local state (a shared .claude/settings.json or skills stay committable)
+.claude/settings.local.json
+.claude/worktrees/
+/memory/
+
+# Playwright MCP captures and ad-hoc UI screenshots
+.playwright-mcp/
+/test-*.png
