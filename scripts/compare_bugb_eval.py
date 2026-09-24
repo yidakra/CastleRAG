@@ -104,10 +104,13 @@ def main() -> int:
     print(f"  accuracy          : {n_correct}/{n_total}  (missing predictions "
           "count as wrong)")
     print(f"  coverage          : {len(graded)}/{n_total} questions have a prediction")
-    print(f"  zero-evidence     : {n_zero}/{len(graded)}  (issue #50 baseline 8/40; "
-          f"post-#53 ~11/40)")
+    # Same denominator as accuracy: a missing prediction surfaced no evidence
+    # and no room camera, so it counts as zero-evidence / no fixed-cam.
+    n_zero += n_total - len(graded)
+    print(f"  zero-evidence     : {n_zero}/{n_total}  (missing predictions count; "
+          "issue #50 baseline 8/40, post-#53 ~11/40)")
     print(
-        f"  fixed-cam evidence: {n_fixed}/{len(graded)} questions cite "
+        f"  fixed-cam evidence: {n_fixed}/{n_total} questions cite "
         ">=1 room camera"
     )
     print()

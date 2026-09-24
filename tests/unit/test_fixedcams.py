@@ -725,3 +725,49 @@ def test_retrieve_drops_hint_for_camera_not_yet_ingested():
     )
     assert calls
     assert all(not _participant_values(f) for f in calls)
+
+
+def test_participant_or_fixed_filter_is_binding_in_qdrant():
+    """A top-level ``should`` next to ``must`` is mandatory in Qdrant, not a boost.
+
+    Runs the real filter through qdrant-client's in-memory engine: another
+    participant's ego clip on the same day must be excluded, while the named
+    participant's clip and the fixed-camera clip both pass.
+    """
+    from qdrant_client import QdrantClient
+    from qdrant_client.http import models as qm
+
+    client = QdrantClient(":memory:")
+    client.create_collection(
+        "t", vectors_config=qm.VectorParams(size=2, distance=qm.Distance.COSINE)
+    )
+    rows = [
+        ("Werner", "ego", "Werner"),
+        ("Allie", "ego", "Allie"),
+        (None, "fixed", "Kitchen"),
+    ]
+    client.upsert(
+        "t",
+        [
+            qm.PointStruct(
+                id=i,
+                vector=[1.0, 0.0],
+                payload={
+                    "participant_id": participant,
+                    "camera_type": ctype,
+                    "camera_id": cam,
+                    "day": "day1",
+                    "source_type": "main_clip",
+                },
+            )
+            for i, (participant, ctype, cam) in enumerate(rows)
+        ],
+    )
+    flt = build_filter(
+        day="day1",
+        source_type="main_clip",
+        participant_id="Werner",
+        participant_includes_fixed=True,
+    )
+    hits = client.query_points("t", query=[1.0, 0.0], query_filter=flt, limit=10).points
+    assert sorted(h.payload["camera_id"] for h in hits) == ["Kitchen", "Werner"]

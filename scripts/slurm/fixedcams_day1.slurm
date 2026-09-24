@@ -110,6 +110,11 @@ if [ "${CAMS}" = "auto" ]; then
   fi
 fi
 read -r -a CAM_ARR <<< "${CAMS}"
+# A manual CAMS="" would otherwise launch zero workers, pass the (then vacuous)
+# validation, and still run embed + the additive index.
+if [ "${#CAM_ARR[@]}" -eq 0 ]; then
+  echo "[fixed] ABORT: CAMS='${CAMS}' selected no cameras"; exit 1
+fi
 # Duplicate selectors would launch workers that rewrite the same output files.
 if [ "$(printf '%s\n' "${CAM_ARR[@]}" | sort | uniq -d)" ]; then
   echo "[fixed] ABORT: duplicate camera in CAMS='${CAMS}'"; exit 1
@@ -194,9 +199,15 @@ if [ "$(printf '%s\n' "${HOUR_ARR[@]}" | sort | uniq -d)" ]; then
   echo "[fixed] ABORT: duplicate hour in HOURS='${HOURS}'"; exit 1
 fi
 TARGET_WORKERS="${TARGET_WORKERS:-10}"
+case "${TARGET_WORKERS}" in
+  ''|*[!0-9]*|0) echo "[fixed] ABORT: TARGET_WORKERS='${TARGET_WORKERS}' is not a positive integer"; exit 1;;
+esac
 if [ "${SPLIT:-auto}" = "auto" ]; then
   SPLIT=$(( (TARGET_WORKERS + ${#CAM_ARR[@]} - 1) / ${#CAM_ARR[@]} ))
 fi
+case "${SPLIT}" in
+  ''|*[!0-9]*|0) echo "[fixed] ABORT: SPLIT='${SPLIT}' is not a positive integer"; exit 1;;
+esac
 [ "${SPLIT}" -gt "${#HOUR_ARR[@]}" ] && SPLIT="${#HOUR_ARR[@]}"
 echo "[fixed] === Phase 1: preprocess ${CAM_ARR[*]} split=${SPLIT} $(date -Iseconds) ==="
 BASE_FLAG=(); [ "${SKIP_BASE}" = "1" ] && BASE_FLAG=(--skip-base)

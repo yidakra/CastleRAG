@@ -50,6 +50,7 @@ def main() -> int:
     args = ap.parse_args()
 
     from qdrant_client import QdrantClient
+    from qdrant_client.http.exceptions import UnexpectedResponse
 
     # Honour the same bound the Slurm jobs export for the pipeline client.
     timeout = float(os.getenv("QDRANT_CLIENT_TIMEOUT", "120"))
@@ -75,8 +76,13 @@ def main() -> int:
     try:
         facet = client.facet(collection_name=c, key="camera_id", limit=64, exact=True)
         cams = sorted({str(h.value) for h in facet.hits} | set(cams))
-    except Exception:  # older qdrant-client / server without facet API
+    except AttributeError:  # qdrant-client too old to have .facet()
         pass
+    except UnexpectedResponse as exc:
+        # Server without the facet endpoint; anything else (auth, timeouts,
+        # bad collection) is a real failure and must not be swallowed.
+        if exc.status_code not in (404, 405, 501):
+            raise
     header = "  " + "camera".ljust(10) + "".join(s.rjust(20) for s in SOURCES)
     print(header)
     for cam in cams:
