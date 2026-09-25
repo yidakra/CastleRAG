@@ -27,7 +27,7 @@
 
 set -euo pipefail
 
-CONF="configs/snellius_me.yaml"
+CONF="${CONF:-configs/snellius_me.yaml}"   # override: sbatch --export=ALL,CONF=configs/snellius_fixedcams.yaml
 SC="/scratch-shared/${USER}"
 COLL="castle_multimodal_v1"
 UI_PORT="${UI_PORT:-8050}"

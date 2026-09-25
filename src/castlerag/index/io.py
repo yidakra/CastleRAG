@@ -9,6 +9,8 @@ This module handles:
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Iterable, List, Sequence, TypeVar
 
@@ -80,11 +82,23 @@ def write_embedding_cache(
             f"({len(record_ids)}) must match vectors rows ({vectors.shape[0]})"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        path,
-        record_ids=np.asarray(record_ids, dtype=str),
-        vectors=np.asarray(vectors, dtype=np.float32),
+    # Write to a temp file in the same directory and atomically swap it in, so
+    # a crash mid-compression can never leave a truncated cache in place of the
+    # previous good one (incremental appends rewrite the whole bundle).
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
     )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            np.savez_compressed(
+                handle,
+                record_ids=np.asarray(record_ids, dtype=str),
+                vectors=np.asarray(vectors, dtype=np.float32),
+            )
+        os.replace(tmp_name, path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
     return path
 
 

@@ -54,6 +54,36 @@ def build_camera_registry(
     return registry
 
 
+def scoped_cameras(
+    ego_cameras: List[str],
+    exo_cameras: List[str],
+    camera_scope: str = "ego",
+    only: Optional[List[str]] = None,
+) -> List[str]:
+    """Return the ordered camera ids in scope, optionally narrowed to ``only``.
+
+    ``camera_scope="ego"`` keeps the ego roster; ``"all"`` appends the fixed
+    room cameras. ``only`` restricts the result to a subset (e.g. the 5 fixed
+    cameras for an additive ingest, or one camera per parallel worker). Names
+    in ``only`` that are not in scope raise ``ValueError`` so a typo or a
+    fixed camera requested under ``camera_scope="ego"`` fails fast instead of
+    silently processing nothing.
+    """
+    in_scope = list(ego_cameras)
+    if camera_scope == "all":
+        in_scope = in_scope + list(exo_cameras)
+    if not only:
+        return in_scope
+    unknown = [cam for cam in only if cam not in in_scope]
+    if unknown:
+        raise ValueError(
+            f"Camera(s) {unknown} not in scope (camera_scope={camera_scope!r}, "
+            f"in scope: {in_scope}). Fixed cameras need camera_scope='all'."
+        )
+    wanted = set(only)
+    return [cam for cam in in_scope if cam in wanted]
+
+
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
@@ -111,6 +141,7 @@ def discover_hours(
     hours: List[int],
     camera_scope: str = "ego",
     include_novideo: bool = False,
+    cameras: Optional[List[str]] = None,
 ) -> Iterator[HourAsset]:
     """Yield one HourAsset for every available hour in scope.
 
@@ -120,12 +151,13 @@ def discover_hours(
 
     include_novideo=False (default) skips .novideo hours; set True to yield
     them with missing_video=True so manifest writers can record them explicitly.
+
+    cameras (optional) narrows discovery to a subset of the in-scope cameras;
+    see ``scoped_cameras``.
     """
     registry = build_camera_registry(ego_cameras, exo_cameras)
 
-    in_scope = list(ego_cameras)
-    if camera_scope == "all":
-        in_scope = in_scope + list(exo_cameras)
+    in_scope = scoped_cameras(ego_cameras, exo_cameras, camera_scope, only=cameras)
 
     for day_num in days:
         day_str = f"day{day_num}"

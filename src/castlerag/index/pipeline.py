@@ -171,6 +171,11 @@ def cache_dense_embeddings(
     cache_dir = Path(cfg.embedding.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     scoped = filter_records(records, cfg, day=day)
+    # Every id that still resolves to a chunk record on disk, in or out of the
+    # current scope. ``force`` keeps out-of-scope rows only if they are live,
+    # so it both preserves e.g. fixed rows under an ego config and prunes
+    # stale ids that would make ``load_dense_caches`` raise later.
+    live_ids = frozenset(_record_index(records))
     suffix = _cache_suffix(day)
     day_label = f"day{day}" if day is not None else None
 
@@ -186,6 +191,7 @@ def cache_dense_embeddings(
                 payload_fn=lambda row: row.transcript_text,
                 record_id_fn=lambda row: row.transcript_window_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
 
@@ -201,6 +207,7 @@ def cache_dense_embeddings(
                 payload_fn=lambda row: row.event_summary or "",
                 record_id_fn=lambda row: row.event_summary_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
 
@@ -236,6 +243,7 @@ def cache_dense_embeddings(
                 ),
                 record_id_fn=lambda row: row.clip_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
         aux_video_records = [
@@ -257,6 +265,7 @@ def cache_dense_embeddings(
                 payload_fn=_aux_video_payload,
                 record_id_fn=lambda row: row.clip_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
 
@@ -274,6 +283,7 @@ def cache_dense_embeddings(
                 payload_fn=lambda row: row.asset_path or "",
                 record_id_fn=lambda row: row.clip_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
 
@@ -291,6 +301,7 @@ def cache_dense_embeddings(
                 payload_fn=lambda row: row.summary_text or "",
                 record_id_fn=lambda row: row.clip_id,
                 force=force,
+                live_ids=live_ids,
             )
         )
 
@@ -311,24 +322,35 @@ def load_dense_caches(
     records: LoadedArtifacts,
     *,
     pattern: str = "*.npz",
+    scope: Optional[LoadedArtifacts] = None,
 ) -> List[CacheArtifact]:
     """Load available dense embedding caches and join them back to typed records.
 
     ``pattern`` restricts which cache files are read; the default loads every
     ``*.npz`` under ``cache_dir``.  Pass ``*_day{N}.npz`` when only the
     day-N subset should be upserted.
+
+    Every cached id must resolve in ``records`` (else ``KeyError`` — a stale
+    cache). When ``scope`` is given, cached rows whose ids are not in ``scope``
+    are dropped, so a cache that also holds out-of-scope rows (e.g. fixed-camera
+    clips appended by a ``camera_scope="all"`` run) can still be indexed under
+    a narrower scope without error.
     """
     index = _record_index(records)
+    allowed = set(_record_index(scope)) if scope is not None else None
     artifacts: List[CacheArtifact] = []
     cache_paths = sorted(cache_dir.glob(pattern))
     for path in cache_paths:
         record_ids, vectors = load_embedding_cache(path)
-        typed_records = [
-            index[record_id] for record_id in record_ids if record_id in index
-        ]
-        if len(typed_records) != len(record_ids):
-            missing = [record_id for record_id in record_ids if record_id not in index]
+        missing = [record_id for record_id in record_ids if record_id not in index]
+        if missing:
             raise KeyError(f"Missing records for cached ids in {path}: {missing[:5]}")
+        if allowed is not None:
+            keep = [i for i, record_id in enumerate(record_ids) if record_id in allowed]
+            if len(keep) != len(record_ids):
+                record_ids = [record_ids[i] for i in keep]
+                vectors = vectors[keep] if keep else vectors[:0]
+        typed_records = [index[record_id] for record_id in record_ids]
         artifacts.append(
             CacheArtifact(
                 name=path.stem,
@@ -357,7 +379,9 @@ def build_qdrant_index(
     cache_dir = Path(cfg.embedding.cache_dir)
     scoped = filter_records(records, cfg, day=day)
     pattern = f"*_day{day}.npz" if day is not None else "*.npz"
-    cache_artifacts = load_dense_caches(cache_dir, scoped, pattern=pattern)
+    cache_artifacts = load_dense_caches(
+        cache_dir, records, pattern=pattern, scope=scoped
+    )
     if not cache_artifacts:
         raise FileNotFoundError(f"No embedding caches found under {cache_dir}")
 
@@ -409,22 +433,77 @@ def _cache_records(
     payload_fn: Callable[[Record], str | List[str]],
     record_id_fn: Callable[[Record], str],
     force: bool,
+    live_ids: Optional[frozenset[str]] = None,
 ) -> Path:
-    """Cache one homogeneous record set to an NPZ bundle."""
-    if cache_path.exists() and not force:
-        return cache_path
-    if not records:
-        return cache_path
+    """Cache one homogeneous record set to an NPZ bundle, incrementally.
 
-    payloads = [payload_fn(record) for record in records]
-    record_ids = [record_id_fn(record) for record in records]
+    When ``cache_path`` already exists (and ``force`` is False), the cached
+    rows are kept verbatim and only records whose id is not yet cached are
+    embedded and appended. Re-running with the same records is therefore a
+    no-op, and widening the scope (e.g. adding the fixed room cameras to an
+    ego-only ``clips_day1.npz``) embeds just the new records instead of being
+    silently skipped because the file exists (issue #43 / #50 Bug B).
+    Cached rows outside the current scope are preserved, never dropped.
+    ``force`` re-embeds the records passed in (replacing their cached rows).
+    Other cached rows survive a forced run only if their id is in
+    ``live_ids`` (still backed by a chunk record on disk): out-of-scope rows
+    are kept, so a forced run under a narrow scope never deletes e.g. fixed
+    camera rows, while stale ids are pruned so ``--force`` stays the repair
+    path for a cache that no longer matches the chunks. With ``live_ids``
+    unset, a forced run keeps every other cached row.
+    """
+    existing_ids: List[str] = []
+    existing_vectors: Optional[np.ndarray] = None
+    if cache_path.exists():
+        existing_ids, existing_vectors = load_embedding_cache(cache_path)
+    have = set() if force else set(existing_ids)
+
+    pending: List[Record] = []
+    pending_ids: List[str] = []
+    for record in records:
+        record_id = record_id_fn(record)
+        if record_id in have:
+            continue
+        have.add(record_id)  # de-duplicate repeated ids within this call
+        pending.append(record)
+        pending_ids.append(record_id)
+    if not pending and not force:
+        return cache_path
+    if force and existing_ids:
+        # Drop the rows being re-embedded and any stale (no longer live) ids.
+        replaced = set(pending_ids)
+        keep = [
+            i
+            for i, rid in enumerate(existing_ids)
+            if rid not in replaced and (live_ids is None or rid in live_ids)
+        ]
+        existing_ids = [existing_ids[i] for i in keep]
+        existing_vectors = (
+            existing_vectors[keep] if existing_vectors is not None else None
+        )
+    if not pending:
+        # Forced run with nothing in scope: only the stale-id prune applies.
+        if existing_vectors is None or not cache_path.exists():
+            return cache_path
+        return write_embedding_cache(existing_ids, existing_vectors, cache_path)
+
+    payloads = [payload_fn(record) for record in pending]
     vectors = _batched_embed(embed_fn, payloads, batch_size)
-    if len(record_ids) != vectors.shape[0]:
+    if len(pending_ids) != vectors.shape[0]:
         raise ValueError(
             f"{name} cache size mismatch: "
-            f"record_ids={len(record_ids)} vectors={vectors.shape[0]}"
+            f"record_ids={len(pending_ids)} vectors={vectors.shape[0]}"
         )
-    return write_embedding_cache(record_ids, vectors, cache_path)
+    if existing_vectors is not None and existing_vectors.size:
+        if existing_vectors.shape[1] != vectors.shape[1]:
+            raise ValueError(
+                f"{name} cache dim mismatch in {cache_path}: cached "
+                f"{existing_vectors.shape[1]} vs new {vectors.shape[1]} — "
+                "embedding model changed? Delete the cache to rebuild."
+            )
+        vectors = np.concatenate([existing_vectors, vectors], axis=0)
+        pending_ids = existing_ids + pending_ids
+    return write_embedding_cache(pending_ids, vectors, cache_path)
 
 
 def _batched_embed(

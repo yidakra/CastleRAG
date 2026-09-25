@@ -60,6 +60,28 @@ def _resolve_config(config: Optional[Path], snellius: bool) -> CastleRAGConfig:
     return load_config(override_path=override)
 
 
+def iter_scoped_clip_paths(day_chunk_roots, cameras, hours=None):
+    """Yield ``<day>/<camera>/<HH>/clips.jsonl`` paths for the given scope only.
+
+    Layout is ``chunks_dir/dayN/<camera_id>/<HH>/clips.jsonl``; files outside
+    that shape, belonging to cameras not listed, or (when ``hours`` is given)
+    to hours not listed, are skipped.
+    """
+    allowed = set(cameras)
+    hour_dirs = {f"{int(h):02d}" for h in hours} if hours is not None else None
+    for root in day_chunk_roots:
+        root = Path(root)
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("clips.jsonl")):
+            rel = path.relative_to(root).parts
+            if len(rel) != 3 or rel[0] not in allowed:
+                continue
+            if hour_dirs is not None and rel[1] not in hour_dirs:
+                continue
+            yield path
+
+
 def _count_records(records: object) -> int:
     """Return the total number of records across all record-list fields."""
     return sum(
@@ -130,6 +152,22 @@ def preprocess(
         "--aux",
         help="Normalize auxiliary modalities (photo, thermal, video)",
     ),
+    camera: Optional[list[str]] = typer.Option(
+        None,
+        "--camera",
+        help="Restrict base/caption/events to this camera (repeatable). Must be "
+        "in the configured camera_scope. Lets an additive ingest touch only the "
+        "new cameras (e.g. the 5 fixed room cams) and lets parallel workers "
+        "caption disjoint cameras without clobbering each other's clips.jsonl.",
+    ),
+    hour: Optional[list[int]] = typer.Option(
+        None,
+        "--hour",
+        min=0,
+        max=23,
+        help="Restrict base/caption/events to this hour (repeatable); defaults "
+        "to dataset.hours. Lets several workers split one camera by hour.",
+    ),
     skip_base: bool = typer.Option(
         False,
         "--skip-base",
@@ -148,7 +186,7 @@ def preprocess(
     --events    : compress 4-clip groups into event summaries   (GPU / vLLM)
     --aux       : normalize photo, thermal, auxiliary video     (CPU)
     """
-    from castlerag.dataset.layout import discover_hours
+    from castlerag.dataset.layout import discover_hours, scoped_cameras
     from castlerag.dataset.transcripts import load_raw_segments, merge_into_windows
     from castlerag.index.io import write_jsonl_records
     from castlerag.preprocess.media import extract_frames_1fps, get_video_duration
@@ -157,6 +195,18 @@ def preprocess(
 
     cfg = _resolve_config(config, snellius)
     days_list = [day] if day is not None else cfg.dataset.days
+    try:
+        cameras_in_scope = scoped_cameras(
+            cfg.dataset.ego_cameras,
+            cfg.dataset.exo_cameras,
+            cfg.dataset.camera_scope,
+            only=camera,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    n_fixed = sum(1 for cam in cameras_in_scope if cam in cfg.dataset.exo_cameras)
+    hours_list = sorted(set(hour)) if hour else list(cfg.dataset.hours)
     console.print(
         f"[bold]castlerag preprocess[/bold]  days={days_list}  "
         f"caption={caption}  events={events}  aux={aux}  dry_run={dry_run}"
@@ -164,8 +214,11 @@ def preprocess(
     console.print(f"  dataset root  : {cfg.dataset.root}")
     console.print(
         f"  camera scope  : {cfg.dataset.camera_scope}  "
-        f"({len(cfg.dataset.ego_cameras)} ego cameras)"
+        f"({len(cameras_in_scope) - n_fixed} ego + {n_fixed} fixed cameras"
+        f"{': ' + ', '.join(cameras_in_scope) if camera else ''})"
     )
+    if hour:
+        console.print(f"  hours         : {hours_list}")
     console.print(
         f"  clip / stride : {cfg.preprocessing.clip_seconds}s / "
         f"{cfg.preprocessing.stride_seconds}s  @ {cfg.preprocessing.fps} fps"
@@ -199,8 +252,9 @@ def preprocess(
         ego_cameras=cfg.dataset.ego_cameras,
         exo_cameras=cfg.dataset.exo_cameras,
         days=days_list,
-        hours=cfg.dataset.hours,
+        hours=hours_list,
         camera_scope=cfg.dataset.camera_scope,
+        cameras=cameras_in_scope,
     ):
         if asset.missing_video:
             continue
@@ -299,14 +353,16 @@ def preprocess(
             f"  base          : {n_clips} clips, {n_windows} transcript windows written"
         )
 
-    # Scope caption/events to the same days as the base pass.  Without this,
-    # --skip-base --day N would still pick up other days' chunks via rglob.
+    # Scope caption/events to the same days, cameras AND hours as the base pass.
+    # Without the day scope, --skip-base --day N would pick up other days'
+    # chunks via rglob; without the camera scope, an additive fixed-camera run
+    # would re-caption (and rewrite) every ego clips.jsonl as well.
     day_chunk_roots = [chunks_dir / f"day{d}" for d in days_list]
 
     def _iter_clip_paths():
-        for root in day_chunk_roots:
-            if root.exists():
-                yield from sorted(root.rglob("clips.jsonl"))
+        yield from iter_scoped_clip_paths(
+            day_chunk_roots, cameras_in_scope, hours=hours_list
+        )
 
     # ------------------------------------------------------------------ #
     # Caption / OCR phase                                                  #
@@ -578,6 +634,7 @@ def retrieve(
         bm25_index=bm25_index,
         embed_client=embed_client,
         retrieval_cfg=cfg.retrieval,
+        known_participants=cfg.dataset.ego_cameras,
     )
     console.print(f"  route    : {hints.route}")
     console.print(f"  evidence : {len(hits)} hits")
