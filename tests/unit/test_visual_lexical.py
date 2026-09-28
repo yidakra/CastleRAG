@@ -742,3 +742,21 @@ def test_build_visual_bm25_index_write_is_atomic(tmp_path: Path, monkeypatch):
         build_visual_bm25_index(clips[:1], [], out)
     assert out.read_bytes() == before
     assert sorted(p.name for p in tmp_path.iterdir()) == [VISUAL_TEXT_INDEX_NAME]
+
+
+def test_score_visual_docs_answer_stopwords_do_not_count_as_evidence():
+    from castlerag.retrieval.visual_lexical import score_visual_docs
+
+    docs = [
+        _vdoc("g1", "Allie", "a person walks in the garden"),
+        _vdoc("k1", "Bjorn", "the fridge in the kitchen"),
+    ]
+    index = SimpleNamespace(bm25=_ScoresBM25([0.0, 0.0]), docs=docs)
+    hits = score_visual_docs(
+        visual_index=index,
+        query="Where was the fridge?",
+        choices={"a": "in the kitchen", "b": "in the hall", "c": "x", "d": "y"},
+        day_hint="day1",
+    )
+    # g1 shares only "in" / "the" with the choices; that is not evidence.
+    assert [h.record_id for h in hits] == ["k1"]

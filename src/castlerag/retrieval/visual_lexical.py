@@ -91,7 +91,9 @@ def score_visual_docs(
     answer_tokens: set[str] = set()
     answer_phrases: List[str] = []
     for choice in choices.values():
-        answer_tokens.update(_tokenize(choice))
+        # Function words in a choice ("a Bosch dishwasher", "in the kitchen")
+        # must not count as overlap, or the evidence gate below is defeated.
+        answer_tokens.update(set(_tokenize(choice)) - _STOPWORDS)
         phrase = choice.strip().lower()
         if len(phrase.split()) > 1:
             answer_phrases.append(phrase)
