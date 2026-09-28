@@ -8,6 +8,7 @@ from castlerag.generation.answer import (
     _format_citation,
     _format_evidence_row,
     _format_timestamp,
+    _gather_frame_paths,
     build_messages,
     build_prompt,
     choice_permutation,
@@ -289,6 +290,38 @@ def test_format_evidence_row_contains_citation_and_asset():
     assert "citation=[aux=aux_photo id=photo_day1_allie_00034]" in row
     assert "asset: aux/day1/allie/photo_00034.jpg" in row
     assert "ocr: Receipt on the kitchen counter." in row
+
+
+def test_gather_frame_paths_samples_evenly_across_top_clip():
+    frames = [f"/clip0/{i:02d}.jpg" for i in range(30)]
+    row = _make_hit().model_copy(update={"sampled_frame_paths": frames})
+    picked = _gather_frame_paths([row], max_frames=8)
+    assert len(picked) == 8
+    assert picked[0] != frames[0] or picked[-1] != frames[7]  # not the first 8 s
+    assert picked == [frames[int((i + 0.5) * 30 / 8)] for i in range(8)]
+    assert picked[-1] == "/clip0/28.jpg"
+
+
+def test_gather_frame_paths_spills_into_next_row_and_dedupes():
+    first = _make_hit().model_copy(
+        update={"sampled_frame_paths": ["/a/0.jpg", "/a/1.jpg", "/a/2.jpg"]}
+    )
+    second = _make_hit().model_copy(
+        update={
+            "record_id": "clip_1",
+            "sampled_frame_paths": ["/a/2.jpg"] + [f"/b/{i}.jpg" for i in range(10)],
+        }
+    )
+    picked = _gather_frame_paths([first, second], max_frames=5)
+    assert picked[:3] == ["/a/0.jpg", "/a/1.jpg", "/a/2.jpg"]
+    assert len(picked) == 5
+    assert len(set(picked)) == 5
+    assert all(p.startswith("/b/") for p in picked[3:])
+
+
+def test_gather_frame_paths_zero_budget_returns_nothing():
+    row = _make_hit().model_copy(update={"sampled_frame_paths": ["/a/0.jpg"]})
+    assert _gather_frame_paths([row], max_frames=0) == []
 
 
 def test_format_evidence_row_renders_caption_and_scene_graph():

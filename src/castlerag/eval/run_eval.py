@@ -466,7 +466,8 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
             candidate_packs=candidate_packs,
             llm_client=generation_client,
             top_k=cfg.reranking.top_k,
-            min_relevance=cfg.reranking.min_relevance,
+            min_relevance=cfg.reranking.min_relevance_for(hints.route),
+            keep_gate_max_relevance=cfg.reranking.keep_gate_max_relevance,
             model=cfg.reranking.model,
         )
 

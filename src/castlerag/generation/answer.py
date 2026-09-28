@@ -23,7 +23,11 @@ from castlerag.evidence_text import (
     MAX_SCENE_GRAPH_CHARS,
     truncate_text,
 )
-from castlerag.frame_encoding import encode_frame, estimate_text_tokens
+from castlerag.frame_encoding import (
+    encode_frame,
+    estimate_text_tokens,
+    sample_frames_evenly,
+)
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import AnswerChoice, EvalQuestion, Prediction, RetrievalHit
 
@@ -155,16 +159,25 @@ def build_prompt(
 def _gather_frame_paths(
     evidence_rows: List[RetrievalHit], max_frames: int = 8
 ) -> List[str]:
-    """Collect deduped frame paths from evidence rows, capped at max_frames."""
+    """Collect deduped frame paths from evidence rows, capped at max_frames.
+
+    Rows are visited in evidence order and each row's frames are sampled
+    evenly across the clip (see :func:`sample_frames_evenly`) rather than
+    taken from its first seconds, so the generator sees the whole 30 s span
+    of the top clip instead of only its opening moment.
+    """
+    if max_frames <= 0:
+        return []
     paths: List[str] = []
     seen: set = set()
     for row in evidence_rows:
-        for p in row.sampled_frame_paths:
-            if p not in seen:
-                seen.add(p)
-                paths.append(p)
-            if len(paths) >= max_frames:
-                return paths
+        remaining = max_frames - len(paths)
+        if remaining <= 0:
+            break
+        fresh = [p for p in row.sampled_frame_paths if p not in seen]
+        for p in sample_frames_evenly(fresh, remaining):
+            seen.add(p)
+            paths.append(p)
     return paths
 
 

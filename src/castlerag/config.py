@@ -181,7 +181,18 @@ class RerankingConfig(BaseModel):
     top_k: int = 4
     relevance_weight: float = 0.7
     support_weight: float = 0.3
+    # Packs with relevance <= min_relevance are pruned. Per-route overrides
+    # (e.g. {"static_visual": 0}) win over the global value for that route.
     min_relevance: int = 1
+    min_relevance_by_route: Dict[str, int] = Field(default_factory=dict)
+    # keep=false from the reranker only discards packs with relevance at or
+    # below this value; higher-rated packs survive a stray keep=false. 4
+    # restores the old behaviour where keep was always decisive.
+    keep_gate_max_relevance: int = 1
+
+    def min_relevance_for(self, route: str) -> int:
+        """Return the min_relevance threshold in force for ``route``."""
+        return self.min_relevance_by_route.get(route, self.min_relevance)
 
 
 class OutputsConfig(BaseModel):

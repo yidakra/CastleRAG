@@ -108,7 +108,16 @@ reranking:
   top_k: 4
   relevance_weight: 0.7
   support_weight: 0.3
+  # Packs rated relevance <= min_relevance are pruned. Override per route
+  # when one lane needs looser gating (a2_local.yaml runs static_visual at 0):
+  #   min_relevance_by_route:
+  #     static_visual: 0
   min_relevance: 1
+  min_relevance_by_route: {}
+  # The model's keep=false only discards packs rated at or below this
+  # relevance; a pack it rated 2-4 survives regardless of keep. Set to 4 to
+  # make keep decisive again (pre-#50 behaviour).
+  keep_gate_max_relevance: 1
 
 outputs:
   dir: "outputs"

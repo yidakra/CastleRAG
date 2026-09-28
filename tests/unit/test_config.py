@@ -33,9 +33,38 @@ def test_evidence_budget_defaults():
     cfg = CastleRAGConfig()
     assert cfg.retrieval.transcript_top_k == 30
     assert cfg.retrieval.max_candidate_videos == 4
+    assert cfg.retrieval.max_event_summaries == 4
+    assert cfg.retrieval.min_clip_hits == 2
     assert cfg.retrieval.frames_per_candidate == 32
     assert cfg.retrieval.max_aux_images == 16
     assert cfg.retrieval.max_evidence_rows == 50
+
+
+def test_reranking_gate_defaults_and_per_route_override():
+    cfg = CastleRAGConfig()
+    assert cfg.reranking.min_relevance == 1
+    assert cfg.reranking.keep_gate_max_relevance == 1
+    assert cfg.reranking.min_relevance_by_route == {}
+    assert cfg.reranking.min_relevance_for("static_visual") == 1
+
+    cfg = CastleRAGConfig.model_validate(
+        {
+            "reranking": {
+                "min_relevance": 1,
+                "min_relevance_by_route": {"static_visual": 0},
+            }
+        }
+    )
+    assert cfg.reranking.min_relevance_for("static_visual") == 0
+    assert cfg.reranking.min_relevance_for("temporal") == 1
+
+
+def test_base_yaml_documents_new_retrieval_and_reranking_keys():
+    cfg = load_config(Path("configs/base.yaml"))
+    assert cfg.retrieval.max_event_summaries == 4
+    assert cfg.retrieval.min_clip_hits == 2
+    assert cfg.reranking.keep_gate_max_relevance == 1
+    assert cfg.reranking.min_relevance_by_route == {}
 
 
 def test_reranking_weights_sum_to_one():
