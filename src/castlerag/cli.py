@@ -568,6 +568,11 @@ def index(
     console.print(f"  Qdrant : {cfg.qdrant.host}:{cfg.qdrant.port}")
     if dry_run:
         console.print("[yellow]dry-run: no Qdrant writes[/yellow]")
+        if lexical_only:
+            console.print(
+                "[yellow]dry-run: --lexical-only would rebuild transcripts.pkl "
+                f"and visual_text.pkl under {cfg.embedding.cache_dir}[/yellow]"
+            )
         return
     records = load_chunk_records(Path(cfg.preprocessing.chunks_dir))
     scoped_all = filter_records(records, cfg)
@@ -645,7 +650,16 @@ def retrieve(
     )
     bm25_index = load_bm25_index(bm25_path)
     # Optional: absent until `castlerag index` is re-run on an older deployment.
-    visual_index = load_visual_bm25_index_if_present(Path(cfg.embedding.cache_dir))
+    try:
+        visual_index = load_visual_bm25_index_if_present(
+            Path(cfg.embedding.cache_dir)
+        )
+    except Exception as exc:  # present but unreadable / incompatible pickle
+        console.print(
+            f"[red]visual-text BM25 index under {cfg.embedding.cache_dir} failed "
+            f"to load ({exc}). Re-run `castlerag index --lexical-only`.[/red]"
+        )
+        raise typer.Exit(1) from exc
     qdrant_client = get_client(cfg.qdrant.host, cfg.qdrant.port)
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,

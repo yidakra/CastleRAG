@@ -72,7 +72,7 @@ class VisualTextDoc(BaseModel):
 class VisualBM25IndexBundle:
     """Persistable visual-text BM25 bundle."""
 
-    bm25: BM25Okapi
+    bm25: Optional[BM25Okapi]
     docs: List[VisualTextDoc]
     tokenized_corpus: List[List[str]]
 

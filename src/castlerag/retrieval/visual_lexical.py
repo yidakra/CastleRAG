@@ -10,7 +10,7 @@ fuse with the dense multimodal lanes on ``record_id``.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import numpy as np
 
@@ -30,6 +30,25 @@ DEFAULT_VISUAL_TEXT_ROUTE_WEIGHTS: Dict[str, float] = {
 }
 
 
+def _doc_features(visual_index: Any, docs: List[Any]) -> tuple[List[str], List[set]]:
+    """Return per-doc (lowercase text, token set), computed once per index.
+
+    The corpus is static for the lifetime of a loaded index, so the features
+    are cached on the bundle after the first query instead of re-tokenising
+    every document on every request.
+    """
+    cached = getattr(visual_index, "_scorer_features", None)
+    if cached is not None and len(cached[0]) == len(docs):
+        return cached
+    lowers = [doc.text.lower() for doc in docs]
+    token_sets = [set(_tokenize(doc.text)) for doc in docs]
+    try:
+        visual_index._scorer_features = (lowers, token_sets)
+    except (AttributeError, TypeError):  # read-only fake indexes in tests
+        pass
+    return lowers, token_sets
+
+
 def score_visual_docs(
     visual_index: Any,
     query: str,
@@ -38,8 +57,13 @@ def score_visual_docs(
     person_hint: Optional[str] = None,
     room_hint: Optional[str] = None,
     top_k: int = DEFAULT_VISUAL_TEXT_TOP_K,
+    exclude_cameras: Optional[Sequence[str]] = None,
 ) -> List[RetrievalHit]:
     """Score visual-text docs with BM25 + bonuses and return the top-k hits.
+
+    ``exclude_cameras`` are skipped *before* ranking and truncation, so a
+    rejected camera can never consume lane slots (the dense lanes filter
+    server-side, before ``limit``, and this lane must match).
 
     ``visual_index`` is a :class:`~castlerag.index.visual_lexical.VisualBM25IndexBundle`
     (or anything exposing ``bm25`` and ``docs``).  An index with no documents
@@ -63,10 +87,14 @@ def score_visual_docs(
         if len(phrase.split()) > 1:
             answer_phrases.append(phrase)
 
+    excluded = set(exclude_cameras or ())
+    lowers, token_sets = _doc_features(visual_index, docs)
     scored: List[tuple[float, Any]] = []
     for idx, doc in enumerate(docs):
-        text_lower = doc.text.lower()
-        doc_tokens = set(_tokenize(doc.text))
+        if excluded and doc.camera_id in excluded:
+            continue
+        text_lower = lowers[idx]
+        doc_tokens = token_sets[idx]
         score = float(base_scores[idx])
 
         # Answer-option overlap: brand names, labels and prices show up in
@@ -75,6 +103,11 @@ def score_visual_docs(
         if query_lower in text_lower:
             score += 1.0
         score += 0.4 * sum(1 for phrase in answer_phrases if phrase in text_lower)
+        if score <= 0.0:
+            # No lexical evidence at all. The metadata bonuses below must not
+            # promote an unrelated same-day / same-person doc into the lane,
+            # where RRF would hand it a vote purely for being ranked.
+            continue
 
         if day_hint and doc.day == day_hint:
             score += 0.75

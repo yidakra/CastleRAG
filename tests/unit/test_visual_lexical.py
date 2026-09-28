@@ -589,3 +589,134 @@ def test_cli_index_lexical_only_builds_both_pickles(tmp_path: Path):
     ]
     with (cache_dir / "transcripts.pkl").open("rb") as fh:
         assert len(pickle.load(fh)["windows"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# review follow-ups (#63): exclusion before truncation, no metadata-only hits,
+# cached doc features, CLI error boundary, dry-run + --lexical-only
+# ---------------------------------------------------------------------------
+
+
+class _ScoresBM25:
+    def __init__(self, scores):
+        self.scores = list(scores)
+
+    def get_scores(self, tokens):
+        return np.asarray(self.scores, dtype=np.float32)
+
+
+def _vdoc(record_id: str, camera_id: str, text: str, day: str = "day1"):
+    from castlerag.index.visual_lexical import VisualTextDoc
+
+    return VisualTextDoc(
+        record_id=record_id,
+        source_type="main_clip",
+        modality="video",
+        day=day,
+        camera_id=camera_id,
+        participant_id=camera_id,
+        absolute_start=0,
+        absolute_end=1,
+        text=text,
+    )
+
+
+_CHOICES = {"a": "Samsung", "b": "Bosch", "c": "Miele", "d": "LG"}
+
+
+def test_score_visual_docs_excludes_cameras_before_truncation():
+    from castlerag.retrieval.visual_lexical import score_visual_docs
+
+    docs = [
+        _vdoc("k1", "Kitchen", "fridge with SAMSUNG logo"),
+        _vdoc("k2", "Kitchen", "fridge door SAMSUNG"),
+        _vdoc("a1", "Allie", "a fridge in the corner"),
+    ]
+    index = SimpleNamespace(bm25=_ScoresBM25([5.0, 4.0, 1.0]), docs=docs)
+    hits = score_visual_docs(
+        visual_index=index,
+        query="What brand is the fridge?",
+        choices=_CHOICES,
+        top_k=1,
+        exclude_cameras=["Kitchen"],
+    )
+    # Both Kitchen docs outrank Allie's, but they must not eat the single slot.
+    assert [h.record_id for h in hits] == ["a1"]
+
+
+def test_score_visual_docs_ignores_docs_with_no_lexical_evidence():
+    from castlerag.retrieval.visual_lexical import score_visual_docs
+
+    docs = [
+        _vdoc("x1", "Allie", "someone reads a book"),
+        _vdoc("x2", "Bjorn", "SAMSUNG sticker on the fridge"),
+    ]
+    index = SimpleNamespace(bm25=_ScoresBM25([0.0, 0.0]), docs=docs)
+    hits = score_visual_docs(
+        visual_index=index,
+        query="What brand is the fridge?",
+        choices=_CHOICES,
+        day_hint="day1",
+        person_hint="Allie",
+    )
+    # x1 only gets the day + person bonuses; x2 matches an answer token.
+    assert [h.record_id for h in hits] == ["x2"]
+
+
+def test_score_visual_docs_caches_doc_features_on_index():
+    from castlerag.retrieval.visual_lexical import score_visual_docs
+
+    docs = [_vdoc("x2", "Bjorn", "SAMSUNG sticker on the fridge")]
+    index = SimpleNamespace(bm25=_ScoresBM25([1.0]), docs=docs)
+    score_visual_docs(visual_index=index, query="fridge brand", choices=_CHOICES)
+    first = index._scorer_features
+    score_visual_docs(visual_index=index, query="fridge brand", choices=_CHOICES)
+    assert index._scorer_features is first
+    assert first[1][0] >= {"samsung", "fridge"}
+
+
+def _cli_cfg(tmp_path: Path) -> Path:
+    cache_dir = tmp_path / "embeddings"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        "preprocessing:\n"
+        f"  chunks_dir: {tmp_path / 'chunks'}\n"
+        "embedding:\n"
+        f"  cache_dir: {cache_dir}\n"
+        "dataset:\n"
+        "  camera_scope: all\n"
+    )
+    return cfg_path
+
+
+def test_cli_retrieve_reports_unreadable_visual_index(tmp_path: Path, monkeypatch):
+    import castlerag.cli as cli_module
+
+    cfg_path = _cli_cfg(tmp_path)
+    cache_dir = tmp_path / "embeddings"
+    (cache_dir / "transcripts.pkl").write_bytes(b"placeholder")
+    (cache_dir / VISUAL_TEXT_INDEX_NAME).write_bytes(b"not a pickle")
+    monkeypatch.setattr(cli_module, "load_bm25_index", lambda path: object())
+    result = CliRunner().invoke(
+        app,
+        [
+            "retrieve", "What brand is the fridge?",
+            "--a", "Samsung", "--b", "Bosch", "--c", "Miele", "--d", "LG",
+            "--config", str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "failed to load" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_cli_index_lexical_only_dry_run_reports_and_writes_nothing(tmp_path: Path):
+    cfg_path = _cli_cfg(tmp_path)
+    result = CliRunner().invoke(
+        app, ["index", "--lexical-only", "--dry-run", "--config", str(cfg_path)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "--lexical-only would rebuild" in result.output
+    assert not (tmp_path / "embeddings" / "transcripts.pkl").exists()
+    assert not (tmp_path / "embeddings" / VISUAL_TEXT_INDEX_NAME).exists()

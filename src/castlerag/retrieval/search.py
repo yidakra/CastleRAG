@@ -216,12 +216,10 @@ def retrieve(
             person_hint=hints.participant,
             room_hint=hints.room,
             top_k=visual_lane_top_k(retrieval_cfg),
+            # Applied inside the scorer, before top-k truncation, so rejected
+            # cameras cannot consume lane slots.
+            exclude_cameras=hints.exclude_cameras,
         )
-        if hints.exclude_cameras:
-            _excluded_visual = set(hints.exclude_cameras)
-            visual_hits = [
-                hit for hit in visual_hits if hit.camera_id not in _excluded_visual
-            ]
         if visual_hits:
             multimodal_lists.append(visual_hits)
             multimodal_weights.append(visual_lane_weight(hints.route, retrieval_cfg))
