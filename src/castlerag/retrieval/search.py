@@ -38,8 +38,12 @@ def reciprocal_rank_fusion(
         w = (weights[i] if i < len(weights) else 1.0) if weights is not None else 1.0
         for rank, hit in enumerate(ranked, start=1):
             scores[hit.record_id] += w / (k + rank)
-            existing = by_record.get(hit.record_id)
-            if existing is None or hit.score > existing.score:
+            # The representative hit for a record is the first one seen. Lanes
+            # carry different score scales (cosine vs BM25), so comparing raw
+            # scores across them would let e.g. the visual-text lexical hit
+            # replace the Qdrant point and its payload for any shared record.
+            # Callers pass dense lists first; the fused score is recomputed.
+            if hit.record_id not in by_record:
                 by_record[hit.record_id] = hit
             # Preserve the best raw cosine similarity seen for this record across
             # all query variants and modality lanes. Seed from the existing value

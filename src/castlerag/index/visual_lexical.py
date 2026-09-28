@@ -178,10 +178,8 @@ def build_visual_bm25_index(
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "docs": [doc.model_dump() for doc in docs],
-        "tokenized_corpus": tokenized_corpus,
-    }
+    # Only the docs are persisted; token lists are re-derived on load.
+    payload = {"docs": [doc.model_dump() for doc in docs]}
     # Temp file + os.replace so a crash mid-write (or a concurrent reader)
     # never sees a truncated pickle: the loader treats an unreadable file as
     # a hard error, so a torn write would brick retrieval until a rebuild.

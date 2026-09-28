@@ -793,3 +793,24 @@ def test_build_visual_bm25_index_skips_tokenless_docs(tmp_path: Path):
     assert [d.record_id for d in bundle.docs] == ["c_ok"]
     assert len(bundle.tokenized_corpus) == 1
     assert bundle.bm25 is not None
+
+
+def test_rrf_representative_is_first_seen_not_highest_raw_score():
+    """A lexical hit must not replace the dense point for a shared record."""
+    from castlerag.retrieval.search import reciprocal_rank_fusion
+
+    dense = _vdoc("shared", "Allie", "SAMSUNG fridge")
+    from castlerag.retrieval.visual_lexical import score_visual_docs
+
+    lexical_hit = score_visual_docs(
+        visual_index=SimpleNamespace(bm25=_ScoresBM25([9.0]), docs=[dense]),
+        query="fridge brand",
+        choices=_CHOICES,
+    )[0]
+    dense_hit = lexical_hit.model_copy(
+        update={"point_id": "qdrant-uuid", "score": 0.42, "raw_score": 0.42}
+    )
+    fused = reciprocal_rank_fusion([[dense_hit], [lexical_hit]], k=60)
+    assert len(fused) == 1
+    assert fused[0].point_id == "qdrant-uuid"
+    assert fused[0].raw_score == 0.42
