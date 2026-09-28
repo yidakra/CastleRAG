@@ -488,12 +488,7 @@ class TestBuildDefaultPipeline:
     def test_returns_eval_pipeline_with_all_callables(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        cfg = load_config(
-            override_path=Path(
-                "/Users/adeliev/Development/CastleRAG/.claude/worktrees/"
-                "agent-a4206a53948faec0a/configs/base.yaml"
-            )
-        )
+        cfg = load_config()
 
         mock_bm25 = MagicMock()
         mock_qdrant = MagicMock()
