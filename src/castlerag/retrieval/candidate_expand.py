@@ -5,6 +5,11 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import List, Optional
 
+from castlerag.evidence_text import (
+    MAX_CAPTION_CHARS,
+    MAX_SCENE_GRAPH_CHARS,
+    truncate_text,
+)
 from castlerag.routing.question_router import QuestionRoute
 from castlerag.schemas import EvidencePack, RetrievalHit
 
@@ -147,10 +152,26 @@ def _collect_ocr(rows: List[RetrievalHit]) -> List[str]:
 
 
 def _collect_frame_descriptions(rows: List[RetrievalHit]) -> List[str]:
-    """Return deduplicated clip asset path strings from main_clip hits."""
+    """Return deduplicated frame descriptions from main_clip hits.
+
+    Renders the VLM clip caption and scene graph (truncated) so the reranker
+    can actually read what the clip shows; the asset path alone (the previous
+    output) told the model nothing about the frames.
+    """
     values = []
     for row in rows:
-        if row.source_type == "main_clip" and row.asset_path:
+        if row.source_type != "main_clip":
+            continue
+        caption = truncate_text(row.clip_caption, MAX_CAPTION_CHARS)
+        scene = truncate_text(row.scene_graph_text, MAX_SCENE_GRAPH_CHARS)
+        label = f"clip {row.record_id}"
+        if row.camera_id:
+            label += f" ({row.camera_id})"
+        if caption:
+            values.append(f"{label} caption: {caption}")
+        if scene:
+            values.append(f"{label} scene graph: {scene}")
+        if not caption and not scene and row.asset_path:
             values.append(f"clip asset: {row.asset_path}")
     return _unique_values(values)
 

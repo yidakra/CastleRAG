@@ -408,6 +408,8 @@ def _dense_search(
                 transcript_text=payload.get("transcript_text"),
                 event_summary=payload.get("event_summary"),
                 ocr_text=payload.get("ocr_text"),
+                clip_caption=payload.get("clip_caption"),
+                scene_graph_text=payload.get("scene_graph_text"),
                 asset_path=payload.get("asset_path"),
                 sampled_frame_paths=payload.get("sampled_frame_paths") or [],
             )

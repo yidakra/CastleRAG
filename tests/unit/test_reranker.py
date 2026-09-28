@@ -20,6 +20,7 @@ from castlerag.rerank.llm_reranker import (
     parse_reranker_response,
     rerank_candidates,
 )
+from castlerag.retrieval.candidate_expand import expand_candidates
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import (
     EvalQuestion,
@@ -288,6 +289,47 @@ def test_rerank_candidates_zeroes_support_for_pruned_fallback(caplog):
         fallback.reranker_output
     )
     assert "fallback" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# format_candidate_pack — clip captions reach the reranker (issue #50)
+# ---------------------------------------------------------------------------
+
+
+def test_format_candidate_pack_renders_clip_caption_and_scene_graph():
+    """A clip with a caption shows the caption, not just its asset path."""
+    clip = _hit("clip_cap").model_copy(
+        update={
+            "camera_id": "Kitchen",
+            "clip_caption": "Werner stands at the stove wearing a white W3C apron.",
+            "scene_graph_text": "person at stove (center); fridge (left)",
+        }
+    )
+    (pack,) = expand_candidates([clip], route="static_visual")
+    text = format_candidate_pack(pack, rank=1)
+    assert "Sampled-frame descriptions:" in text
+    assert "clip clip_cap (Kitchen) caption: Werner stands at the stove" in text
+    assert "scene graph: person at stove (center); fridge (left)" in text
+    assert "clip asset:" not in text
+    assert "/tmp/clip.mp4" not in text
+
+
+def test_format_candidate_pack_falls_back_to_asset_path_without_caption():
+    clip = _hit("clip_plain")
+    (pack,) = expand_candidates([clip], route="static_visual")
+    text = format_candidate_pack(pack, rank=1)
+    assert "clip asset: /tmp/clip.mp4" in text
+
+
+def test_format_candidate_pack_truncates_runaway_caption():
+    clip = _hit("clip_long").model_copy(update={"clip_caption": "word " * 500})
+    (pack,) = expand_candidates([clip], route="static_visual")
+    text = format_candidate_pack(pack, rank=1)
+    caption_line = next(
+        line for line in text.splitlines() if "clip_long" in line and "caption" in line
+    )
+    assert len(caption_line) < 700
+    assert caption_line.endswith("...")
 
 
 # ---------------------------------------------------------------------------

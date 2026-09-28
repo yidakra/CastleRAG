@@ -291,6 +291,33 @@ def test_format_evidence_row_contains_citation_and_asset():
     assert "ocr: Receipt on the kitchen counter." in row
 
 
+def test_format_evidence_row_renders_caption_and_scene_graph():
+    hit = _make_hit().model_copy(
+        update={
+            "transcript_text": None,
+            "clip_caption": "Werner at the stove wearing a W3C apron.",
+            "scene_graph_text": "person at stove (center)",
+            "ocr_text": "W3C",
+            "asset_path": "/tmp/clip_0.mp4",
+        }
+    )
+    row = _format_evidence_row(hit)
+    assert "caption: Werner at the stove wearing a W3C apron." in row
+    assert "scene: person at stove (center)" in row
+    assert "ocr: W3C" in row
+    assert "asset: /tmp/clip_0.mp4" in row
+
+
+def test_format_evidence_row_truncates_long_caption():
+    hit = _make_hit().model_copy(update={"clip_caption": "x" * 5000})
+    row = _format_evidence_row(hit)
+    caption_line = next(
+        line for line in row.splitlines() if line.startswith("caption:")
+    )
+    assert len(caption_line) <= len("caption: ") + 600
+    assert caption_line.endswith("...")
+
+
 def test_build_prompt_contains_question_and_route_block():
     q = _make_question()
     hints = RouteHints(route="speech_text")

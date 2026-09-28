@@ -18,6 +18,11 @@ import re
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence
 
+from castlerag.evidence_text import (
+    MAX_CAPTION_CHARS,
+    MAX_SCENE_GRAPH_CHARS,
+    truncate_text,
+)
 from castlerag.frame_encoding import encode_frame, estimate_text_tokens
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import AnswerChoice, EvalQuestion, Prediction, RetrievalHit
@@ -327,6 +332,12 @@ def _format_evidence_row(hit: RetrievalHit) -> str:
         body_parts.append(f"event: {hit.event_summary}")
     if hit.ocr_text:
         body_parts.append(f"ocr: {hit.ocr_text}")
+    caption = truncate_text(hit.clip_caption, MAX_CAPTION_CHARS)
+    if caption:
+        body_parts.append(f"caption: {caption}")
+    scene = truncate_text(hit.scene_graph_text, MAX_SCENE_GRAPH_CHARS)
+    if scene:
+        body_parts.append(f"scene: {scene}")
     if hit.asset_path:
         body_parts.append(f"asset: {hit.asset_path}")
     body = "\n".join(body_parts) if body_parts else "[no text]"

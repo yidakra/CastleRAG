@@ -11,6 +11,7 @@ from castlerag.retrieval.candidate_expand import _collect_frame_paths
 from castlerag.retrieval.filters import build_filter
 from castlerag.retrieval.search import (
     _collapse_hits,
+    _dense_search,
     _query_variants,
     reciprocal_rank_fusion,
     retrieve,
@@ -679,6 +680,96 @@ def test_retrieve_does_not_hard_filter_dense_search_by_room():
     # ...but no dense search filtered on room.
     assert qdrant.filter_keys  # dense searches actually ran
     assert all("room" not in keys for keys in qdrant.filter_keys)
+
+
+def test_dense_search_maps_caption_scene_graph_and_ocr_from_payload():
+    """clip_caption / scene_graph_text / ocr_text in the payload land on the hit."""
+
+    class FakePoint:
+        def __init__(self, pid: str, score: float, payload: dict) -> None:
+            self.id = pid
+            self.score = score
+            self.payload = payload
+
+    class FakeQdrantClient:
+        def query_points(self, **kwargs):
+            return SimpleNamespace(
+                points=[
+                    FakePoint(
+                        "pt_clip_9",
+                        0.8,
+                        {
+                            "record_id": "clip_9",
+                            "source_type": "main_clip",
+                            "modality": "video",
+                            "day": "day1",
+                            "camera_id": "Kitchen",
+                            "clip_caption": "Werner at the stove in a W3C apron.",
+                            "scene_graph_text": "person at stove (center); apron",
+                            "ocr_text": "W3C",
+                            "asset_path": "/tmp/clip_9.mp4",
+                            "sampled_frame_paths": ["/tmp/f0.jpg"],
+                        },
+                    )
+                ]
+            )
+
+    hits = _dense_search(
+        qdrant_client=FakeQdrantClient(),
+        collection_name="castle_test",
+        query_vector=[1.0, 0.0],
+        limit=5,
+        source_type="main_clip",
+        modality="video",
+    )
+    assert len(hits) == 1
+    hit = hits[0]
+    assert hit.clip_caption == "Werner at the stove in a W3C apron."
+    assert hit.scene_graph_text == "person at stove (center); apron"
+    assert hit.ocr_text == "W3C"
+    assert hit.asset_path == "/tmp/clip_9.mp4"
+    assert hit.sampled_frame_paths == ["/tmp/f0.jpg"]
+    # Fields survive the model_copy calls used by RRF and collapse.
+    fused = reciprocal_rank_fusion([hits])
+    assert fused[0].clip_caption == hit.clip_caption
+    assert fused[0].scene_graph_text == hit.scene_graph_text
+
+
+def test_dense_search_leaves_caption_fields_none_when_payload_lacks_them():
+    class FakePoint:
+        def __init__(self, pid: str, score: float, payload: dict) -> None:
+            self.id = pid
+            self.score = score
+            self.payload = payload
+
+    class FakeQdrantClient:
+        def query_points(self, **kwargs):
+            return SimpleNamespace(
+                points=[
+                    FakePoint(
+                        "pt_tw_9",
+                        0.8,
+                        {
+                            "record_id": "tw_9",
+                            "source_type": "transcript_window",
+                            "modality": "text",
+                            "transcript_text": "hello",
+                        },
+                    )
+                ]
+            )
+
+    (hit,) = _dense_search(
+        qdrant_client=FakeQdrantClient(),
+        collection_name="castle_test",
+        query_vector=[1.0, 0.0],
+        limit=5,
+        source_type="transcript_window",
+        modality="text",
+    )
+    assert hit.clip_caption is None
+    assert hit.scene_graph_text is None
+    assert hit.ocr_text is None
 
 
 # ---------------------------------------------------------------------------

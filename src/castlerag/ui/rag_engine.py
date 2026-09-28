@@ -850,7 +850,13 @@ class RagEngine:
                 continue
             hour = _hour_of(hit)
             start = _seconds_within_hour(hit)
-            text = hit.transcript_text or hit.event_summary or hit.ocr_text or ""
+            text = (
+                hit.transcript_text
+                or hit.event_summary
+                or hit.ocr_text
+                or hit.clip_caption
+                or ""
+            )
             refs.append(
                 EvidenceRef(
                     record_id=hit.record_id,
@@ -972,8 +978,13 @@ def _display_score(
 
 
 def _hit_evidence_text(hit: RetrievalHit, limit: int = 300) -> Optional[str]:
-    """Best available evidence snippet for a hit (transcript/event/OCR)."""
-    for text in (hit.transcript_text, hit.event_summary, hit.ocr_text):
+    """Best available evidence snippet for a hit (transcript/event/OCR/caption)."""
+    for text in (
+        hit.transcript_text,
+        hit.event_summary,
+        hit.ocr_text,
+        hit.clip_caption,
+    ):
         snippet = (text or "").strip()
         if snippet:
             return snippet[:limit]
