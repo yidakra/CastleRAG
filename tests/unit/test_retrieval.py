@@ -924,3 +924,35 @@ def test_collect_frame_descriptions_caps_described_clips():
     assert len(values) == 2 * MAX_DESCRIBED_CLIPS
     assert values[0].startswith("clip clip0 ")
     assert not any(f"clip clip{MAX_DESCRIBED_CLIPS} " in v for v in values)
+
+
+def test_collect_frame_descriptions_cap_counts_only_described_clips():
+    from types import SimpleNamespace
+
+    from castlerag.retrieval.candidate_expand import (
+        MAX_DESCRIBED_CLIPS,
+        _collect_frame_descriptions,
+    )
+
+    def _row(i, caption):
+        return SimpleNamespace(
+            source_type="main_clip",
+            record_id=f"clip{i}",
+            camera_id="Allie",
+            clip_caption=caption,
+            scene_graph_text=None,
+            asset_path=f"/clips/{i}.mp4",
+        )
+
+    # Un-annotated clips first, then more captioned clips than the cap.
+    rows = [_row(i, None) for i in range(MAX_DESCRIBED_CLIPS)] + [
+        _row(100 + i, f"caption {i}") for i in range(MAX_DESCRIBED_CLIPS + 2)
+    ]
+    values = _collect_frame_descriptions(rows)
+    captions = [v for v in values if " caption: " in v]
+    assets = [v for v in values if v.startswith("clip asset: ")]
+    # Un-annotated clips did not eat the cap; the first N captioned clips render.
+    assert len(captions) == MAX_DESCRIBED_CLIPS
+    assert captions[0].startswith("clip clip100 ")
+    # Every other main_clip row, including the two past the cap, keeps its path.
+    assert len(assets) == MAX_DESCRIBED_CLIPS + 2

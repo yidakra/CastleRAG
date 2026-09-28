@@ -469,9 +469,10 @@ def _collapse_hits(
     )
 
     # Budgets are per record, not per point: the same clip can arrive from
-    # several lanes (dense Qdrant point, lexical caption/OCR lane with a
-    # ``visual_lexical:<record_id>`` point id). RRF already merges these by
-    # record_id, but dedupe here too so a direct caller never double-counts.
+    # several lanes (the dense Qdrant point and the transcript BM25 lane today;
+    # the caption/OCR lexical lane from PR #63 once merged). RRF already merges
+    # these by record_id, but dedupe here too so a direct caller never
+    # double-counts.
     ordered_hits: List[RetrievalHit] = []
     seen_record_ids: Set[str] = set()
     for hit in sorted(hits, key=lambda hit: (_route_priority(hints, hit), hit.rank)):

@@ -241,3 +241,11 @@ def test_no_space_day_form_counts_in_day_comparison(question):
     hints = route_question(question, {})
     assert hints.route == "temporal"
     assert hints.day is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["Where is the first-aid kit?", "Who made a last-minute change to the slides?"],
+)
+def test_hyphenated_first_last_compounds_do_not_anchor(question):
+    assert route_question(question, {}).route != "temporal"
