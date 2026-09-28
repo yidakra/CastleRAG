@@ -185,3 +185,46 @@ def test_single_day_reference_still_sets_day_hint():
     hints = route_question("What is on the whiteboard on day 2?", {})
     assert hints.day == "day2"
     assert hints.route != "temporal"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What is in the cupboard next to the fridge?",
+        "What is in the first drawer under the sink?",
+        "What are the last two items on the shopping list?",
+        "What is Werner's first name?",
+    ],
+)
+def test_spatial_next_to_and_positional_first_last_do_not_anchor(question):
+    assert route_question(question, {}).route != "temporal"
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["What did Bjorn do next?", "Who dealt first in the first game of poker?"],
+)
+def test_ordering_next_and_first_still_anchor(question):
+    assert route_question(question, {}).route == "temporal"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What was on the whiteboard on the last day?",
+        "How did the kitchen look on the first two days?",
+        "Which board game was played on the final day?",
+    ],
+)
+def test_last_day_and_day_spans_are_day_phrases_not_anchors(question):
+    hints = route_question(question, {})
+    assert hints.route != "temporal"
+    assert hints.day is None
+
+
+def test_first_to_last_day_is_a_comparison():
+    hints = route_question(
+        "What changed on the whiteboard from the first day to the last day?", {}
+    )
+    assert hints.route == "temporal"
+    assert hints.day is None

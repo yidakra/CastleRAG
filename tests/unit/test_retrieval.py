@@ -899,3 +899,28 @@ def test_collapse_hits_defaults_when_config_lacks_new_keys():
     result = _collapse_hits(_mixed_source_hits(), hints, legacy_cfg)
     assert _count(result, "main_event_summary") == 4
     assert _count(result, "main_clip") == 4
+
+
+def test_collect_frame_descriptions_caps_described_clips():
+    from types import SimpleNamespace
+
+    from castlerag.retrieval.candidate_expand import (
+        MAX_DESCRIBED_CLIPS,
+        _collect_frame_descriptions,
+    )
+
+    rows = [
+        SimpleNamespace(
+            source_type="main_clip",
+            record_id=f"clip{i}",
+            camera_id="Allie",
+            clip_caption=f"caption {i}",
+            scene_graph_text=f"graph {i}",
+            asset_path=None,
+        )
+        for i in range(MAX_DESCRIBED_CLIPS + 5)
+    ]
+    values = _collect_frame_descriptions(rows)
+    assert len(values) == 2 * MAX_DESCRIBED_CLIPS
+    assert values[0].startswith("clip clip0 ")
+    assert not any(f"clip clip{MAX_DESCRIBED_CLIPS} " in v for v in values)

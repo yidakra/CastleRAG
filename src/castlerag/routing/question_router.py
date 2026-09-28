@@ -45,7 +45,8 @@ _DAY_ORDINALS = {
 # as a temporal-ordering marker: "what is on the back of Werner's t-shirt on
 # the first day" is a static visual question, not a before/after one.
 _DAY_PHRASE_RE = re.compile(
-    r"\b(?:(?:first|second|third|fourth)\s+day|day\s*[1-4])\b"
+    r"\b(?:(?:first|second|third|fourth|last|final)\s+"
+    r"(?:(?:two|three|four|\d)\s+)?days?|day\s*[1-4])\b"
 )
 _TEMPORAL_KEYWORDS = frozenset(
     [
@@ -86,10 +87,8 @@ _TEMPORAL_PHRASES = (
 _TEMPORAL_DOMINANT_MARKERS = (
     "before",
     "after",
-    "next",
     "previously",
     "later",
-    "first",
     "second person to",
     "second one to",
     "second time",
@@ -98,15 +97,29 @@ _TEMPORAL_DOMINANT_MARKERS = (
     "third one to",
     "third time",
     "third to",
-    "last",
     "finally",
     "once",
     "in what order",
     "right before",
     "right after",
 )
+# "first"/"last" anchor only in their ordering sense. In CASTLE questions that
+# is the common case ("who dealt first", "the first category in the quiz",
+# "the first person to unfold the mat"), so the bare words stay anchors, but
+# a positional or quantity noun right after them ("the first drawer", "the
+# last two", "first name") disqualifies the match. "next" is spatial in
+# "next to" and an ordering marker otherwise ("what did she do next").
+_POSITIONAL_FOLLOWERS = (
+    r"(?!\s+(?:two|three|four|five|few|\d+|rows?|drawers?|shelf|shelves|"
+    r"cupboards?|cabinets?|floors?|pages?|columns?|seats?|doors?|aisles?|"
+    r"names?|letters?|words?|digits?|numbers?|items?|slots?|positions?)\b)"
+)
 _TEMPORAL_DOMINANT_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(m) for m in _TEMPORAL_DOMINANT_MARKERS) + r")\b"
+    r"\b(?:"
+    + "|".join(re.escape(m) for m in _TEMPORAL_DOMINANT_MARKERS)
+    + r"|next(?!\s+to\b)"
+    + r"|(?:first|last)" + _POSITIONAL_FOLLOWERS
+    + r")\b"
 )
 _SPEECH_KEYWORDS = frozenset(
     [
@@ -508,9 +521,17 @@ def _has_day_comparison(text: str) -> bool:
     """
     seen = set()
     for match in _DAY_PHRASE_RE.finditer(text):
-        token = match.group(0)
-        digit = re.search(r"[1-4]", token)
-        seen.add(f"day{digit.group(0)}" if digit else _DAY_ORDINALS[token.split()[0]])
+        words = match.group(0).split()
+        digit = re.search(r"[1-4]", match.group(0))
+        if digit and words[0] == "day":
+            seen.add(f"day{digit.group(0)}")
+        elif len(words) == 3:
+            # "first two days": a span, not a specific day to compare against.
+            seen.add("span")
+        elif words[0] in _DAY_ORDINALS:
+            seen.add(_DAY_ORDINALS[words[0]])
+        else:
+            seen.add("last")  # "last day" / "final day"
     return len(seen) >= 2
 
 

@@ -151,17 +151,30 @@ def _collect_ocr(rows: List[RetrievalHit]) -> List[str]:
     return _unique_values([row.ocr_text for row in rows if row.ocr_text])
 
 
-def _collect_frame_descriptions(rows: List[RetrievalHit]) -> List[str]:
+# Clips described (caption + scene graph) per reranker pack.
+MAX_DESCRIBED_CLIPS = 8
+
+
+def _collect_frame_descriptions(
+    rows: List[RetrievalHit], max_clips: int = MAX_DESCRIBED_CLIPS
+) -> List[str]:
     """Return deduplicated frame descriptions from main_clip hits.
 
     Renders the VLM clip caption and scene graph (truncated) so the reranker
     can actually read what the clip shows; the asset path alone (the previous
-    output) told the model nothing about the frames.
+    output) told the model nothing about the frames. At most ``max_clips``
+    clips are described (rows arrive primary-first), because a bundle can
+    hold every clip sharing day+camera+participant and the reranker enforces
+    no token budget.
     """
     values = []
+    described = 0
     for row in rows:
         if row.source_type != "main_clip":
             continue
+        if described >= max_clips:
+            break
+        described += 1
         caption = truncate_text(row.clip_caption, MAX_CAPTION_CHARS)
         scene = truncate_text(row.scene_graph_text, MAX_SCENE_GRAPH_CHARS)
         label = f"clip {row.record_id}"

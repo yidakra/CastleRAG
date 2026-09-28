@@ -298,8 +298,12 @@ def test_gather_frame_paths_samples_evenly_across_top_clip():
     picked = _gather_frame_paths([row], max_frames=8)
     assert len(picked) == 8
     assert picked[0] != frames[0] or picked[-1] != frames[7]  # not the first 8 s
-    assert picked == [frames[int((i + 0.5) * 30 / 8)] for i in range(8)]
-    assert picked[-1] == "/clip0/28.jpg"
+    # Behavioural: in order, no repeats, covering the whole clip evenly.
+    idx = [frames.index(p) for p in picked]
+    assert idx == sorted(idx) and len(set(idx)) == 8
+    assert idx[0] < 30 / 8 and idx[-1] >= 30 - 30 / 8  # first and last buckets
+    gaps = [b - a for a, b in zip(idx, idx[1:])]
+    assert max(gaps) - min(gaps) <= 1
 
 
 def test_gather_frame_paths_spills_into_next_row_and_dedupes():

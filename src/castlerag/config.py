@@ -104,12 +104,14 @@ class RetrievalConfig(BaseModel):
     # Clips (main_clip) and event summaries (main_event_summary) are budgeted
     # separately; min_clip_hits reserves rows for the top clips on every route
     # so frames always reach the reranker/generator when clips were retrieved.
-    max_candidate_videos: int = 4
-    max_event_summaries: int = 4
-    min_clip_hits: int = 2
-    frames_per_candidate: int = 32
-    max_aux_images: int = 16
-    max_evidence_rows: int = 50
+    # All budgets are non-negative: a negative value would turn into a
+    # Python drop-last-N slice in _collapse_hits and silently starve a lane.
+    max_candidate_videos: int = Field(default=4, ge=0)
+    max_event_summaries: int = Field(default=4, ge=0)
+    min_clip_hits: int = Field(default=2, ge=0)
+    frames_per_candidate: int = Field(default=32, ge=0)
+    max_aux_images: int = Field(default=16, ge=0)
+    max_evidence_rows: int = Field(default=50, ge=0)
     modality_score_thresholds: Dict[str, float] = Field(default_factory=dict)
     # Visual-text lexical lane (issue #50, modality gap): BM25 over per-clip
     # captions + OCR + scene-graph text and per-event summaries + aggregated
@@ -183,12 +185,12 @@ class RerankingConfig(BaseModel):
     support_weight: float = 0.3
     # Packs with relevance <= min_relevance are pruned. Per-route overrides
     # (e.g. {"static_visual": 0}) win over the global value for that route.
-    min_relevance: int = 1
+    min_relevance: int = Field(default=1, ge=0, le=4)
     min_relevance_by_route: Dict[str, int] = Field(default_factory=dict)
     # keep=false from the reranker only discards packs with relevance at or
     # below this value; higher-rated packs survive a stray keep=false. 4
     # restores the old behaviour where keep was always decisive.
-    keep_gate_max_relevance: int = 1
+    keep_gate_max_relevance: int = Field(default=1, ge=0, le=4)
 
     @field_validator("min_relevance_by_route")
     @classmethod

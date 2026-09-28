@@ -53,6 +53,8 @@ def _flat_config(cfg: "CastleRAGConfig", n_questions: int) -> Dict[str, Any]:
         "retrieval/max_evidence_rows": cfg.retrieval.max_evidence_rows,
         "reranking/top_k": cfg.reranking.top_k,
         "reranking/min_relevance": cfg.reranking.min_relevance,
+        "reranking/min_relevance_by_route": dict(cfg.reranking.min_relevance_by_route),
+        "reranking/keep_gate_max_relevance": cfg.reranking.keep_gate_max_relevance,
         "reranking/relevance_weight": cfg.reranking.relevance_weight,
         "ui/score_mode": cfg.ui.score_mode,
         "n_questions": n_questions,

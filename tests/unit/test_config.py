@@ -163,3 +163,18 @@ def test_min_relevance_by_route_rejects_unknown_route_and_bad_values():
         {"reranking": {"min_relevance_by_route": {"static_visual": 0, "mixed": 2}}}
     )
     assert cfg.reranking.min_relevance_for("mixed") == 2
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value"),
+    [
+        ("retrieval", "min_clip_hits", -1),
+        ("retrieval", "max_event_summaries", -1),
+        ("retrieval", "max_candidate_videos", -2),
+        ("reranking", "min_relevance", 5),
+        ("reranking", "keep_gate_max_relevance", -1),
+    ],
+)
+def test_budget_and_gate_knobs_reject_out_of_range_values(section, key, value):
+    with pytest.raises(ValueError):
+        CastleRAGConfig.model_validate({section: {key: value}})
