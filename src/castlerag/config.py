@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, get_args
@@ -132,9 +133,10 @@ class RetrievalConfig(BaseModel):
                     f"visual_text_route_weights: unknown route {route!r} "
                     f"(expected one of {sorted(routes)})"
                 )
-            if weight < 0:
+            if not math.isfinite(weight) or weight < 0:
                 raise ValueError(
-                    f"visual_text_route_weights[{route!r}] must be >= 0, got {weight}"
+                    f"visual_text_route_weights[{route!r}] must be a finite "
+                    f"float >= 0, got {weight}"
                 )
         return value
 

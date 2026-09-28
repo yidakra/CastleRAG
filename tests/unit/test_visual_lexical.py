@@ -831,3 +831,31 @@ def test_visual_text_route_weights_rejects_unknown_route_and_negative():
         {"retrieval": {"visual_text_route_weights": {"static_visual": 3.0}}}
     )
     assert cfg.retrieval.visual_text_route_weights == {"static_visual": 3.0}
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_visual_text_route_weights_rejects_non_finite(bad):
+    from castlerag.config import CastleRAGConfig
+
+    with pytest.raises(ValueError, match="finite"):
+        CastleRAGConfig.model_validate(
+            {"retrieval": {"visual_text_route_weights": {"mixed": bad}}}
+        )
+
+
+def test_score_visual_docs_all_stopword_answer_phrase_is_not_evidence():
+    from castlerag.retrieval.visual_lexical import score_visual_docs
+
+    docs = [
+        _vdoc("g1", "Allie", "two people chat in the garden"),
+        _vdoc("k1", "Bjorn", "the fridge in the kitchen"),
+    ]
+    index = SimpleNamespace(bm25=_ScoresBM25([0.0, 0.0]), docs=docs)
+    hits = score_visual_docs(
+        visual_index=index,
+        query="Where was the fridge?",
+        choices={"a": "in the", "b": "on the", "c": "kitchen", "d": "hall"},
+        day_hint="day1",
+    )
+    # "in the" substring-matches g1 but carries no content token.
+    assert [h.record_id for h in hits] == ["k1"]

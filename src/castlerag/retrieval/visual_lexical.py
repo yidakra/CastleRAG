@@ -97,7 +97,9 @@ def score_visual_docs(
         # must not count as overlap, or the evidence gate below is defeated.
         answer_tokens.update(set(_tokenize(choice)) - _STOPWORDS)
         phrase = choice.strip().lower()
-        if len(phrase.split()) > 1:
+        # A phrase of pure function words ("in the kitchen") would substring-
+        # match most captions; it only counts if it carries a content token.
+        if len(phrase.split()) > 1 and set(phrase.split()) - _STOPWORDS:
             answer_phrases.append(phrase)
 
     excluded = set(exclude_cameras or ())
