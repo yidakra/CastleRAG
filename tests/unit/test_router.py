@@ -228,3 +228,16 @@ def test_first_to_last_day_is_a_comparison():
     )
     assert hints.route == "temporal"
     assert hints.day is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What changed between day1 and day2?",
+        "Was the same lamp on the desk on day1 and on the second day?",
+    ],
+)
+def test_no_space_day_form_counts_in_day_comparison(question):
+    hints = route_question(question, {})
+    assert hints.route == "temporal"
+    assert hints.day is None

@@ -521,10 +521,11 @@ def _has_day_comparison(text: str) -> bool:
     """
     seen = set()
     for match in _DAY_PHRASE_RE.finditer(text):
-        words = match.group(0).split()
-        digit = re.search(r"[1-4]", match.group(0))
-        if digit and words[0] == "day":
-            seen.add(f"day{digit.group(0)}")
+        token = match.group(0)
+        words = token.split()
+        digit = re.fullmatch(r"day\s*([1-4])", token)
+        if digit:  # "day 1" and the no-space "day1" alike
+            seen.add(f"day{digit.group(1)}")
         elif len(words) == 3:
             # "first two days": a span, not a specific day to compare against.
             seen.add("span")

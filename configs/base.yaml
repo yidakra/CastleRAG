@@ -109,7 +109,8 @@ reranking:
   relevance_weight: 0.7
   support_weight: 0.3
   # Packs rated relevance <= min_relevance are pruned. Override per route
-  # when one lane needs looser gating (a2_local.yaml runs static_visual at 0):
+  # Per-route overrides win over the global value (e.g. static_visual: 0 to
+  # keep weak visual packs); a2_local.yaml instead sets the global value to 0.
   #   min_relevance_by_route:
   #     static_visual: 0
   min_relevance: 1
