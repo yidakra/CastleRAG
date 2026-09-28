@@ -678,12 +678,13 @@ def _load_optional_visual_index(
     try:
         return load_visual_bm25_index_if_present(cache_dir)
     except Exception as exc:
+        # Not a missing-artifact situation, so skip the generic template and
+        # its "run preprocess/index on a small subset" advice.
         raise PipelineDependencyError(
-            _dependency_failure_message(
-                "indexing",
-                f"failed to load visual-text BM25 index under {cache_dir}: {exc}",
-                artifact_report,
-            )
+            f"failed to load visual-text BM25 index under {cache_dir}: {exc}. "
+            "The lane is optional: rebuild the index with "
+            "`castlerag index --lexical-only`, or delete visual_text.pkl to run "
+            "without the caption/OCR lane."
         ) from exc
 
 
