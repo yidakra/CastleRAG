@@ -415,12 +415,33 @@ def _dense_search(
     return hits
 
 
+# Fallbacks for retrieval configs that predate the split clip / event-summary
+# budgets (e.g. the SimpleNamespace configs in tests). Keep in sync with the
+# defaults on ``castlerag.config.RetrievalConfig``.
+_DEFAULT_MAX_EVENT_SUMMARIES = 4
+_DEFAULT_MIN_CLIP_HITS = 2
+
+
 def _collapse_hits(
     hits: List[RetrievalHit],
     hints: RouteHints,
     retrieval_cfg: Any,
 ) -> List[RetrievalHit]:
-    """Apply per-source budgets and re-rank hits according to route priority."""
+    """Apply per-source budgets and re-rank hits according to route priority.
+
+    ``main_clip`` and ``main_event_summary`` hits have *separate* budgets
+    (``max_candidate_videos`` and ``max_event_summaries``). They used to share
+    one, which starved whichever source the route ranked second: temporal and
+    speech routes put event summaries first and so never kept a single clip
+    (no frames reached the reranker/generator), while static_visual kept only
+    clips and dropped the event summaries that carry the aggregated OCR text
+    (issue #50).
+
+    ``min_clip_hits`` additionally reserves room for the top-ranked clips on
+    every route, so the ``max_evidence_rows`` cap cannot squeeze them out
+    behind a long run of higher-priority transcript windows. The floor only
+    applies when clips were retrieved at all; it never invents rows.
+    """
     transcript_budget = min(
         retrieval_cfg.transcript_top_k,
         hints.evidence_profile.transcript_budget,
@@ -428,6 +449,13 @@ def _collapse_hits(
     max_candidate_videos = min(
         retrieval_cfg.max_candidate_videos,
         hints.evidence_profile.candidate_video_budget,
+    )
+    max_event_summaries = getattr(
+        retrieval_cfg, "max_event_summaries", _DEFAULT_MAX_EVENT_SUMMARIES
+    )
+    min_clip_hits = min(
+        getattr(retrieval_cfg, "min_clip_hits", _DEFAULT_MIN_CLIP_HITS),
+        max_candidate_videos,
     )
     max_aux_images = min(
         retrieval_cfg.max_aux_images,
@@ -438,29 +466,61 @@ def _collapse_hits(
         hints.evidence_profile.max_evidence_rows,
     )
 
+    # Budgets are per record, not per point: the same clip can arrive from
+    # several lanes (dense Qdrant point, lexical caption/OCR lane with a
+    # ``visual_lexical:<record_id>`` point id). RRF already merges these by
+    # record_id, but dedupe here too so a direct caller never double-counts.
+    ordered_hits: List[RetrievalHit] = []
+    seen_record_ids: Set[str] = set()
+    for hit in sorted(hits, key=lambda hit: (_route_priority(hints, hit), hit.rank)):
+        if hit.record_id in seen_record_ids:
+            continue
+        seen_record_ids.add(hit.record_id)
+        ordered_hits.append(hit)
+
+    # Reserve slots for the best-ranked clips. They are contiguous in
+    # ``ordered_hits`` (same route priority, sorted by rank), so they are also
+    # the first clips the walk below meets and always fit the clip budget.
+    reserved_clip_ids = {
+        hit.record_id
+        for hit in [h for h in ordered_hits if h.source_type == "main_clip"][
+            :min_clip_hits
+        ]
+    }
+    reserved_remaining = len(reserved_clip_ids)
+
     transcript_count = 0
-    candidate_count = 0
+    clip_count = 0
+    summary_count = 0
     aux_image_count = 0
     kept: List[RetrievalHit] = []
-
-    ordered_hits = sorted(hits, key=lambda hit: (_route_priority(hints, hit), hit.rank))
 
     for hit in ordered_hits:
         if len(kept) >= max_rows:
             break
+        is_reserved = hit.record_id in reserved_clip_ids
+        if not is_reserved and len(kept) + reserved_remaining >= max_rows:
+            # Only the reserved clips may still claim the remaining rows.
+            continue
         if hit.source_type == "transcript_window":
             if transcript_count >= transcript_budget:
                 continue
             transcript_count += 1
-        elif hit.source_type in {"main_clip", "main_event_summary"}:
-            if candidate_count >= max_candidate_videos:
+        elif hit.source_type == "main_clip":
+            if clip_count >= max_candidate_videos:
                 continue
-            candidate_count += 1
+            clip_count += 1
+        elif hit.source_type == "main_event_summary":
+            if summary_count >= max_event_summaries:
+                continue
+            summary_count += 1
         elif hit.modality == "image" and hit.source_type.startswith("aux_"):
             if aux_image_count >= max_aux_images:
                 continue
             aux_image_count += 1
 
+        if is_reserved:
+            reserved_remaining -= 1
         kept.append(hit)
 
     return [

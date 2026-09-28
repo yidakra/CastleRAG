@@ -100,7 +100,13 @@ class RetrievalConfig(BaseModel):
     gaze_top_k: int = 8
     thermal_top_k: int = 8
     rrf_k: int = 60
+    # Post-fusion evidence budgets applied in retrieval.search._collapse_hits.
+    # Clips (main_clip) and event summaries (main_event_summary) are budgeted
+    # separately; min_clip_hits reserves rows for the top clips on every route
+    # so frames always reach the reranker/generator when clips were retrieved.
     max_candidate_videos: int = 4
+    max_event_summaries: int = 4
+    min_clip_hits: int = 2
     frames_per_candidate: int = 32
     max_aux_images: int = 16
     max_evidence_rows: int = 50

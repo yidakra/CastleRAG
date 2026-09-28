@@ -70,7 +70,17 @@ retrieval:
   gaze_top_k: 8
   thermal_top_k: 8
   rrf_k: 60
-  max_candidate_videos: 4
+  # Post-fusion evidence budgets (per question, after RRF). Clips and event
+  # summaries are budgeted separately: sharing one budget meant temporal and
+  # speech routes (event summaries ranked first) kept zero clips, so no frames
+  # ever reached the reranker/generator, while static_visual kept zero event
+  # summaries and lost the aggregated OCR text they carry (issue #50).
+  max_candidate_videos: 4    # main_clip rows kept
+  max_event_summaries: 4     # main_event_summary rows kept
+  # Rows reserved for the top-ranked clips on every route so the
+  # max_evidence_rows cap cannot squeeze them out behind transcript windows.
+  # Only applies when clips were retrieved at all; capped at max_candidate_videos.
+  min_clip_hits: 2
   frames_per_candidate: 32
   max_aux_images: 16
   max_evidence_rows: 50  # TAHAKOM-validated working-memory cap

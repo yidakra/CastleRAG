@@ -679,3 +679,132 @@ def test_retrieve_does_not_hard_filter_dense_search_by_room():
     # ...but no dense search filtered on room.
     assert qdrant.filter_keys  # dense searches actually ran
     assert all("room" not in keys for keys in qdrant.filter_keys)
+
+
+# ---------------------------------------------------------------------------
+# _collapse_hits — separate clip / event-summary budgets and the clip floor
+# (issue #50: visual evidence retrieved but lost at collapse time)
+# ---------------------------------------------------------------------------
+
+
+def _mixed_source_hits(
+    *, transcripts: int = 30, summaries: int = 6, clips: int = 6
+) -> list[RetrievalHit]:
+    """Fused hits ranked transcripts first, then summaries, then clips."""
+    hits: list[RetrievalHit] = []
+    rank = 1
+    for i in range(transcripts):
+        hits.append(_make_hit(f"tw_{i}", "transcript_window", rank))
+        rank += 1
+    for i in range(summaries):
+        hits.append(_make_hit(f"es_{i}", "main_event_summary", rank))
+        rank += 1
+    for i in range(clips):
+        clip = _make_hit(f"clip_{i}", "main_clip", rank)
+        hits.append(clip.model_copy(update={"modality": "video"}))
+        rank += 1
+    return hits
+
+
+def _budget_cfg(**overrides) -> SimpleNamespace:
+    cfg = dict(
+        transcript_top_k=30,
+        max_candidate_videos=4,
+        max_event_summaries=4,
+        min_clip_hits=2,
+        max_aux_images=16,
+        max_evidence_rows=50,
+    )
+    cfg.update(overrides)
+    return SimpleNamespace(**cfg)
+
+
+def _count(hits: list[RetrievalHit], source_type: str) -> int:
+    return sum(1 for hit in hits if hit.source_type == source_type)
+
+
+@pytest.mark.parametrize("route", ["temporal", "speech_text", "mixed"])
+def test_collapse_hits_keeps_clips_when_summaries_rank_first(route):
+    """Routes that rank event summaries ahead of clips still keep clip rows."""
+    hints = RouteHints(route=route)
+    result = _collapse_hits(_mixed_source_hits(), hints, _budget_cfg())
+    assert _count(result, "main_event_summary") == 4
+    assert _count(result, "main_clip") == 4
+    assert _count(result, "transcript_window") == 30
+
+
+def test_collapse_hits_static_visual_keeps_event_summaries_alongside_clips():
+    """static_visual ranks clips first; event summaries (with OCR) must survive."""
+    hints = RouteHints(route="static_visual")
+    result = _collapse_hits(_mixed_source_hits(), hints, _budget_cfg())
+    assert _count(result, "main_clip") == 4
+    assert _count(result, "main_event_summary") == 4
+    # static_visual transcript budget is 10 (route profile), not 30.
+    assert _count(result, "transcript_window") == 10
+    assert result[0].source_type == "main_clip"
+
+
+def test_collapse_hits_reserves_min_clip_hits_under_max_rows():
+    """The max_rows cap cannot squeeze out the top clips behind transcripts."""
+    hints = RouteHints(route="temporal")  # transcripts, summaries, then clips
+    cfg = _budget_cfg(max_evidence_rows=5, min_clip_hits=2)
+    result = _collapse_hits(_mixed_source_hits(), hints, cfg)
+    assert len(result) == 5
+    assert _count(result, "main_clip") == 2
+    assert [hit.record_id for hit in result if hit.source_type == "main_clip"] == [
+        "clip_0",
+        "clip_1",
+    ]
+    assert _count(result, "transcript_window") == 3
+    # Output ranks are re-numbered contiguously.
+    assert [hit.rank for hit in result] == [1, 2, 3, 4, 5]
+
+
+def test_collapse_hits_clip_floor_is_noop_without_clips():
+    """No clips retrieved -> nothing is reserved and rows fill as before."""
+    hints = RouteHints(route="temporal")
+    cfg = _budget_cfg(max_evidence_rows=5)
+    result = _collapse_hits(_mixed_source_hits(clips=0), hints, cfg)
+    assert len(result) == 5
+    assert _count(result, "transcript_window") == 5
+
+
+def test_collapse_hits_clip_floor_capped_by_clip_budget():
+    """min_clip_hits never exceeds the clip budget."""
+    hints = RouteHints(route="temporal")
+    cfg = _budget_cfg(max_candidate_videos=1, min_clip_hits=3, max_evidence_rows=4)
+    result = _collapse_hits(_mixed_source_hits(), hints, cfg)
+    assert _count(result, "main_clip") == 1
+    assert len(result) == 4
+
+
+def test_collapse_hits_counts_lexical_and_dense_hits_for_same_record_once():
+    """A clip reached via a lexical lane (visual_lexical:<id>) and via dense
+    Qdrant shares one record_id; it must occupy one budget slot, not two."""
+    hits = _mixed_source_hits(transcripts=0, summaries=0, clips=4)
+    lexical_dupes = [
+        hits[0].model_copy(update={"point_id": "visual_lexical:clip_0", "rank": 9}),
+        hits[1].model_copy(update={"point_id": "visual_lexical:clip_1", "rank": 10}),
+    ]
+    hints = RouteHints(route="static_visual")
+    cfg = _budget_cfg(max_candidate_videos=3, min_clip_hits=2)
+    result = _collapse_hits(hits + lexical_dupes, hints, cfg)
+    ids = [hit.record_id for hit in result]
+    assert ids == ["clip_0", "clip_1", "clip_2"]
+    assert len(set(ids)) == len(ids)
+    # The first occurrence in priority order (the better rank) is the one kept.
+    assert all(not hit.point_id.startswith("visual_lexical:") for hit in result)
+
+
+def test_collapse_hits_defaults_when_config_lacks_new_keys():
+    """Configs without max_event_summaries/min_clip_hits use the module defaults."""
+    hints = RouteHints(route="temporal")
+    legacy_cfg = SimpleNamespace(
+        transcript_top_k=30,
+        max_candidate_videos=4,
+        max_aux_images=16,
+        max_evidence_rows=50,
+    )
+    result = _collapse_hits(_mixed_source_hits(), hints, legacy_cfg)
+    assert _count(result, "main_event_summary") == 4
+    assert _count(result, "main_clip") == 4
