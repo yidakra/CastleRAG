@@ -777,3 +777,19 @@ def test_score_visual_docs_yes_no_choices_are_not_evidence():
         day_hint="day1",
     )
     assert [h.record_id for h in hits] == ["k1"]
+
+
+def test_build_visual_bm25_index_skips_tokenless_docs(tmp_path: Path):
+    """Punctuation-only captions must not crash BM25Okapi (ZeroDivisionError)."""
+    out = tmp_path / VISUAL_TEXT_INDEX_NAME
+    only_punct = [_clip("c_punct", caption="..."), _clip("c_dots", caption="- - -")]
+    bundle = build_visual_bm25_index(only_punct, [], out)
+    assert bundle.docs == [] and bundle.bm25 is None
+    loaded = load_visual_bm25_index(out)
+    assert loaded.docs == [] and loaded.bm25 is None
+
+    mixed = only_punct + [_clip("c_ok", caption="a red mug on the table")]
+    bundle = build_visual_bm25_index(mixed, [], out)
+    assert [d.record_id for d in bundle.docs] == ["c_ok"]
+    assert len(bundle.tokenized_corpus) == 1
+    assert bundle.bm25 is not None

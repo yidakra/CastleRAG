@@ -171,8 +171,7 @@ def build_visual_bm25_index(
     as an empty bundle whose ``bm25`` is ``None``; the scorer treats that as
     "no hits".
     """
-    docs = build_visual_docs(clips, events)
-    tokenized_corpus = [_tokenize(doc.text) for doc in docs]
+    docs, tokenized_corpus = _drop_tokenless(build_visual_docs(clips, events))
     bm25 = BM25Okapi(tokenized_corpus) if tokenized_corpus else None
     bundle = VisualBM25IndexBundle(
         bm25=bm25, docs=docs, tokenized_corpus=tokenized_corpus
@@ -199,12 +198,34 @@ def build_visual_bm25_index(
     return bundle
 
 
+def _drop_tokenless(
+    docs: Sequence[VisualTextDoc],
+) -> tuple[List[VisualTextDoc], List[List[str]]]:
+    """Return (docs, token lists) with tokenless docs removed, kept aligned.
+
+    A caption or OCR value made only of punctuation tokenises to nothing;
+    BM25Okapi divides by the average document length, so an all-empty corpus
+    would raise ZeroDivisionError and block indexing. Such docs can never
+    match a query anyway.
+    """
+    kept: List[VisualTextDoc] = []
+    tokens: List[List[str]] = []
+    for doc in docs:
+        doc_tokens = _tokenize(doc.text)
+        if doc_tokens:
+            kept.append(doc)
+            tokens.append(doc_tokens)
+    return kept, tokens
+
+
 def load_visual_bm25_index(index_path: Path) -> VisualBM25IndexBundle:
     """Load a persisted visual-text BM25 index from disk."""
     with index_path.open("rb") as fh:
         payload = pickle.load(fh)
     docs = [VisualTextDoc.model_validate(doc) for doc in payload["docs"]]
-    tokenized_corpus = payload["tokenized_corpus"]
+    # Re-derive the token lists rather than trusting the pickle, so a corpus
+    # written before the tokenless filter existed still loads safely.
+    docs, tokenized_corpus = _drop_tokenless(docs)
     bm25 = BM25Okapi(tokenized_corpus) if tokenized_corpus else None
     return VisualBM25IndexBundle(
         bm25=bm25, docs=docs, tokenized_corpus=tokenized_corpus
