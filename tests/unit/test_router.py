@@ -249,3 +249,23 @@ def test_no_space_day_form_counts_in_day_comparison(question):
 )
 def test_hyphenated_first_last_compounds_do_not_anchor(question):
     assert route_question(question, {}).route != "temporal"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What was on the whiteboard on the second to last day?",
+        "Which game was played on the second-to-last day?",
+    ],
+)
+def test_second_to_last_day_is_a_day_phrase_not_an_anchor(question):
+    hints = route_question(question, {})
+    assert hints.route != "temporal"
+    assert hints.day is None
+
+
+def test_second_to_last_day_versus_last_day_is_a_comparison():
+    hints = route_question(
+        "Was the kitchen tidier on the second to last day than on the last day?", {}
+    )
+    assert hints.route == "temporal"

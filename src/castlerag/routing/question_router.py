@@ -45,7 +45,11 @@ _DAY_ORDINALS = {
 # as a temporal-ordering marker: "what is on the back of Werner's t-shirt on
 # the first day" is a static visual question, not a before/after one.
 _DAY_PHRASE_RE = re.compile(
-    r"\b(?:(?:first|second|third|fourth|last|final)\s+"
+    # Compound forms first ("second to last day", "second-to-last day") so the
+    # bare "last day" alternative can't leave a stray "second to" behind,
+    # which would read as an ordering marker.
+    r"\b(?:(?:second|third)[\s-]+to[\s-]+last\s+days?"
+    r"|(?:first|second|third|fourth|last|final)\s+"
     r"(?:(?:two|three|four|\d)\s+)?days?|day\s*[1-4])\b"
 )
 _TEMPORAL_KEYWORDS = frozenset(
@@ -527,6 +531,8 @@ def _has_day_comparison(text: str) -> bool:
         digit = re.fullmatch(r"day\s*([1-4])", token)
         if digit:  # "day 1" and the no-space "day1" alike
             seen.add(f"day{digit.group(1)}")
+        elif re.search(r"\bto[\s-]+last\b", token):
+            seen.add(f"{words[0].rstrip('-')}-to-last")
         elif len(words) == 3:
             # "first two days": a span, not a specific day to compare against.
             seen.add("span")
