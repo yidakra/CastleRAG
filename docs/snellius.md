@@ -289,6 +289,11 @@ run rather than a full rebuild.
 > per-day commands once data is in the collection — `castlerag embed --day N`
 > and `castlerag index --day N` always write distinct `*_dayN.npz` artifacts
 > and upsert only those records.  Tracking issue: #43.
+>
+> Caches are now also incremental *per record id*: re-running `embed` over an
+> existing `*_dayN.npz` keeps the cached rows and embeds only records that are
+> not in it yet.  That is what lets new **cameras** join an existing day (the
+> fixed room cameras, #50 Bug B) — see `docs/fixedcams_reingest.md`.
 
 
 ```bash

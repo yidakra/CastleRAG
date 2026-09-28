@@ -23,7 +23,7 @@
 
 set -euo pipefail
 
-CONF="configs/snellius_me.yaml"
+CONF="${CONF:-configs/snellius_me.yaml}"   # override: sbatch --export=ALL,CONF=configs/snellius_fixedcams.yaml
 SC="/scratch-shared/${USER}"
 QFILE="data/smoke_day1.csv"          # 40 day-1 questions w/ ground truth
 N="${N:-5}"                          # how many to run; override via `sbatch --export=ALL,N=40`

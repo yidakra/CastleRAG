@@ -23,6 +23,7 @@ def build_filter(
     time_range_end_ms: Optional[int] = None,
     has_speech: Optional[bool] = None,
     exclude_camera_ids: Optional[Sequence[str]] = None,
+    participant_includes_fixed: bool = False,
 ) -> Any:
     """Return a qdrant_client Filter object for the given constraints.
 
@@ -30,6 +31,14 @@ def build_filter(
     ``exclude_camera_ids`` adds ``must_not`` conditions so the named cameras are
     hard-excluded from results — used by the UI refine loop to drop angles the
     reviewer rejected.
+
+    ``participant_includes_fixed`` turns the ``participant_id`` constraint into
+    ``participant_id == X OR camera_type == "fixed"`` (a top-level ``should``).
+    Fixed room cameras carry ``participant_id=None`` but do film the named
+    participant, so a hard participant filter would silently drop every fixed
+    camera point for any question that names a person (issue #50 Bug B — the
+    same failure mode as the room hard filter fixed in #53). On an ego-only
+    index this is equivalent to the plain filter.
     """
     from qdrant_client.http import models as qm
 
@@ -45,12 +54,20 @@ def build_filter(
         conditions.append(
             qm.FieldCondition(key="camera_type", match=qm.MatchValue(value=camera_type))
         )
+    should = []
     if participant_id is not None:
-        conditions.append(
-            qm.FieldCondition(
-                key="participant_id", match=qm.MatchValue(value=participant_id)
-            )
+        participant_cond = qm.FieldCondition(
+            key="participant_id", match=qm.MatchValue(value=participant_id)
         )
+        if participant_includes_fixed:
+            should = [
+                participant_cond,
+                qm.FieldCondition(
+                    key="camera_type", match=qm.MatchValue(value="fixed")
+                ),
+            ]
+        else:
+            conditions.append(participant_cond)
     if room is not None:
         conditions.append(
             qm.FieldCondition(key="room", match=qm.MatchValue(value=room))
@@ -99,6 +116,10 @@ def build_filter(
         for cam in (exclude_camera_ids or [])
     ]
 
-    if not conditions and not must_not:
+    if not conditions and not must_not and not should:
         return None
-    return qm.Filter(must=conditions or None, must_not=must_not or None)
+    return qm.Filter(
+        must=conditions or None,
+        should=should or None,
+        must_not=must_not or None,
+    )

@@ -1,0 +1,39 @@
+# CastleRAG — Snellius config with the 5 fixed room cameras in scope (#50 Bug B).
+#
+# Identical to configs/snellius_me.yaml except `dataset.camera_scope: "all"`.
+# load_config() merges exactly ONE override on top of base.yaml, so this file
+# repeats every snellius_me.yaml key instead of layering on it — keep the two
+# in sync if you change paths/endpoints there.
+#
+# Use it for the additive fixed-camera ingest (docs/fixedcams_reingest.md):
+#   castlerag preprocess --config configs/snellius_fixedcams.yaml --day 1 \
+#       --camera Kitchen --camera Living1 ...           # fixed cams only
+#   castlerag embed      --config configs/snellius_fixedcams.yaml --day 1
+#   castlerag index      --config configs/snellius_fixedcams.yaml --day 1   # additive
+# and for every eval / UI run afterwards: an `index` run under the ego-only
+# snellius_me.yaml would rebuild transcripts.pkl (BM25) WITHOUT the fixed-camera
+# transcripts. Dense retrieval itself has no camera-scope filter, so the fixed
+# points are searchable under either config once they are in Qdrant.
+dataset:
+  root: "/scratch-shared/$USER/castle2024"
+  hf_repo: "CASTLE-Dataset/CASTLE2024"
+  ego_cameras: ["Allie", "Bjorn", "Cathal", "Florian", "Klaus", "Luca", "Onanong", "Stevan", "Tien", "Werner"]
+  exo_cameras: ["Kitchen", "Living1", "Living2", "Meeting", "Reading"]
+  camera_scope: "all"
+preprocessing:
+  frames_dir:    "/scratch-shared/$USER/castle_derived/frames_1fps"
+  clips_dir:     "/scratch-shared/$USER/castle_derived/clips"
+  manifests_dir: "/scratch-shared/$USER/castle_derived/manifests"
+  chunks_dir:    "/scratch-shared/$USER/castle_derived/chunks"
+embedding:
+  cache_dir: "/scratch-shared/$USER/castle_derived/embeddings"
+  base_url: "http://localhost:8200/v1"
+qdrant:
+  host: "localhost"
+  port: 6333
+outputs:
+  dir:             "/scratch-shared/$USER/castle_outputs"
+  predictions:     "/scratch-shared/$USER/castle_outputs/predictions.json"
+  evidence_traces: "/scratch-shared/$USER/castle_outputs/evidence_traces.jsonl"
+  submissions:     "/scratch-shared/$USER/castle_outputs/submissions.json"
+  metrics:         "/scratch-shared/$USER/castle_outputs/metrics.json"

@@ -128,6 +128,9 @@ def format_candidate_pack(
     frame_text = _format_section("Sampled-frame descriptions", pack.frame_descriptions)
     aux_text = _format_section("Auxiliary notes", pack.auxiliary_notes)
 
+    # Fixed room cameras have no participant; name the room instead so the
+    # reranker knows what the angle shows. Ego packs (room=None) are unchanged.
+    room_line = f"Room: {primary.room} (fixed room camera)\n" if primary.room else ""
     return (
         f"{header}\n"
         f"Pack id: {pack.pack_id}\n"
@@ -138,6 +141,7 @@ def format_candidate_pack(
         f"Day: {primary.day or 'N/A'}\n"
         f"Camera: {primary.camera_id or 'N/A'}\n"
         f"Participant: {primary.participant_id or 'N/A'}\n"
+        f"{room_line}"
         f"Time: {time_text}\n\n"
         f"{transcript_text}\n\n"
         f"{event_text}\n\n"
