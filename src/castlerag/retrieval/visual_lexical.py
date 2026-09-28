@@ -1,0 +1,144 @@
+"""Visual-text BM25 retrieval over captions, OCR and scene graphs.
+
+Query-time counterpart of :mod:`castlerag.index.visual_lexical`.  Scores
+the per-clip / per-event visual documents with BM25 plus the same style of
+answer-option and metadata bonuses the transcript lane uses, and returns
+``RetrievalHit`` rows for ``main_clip`` / ``main_event_summary`` so they
+fuse with the dense multimodal lanes on ``record_id``.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, List, Mapping, Optional
+
+import numpy as np
+
+from castlerag.schemas import RetrievalHit
+
+_TOKEN_RE = re.compile(r"\b\w+\b")
+
+# Defaults used when the retrieval config predates the lane (e.g. the
+# SimpleNamespace configs in older tests).  Keep in sync with
+# RetrievalConfig / configs/base.yaml.
+DEFAULT_VISUAL_TEXT_TOP_K = 20
+DEFAULT_VISUAL_TEXT_ROUTE_WEIGHTS: Dict[str, float] = {
+    "static_visual": 2.0,
+    "mixed": 1.5,
+    "temporal": 1.0,
+    "speech_text": 0.5,
+}
+
+
+def score_visual_docs(
+    visual_index: Any,
+    query: str,
+    choices: Mapping[str, str],
+    day_hint: Optional[str] = None,
+    person_hint: Optional[str] = None,
+    room_hint: Optional[str] = None,
+    top_k: int = DEFAULT_VISUAL_TEXT_TOP_K,
+) -> List[RetrievalHit]:
+    """Score visual-text docs with BM25 + bonuses and return the top-k hits.
+
+    ``visual_index`` is a :class:`~castlerag.index.visual_lexical.VisualBM25IndexBundle`
+    (or anything exposing ``bm25`` and ``docs``).  An index with no documents
+    yields no hits.
+    """
+    docs = list(getattr(visual_index, "docs", None) or [])
+    bm25 = getattr(visual_index, "bm25", None)
+    if not docs or bm25 is None or top_k <= 0:
+        return []
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        return []
+
+    base_scores = np.asarray(bm25.get_scores(query_tokens), dtype=np.float32)
+    query_lower = query.lower()
+    answer_tokens: set[str] = set()
+    answer_phrases: List[str] = []
+    for choice in choices.values():
+        answer_tokens.update(_tokenize(choice))
+        phrase = choice.strip().lower()
+        if len(phrase.split()) > 1:
+            answer_phrases.append(phrase)
+
+    scored: List[tuple[float, Any]] = []
+    for idx, doc in enumerate(docs):
+        text_lower = doc.text.lower()
+        doc_tokens = set(_tokenize(doc.text))
+        score = float(base_scores[idx])
+
+        # Answer-option overlap: brand names, labels and prices show up in
+        # OCR verbatim, so a single shared token is a strong signal here.
+        score += 0.15 * len(answer_tokens.intersection(doc_tokens))
+        if query_lower in text_lower:
+            score += 1.0
+        score += 0.4 * sum(1 for phrase in answer_phrases if phrase in text_lower)
+
+        if day_hint and doc.day == day_hint:
+            score += 0.75
+        if person_hint and (
+            (doc.participant_id and doc.participant_id.lower() == person_hint.lower())
+            or person_hint.lower() in text_lower
+        ):
+            score += 0.75
+        if room_hint and (
+            (doc.room and doc.room.lower() == room_hint.lower())
+            or room_hint.lower() in text_lower
+        ):
+            score += 0.5
+
+        scored.append((score, doc))
+
+    ranked = sorted(
+        scored,
+        key=lambda item: (-item[0], item[1].absolute_start, item[1].record_id),
+    )[:top_k]
+    return [
+        RetrievalHit(
+            rank=rank,
+            score=score,
+            point_id=f"visual_lexical:{doc.record_id}",
+            record_id=doc.record_id,
+            source_type=doc.source_type,
+            modality=doc.modality,
+            day=doc.day,
+            camera_id=doc.camera_id,
+            participant_id=doc.participant_id,
+            room=doc.room,
+            hour=doc.hour,
+            start_seconds=doc.start_seconds,
+            end_seconds=doc.end_seconds,
+            absolute_start=doc.absolute_start,
+            absolute_end=doc.absolute_end,
+            transcript_text=doc.transcript_text,
+            event_summary=doc.event_summary,
+            ocr_text=doc.ocr_text,
+            asset_path=doc.asset_path,
+            sampled_frame_paths=list(doc.sampled_frame_paths),
+        )
+        for rank, (score, doc) in enumerate(ranked, start=1)
+    ]
+
+
+def visual_lane_top_k(retrieval_cfg: Any) -> int:
+    """Return the configured lane size, tolerating configs without the key."""
+    return int(getattr(retrieval_cfg, "visual_text_top_k", DEFAULT_VISUAL_TEXT_TOP_K))
+
+
+def visual_lane_weight(route: str, retrieval_cfg: Any) -> float:
+    """Return the RRF weight of the visual-text lane for ``route``.
+
+    Reads ``retrieval_cfg.visual_text_route_weights`` when present and falls
+    back to :data:`DEFAULT_VISUAL_TEXT_ROUTE_WEIGHTS`; unknown routes get 1.0.
+    """
+    configured = getattr(retrieval_cfg, "visual_text_route_weights", None) or {}
+    if route in configured:
+        return float(configured[route])
+    return float(DEFAULT_VISUAL_TEXT_ROUTE_WEIGHTS.get(route, 1.0))
+
+
+def _tokenize(text: str) -> List[str]:
+    """Lowercase and split text into word tokens using the module regex."""
+    return _TOKEN_RE.findall(text.lower())

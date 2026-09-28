@@ -16,10 +16,15 @@ from castlerag.config import CastleRAGConfig, load_config
 from castlerag.embed.omniembed import OmniEmbedClient
 from castlerag.eval import PipelineDependencyError, load_questions, run_eval
 from castlerag.eval.run_eval import _omniembed_base_url
-from castlerag.index import get_client, load_bm25_index
+from castlerag.index import (
+    get_client,
+    load_bm25_index,
+    load_visual_bm25_index_if_present,
+)
 from castlerag.index.pipeline import (
     build_bm25_artifact,
     build_qdrant_index,
+    build_visual_bm25_artifact,
     cache_dense_embeddings,
     filter_records,
     load_chunk_records,
@@ -521,6 +526,12 @@ def index(
         "Qdrant collection are left untouched; BM25 is still rebuilt from all "
         "available transcripts.",
     ),
+    lexical_only: bool = typer.Option(
+        False,
+        "--lexical-only",
+        help="Only rebuild the CPU BM25 artifacts (transcripts.pkl and "
+        "visual_text.pkl) from the chunk records; skip embedding and Qdrant.",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """Create Qdrant collection + payload indexes and upsert evidence points.
@@ -532,7 +543,12 @@ def index(
         castlerag index      --day 2
 
     BM25 is always rebuilt from the full transcript scope so retrieval keeps
-    matching previously-ingested days.
+    matching previously-ingested days. The same run also rebuilds the
+    visual-text BM25 index (``visual_text.pkl``: clip captions + OCR + scene
+    graphs, event summaries + aggregated OCR). ``--lexical-only`` rebuilds
+    just those two pickles from the chunk records — no vLLM, no Qdrant — which
+    is how an existing deployment picks up the visual-text lane without
+    re-embedding or re-annotating anything.
 
     **Always pass ``--day N`` after the initial bootstrap run.**  A bootstrap
     run without ``--day`` writes suffix-less cache files (``transcripts.npz``,
@@ -564,6 +580,14 @@ def index(
             f"run `castlerag preprocess --day {day}` first.[/red]"
         )
         raise typer.Exit(1)
+    if lexical_only:
+        cache_dir = Path(cfg.embedding.cache_dir)
+        bm25_path = build_bm25_artifact(scoped_all, cache_dir)
+        visual_path = build_visual_bm25_artifact(scoped_all, cache_dir)
+        console.print(f"  BM25    : {bm25_path}")
+        console.print(f"  visual  : {visual_path}")
+        console.print("  dense   : skipped (--lexical-only)")
+        return
     # Always invoke cache_dense_embeddings — _cache_records short-circuits
     # per cache file, so existing artifacts are not re-embedded.
     embed_client = OmniEmbedClient(
@@ -577,6 +601,7 @@ def index(
     # BM25 rebuilds from the full record scope so day-1 retrieval keeps
     # working after a day-2 incremental ingest.
     bm25_path = build_bm25_artifact(scoped_all, Path(cfg.embedding.cache_dir))
+    visual_path = build_visual_bm25_artifact(scoped_all, Path(cfg.embedding.cache_dir))
     vector_size, cache_paths = build_qdrant_index(
         cfg,
         records,
@@ -584,6 +609,7 @@ def index(
         day=day,
     )
     console.print(f"  BM25    : {bm25_path}")
+    console.print(f"  visual  : {visual_path}")
     console.print(f"  dense   : {len(cache_paths)} cache bundles upserted")
     console.print(f"  dim     : {vector_size}")
 
@@ -618,6 +644,8 @@ def retrieve(
         answers={"a": choice_a, "b": choice_b, "c": choice_c, "d": choice_d},
     )
     bm25_index = load_bm25_index(bm25_path)
+    # Optional: absent until `castlerag index` is re-run on an older deployment.
+    visual_index = load_visual_bm25_index_if_present(Path(cfg.embedding.cache_dir))
     qdrant_client = get_client(cfg.qdrant.host, cfg.qdrant.port)
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
@@ -635,8 +663,12 @@ def retrieve(
         embed_client=embed_client,
         retrieval_cfg=cfg.retrieval,
         known_participants=cfg.dataset.ego_cameras,
+        visual_index=visual_index,
     )
     console.print(f"  route    : {hints.route}")
+    console.print(
+        f"  visual   : {'visual_text.pkl loaded' if visual_index else 'absent'}"
+    )
     console.print(f"  evidence : {len(hits)} hits")
     for hit in hits[:10]:
         console.print(

@@ -31,7 +31,11 @@ from castlerag.eval.io import (
     write_predictions,
 )
 from castlerag.generation.answer import generate_answer
-from castlerag.index import get_client, load_bm25_index
+from castlerag.index import (
+    get_client,
+    load_bm25_index,
+    load_visual_bm25_index_if_present,
+)
 from castlerag.rerank.llm_reranker import rerank_candidates
 from castlerag.retrieval.candidate_expand import expand_candidates
 from castlerag.retrieval.search import retrieve as retrieve_evidence
@@ -411,6 +415,7 @@ def _resolve_output_paths(
 def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
     """Construct the default EvalPipeline wired to BM25, Qdrant, and vLLM clients."""
     bm25_index, qdrant_client, artifact_report = _prepare_default_runtime(cfg)
+    visual_index = _load_optional_visual_index(cfg, artifact_report)
     embed_client = OmniEmbedClient(
         model=cfg.embedding.model,
         backend=cfg.embedding.backend,
@@ -432,6 +437,7 @@ def _build_default_pipeline(cfg: CastleRAGConfig) -> EvalPipeline:
                 embed_client=embed_client,
                 retrieval_cfg=cfg.retrieval,
                 known_participants=cfg.dataset.ego_cameras,
+                visual_index=visual_index,
             )
         except (
             ConnectionError,
@@ -656,6 +662,29 @@ def _prepare_default_runtime(
     _ensure_qdrant_collection_ready(qdrant_client, cfg)
     _ensure_vllm_runtime_ready(cfg)
     return bm25_index, qdrant_client, artifact_report
+
+
+def _load_optional_visual_index(
+    cfg: CastleRAGConfig, artifact_report: IndexArtifactReport
+) -> Any:
+    """Load ``visual_text.pkl`` when present; ``None`` keeps the old behaviour.
+
+    The visual-text lexical lane is additive (issue #50): an index built
+    before it existed has no pickle, and retrieval must then run exactly as
+    it did. A pickle that is present but unreadable is a broken artifact and
+    is reported like a broken transcript index rather than silently skipped.
+    """
+    cache_dir = Path(cfg.embedding.cache_dir)
+    try:
+        return load_visual_bm25_index_if_present(cache_dir)
+    except Exception as exc:
+        raise PipelineDependencyError(
+            _dependency_failure_message(
+                "indexing",
+                f"failed to load visual-text BM25 index under {cache_dir}: {exc}",
+                artifact_report,
+            )
+        ) from exc
 
 
 def _discover_index_artifacts(cfg: CastleRAGConfig) -> IndexArtifactReport:

@@ -9,6 +9,11 @@ import numpy as np
 
 from castlerag.retrieval.filters import build_filter
 from castlerag.retrieval.transcript_lexical import score_windows
+from castlerag.retrieval.visual_lexical import (
+    score_visual_docs,
+    visual_lane_top_k,
+    visual_lane_weight,
+)
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import EvalQuestion, RetrievalHit
 
@@ -73,8 +78,15 @@ def retrieve(
     embed_client: Any,
     retrieval_cfg: Any,
     known_participants: Optional[Sequence[str]] = None,
+    visual_index: Any = None,
 ) -> List[RetrievalHit]:
     """Full dual-path retrieval for one question.
+
+    ``visual_index`` is the optional BM25 bundle over clip captions, OCR and
+    scene-graph text (``visual_text.pkl``). When given, it adds a lexical
+    lane to the multimodal RRF pass so object / on-screen-text questions can
+    match verbatim (issue #50, modality gap). When ``None`` (index not built
+    yet) retrieval is byte-for-byte the pre-lane behaviour.
 
     The dense participant filter is only kept when that participant actually
     has indexed ego evidence for the hinted day, judged from the loaded BM25
@@ -189,6 +201,30 @@ def retrieve(
                 if hits:
                     multimodal_lists.append(hits)
                     multimodal_weights.append(variant_weights[qi])
+
+    # Visual-text lexical lane: BM25 over captions + OCR + scene graphs, fused
+    # as one more list in the multimodal pass. Hits share record_ids with the
+    # dense main_clip / main_event_summary lanes, so a clip whose OCR carries
+    # the answer verbatim gets both a dense and a lexical vote. Weighted per
+    # route (visual routes up, speech_text down); see visual_lane_weight.
+    if visual_index is not None:
+        visual_hits = score_visual_docs(
+            visual_index=visual_index,
+            query=question.query,
+            choices=question.answers,
+            day_hint=hints.day,
+            person_hint=hints.participant,
+            room_hint=hints.room,
+            top_k=visual_lane_top_k(retrieval_cfg),
+        )
+        if hints.exclude_cameras:
+            _excluded_visual = set(hints.exclude_cameras)
+            visual_hits = [
+                hit for hit in visual_hits if hit.camera_id not in _excluded_visual
+            ]
+        if visual_hits:
+            multimodal_lists.append(visual_hits)
+            multimodal_weights.append(visual_lane_weight(hints.route, retrieval_cfg))
 
     multimodal_lane = reciprocal_rank_fusion(
         multimodal_lists,
