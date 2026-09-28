@@ -40,6 +40,13 @@ _DAY_ORDINALS = {
     "third": "day3",
     "fourth": "day4",
 }
+# Day references ("on the first day", "day 1") are a DAY hint only. They are
+# blanked out before temporal cue matching so the bare ordinal does not read
+# as a temporal-ordering marker: "what is on the back of Werner's t-shirt on
+# the first day" is a static visual question, not a before/after one.
+_DAY_PHRASE_RE = re.compile(
+    r"\b(?:(?:first|second|third|fourth)\s+day|day\s*[1-4])\b"
+)
 _TEMPORAL_KEYWORDS = frozenset(
     [
         "before",
@@ -67,6 +74,11 @@ _TEMPORAL_PHRASES = (
     "right before",
     "right after",
 )
+# Markers that alone send a question to the temporal route. Matched as whole
+# words (so "after" no longer fires on "afternoon") on the day-stripped text,
+# so "first"/"second"/"last" only count in their ordering sense ("who dealt
+# first", "the second person to present", "at first", "the first time"), not
+# as part of "the first day".
 _TEMPORAL_DOMINANT_MARKERS = (
     "before",
     "after",
@@ -74,12 +86,17 @@ _TEMPORAL_DOMINANT_MARKERS = (
     "previously",
     "later",
     "first",
+    "second",
+    "third",
     "last",
     "finally",
     "once",
     "in what order",
     "right before",
     "right after",
+)
+_TEMPORAL_DOMINANT_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(m) for m in _TEMPORAL_DOMINANT_MARKERS) + r")\b"
 )
 _SPEECH_KEYWORDS = frozenset(
     [
@@ -281,9 +298,12 @@ def route_question(
     ]
     room = min(room_matches, default=(None, None))[1]
 
+    # Temporal cues are scored on the text with day references blanked out:
+    # "the first day" is a day hint (extracted above), not an ordering marker.
+    temporal_text = _strip_day_phrases(question_lower)
     temporal_score, temporal_hits = _cue_score(
-        question_lower,
-        tokens,
+        temporal_text,
+        set(re.findall(r"\b\w+\b", temporal_text)),
         keywords=_TEMPORAL_KEYWORDS,
         phrases=_TEMPORAL_PHRASES,
     )
@@ -311,7 +331,7 @@ def route_question(
         temporal_score=temporal_score,
         speech_score=speech_score,
         visual_score=visual_score,
-        question=question_lower,
+        question=temporal_text,
     )
     extracted_keywords = sorted(
         {
@@ -457,6 +477,15 @@ def _choose_route(
     return "static_visual"
 
 
+def _strip_day_phrases(text: str) -> str:
+    """Blank out day references ("first day", "day 1") so they carry no temporal cue."""
+    return _DAY_PHRASE_RE.sub(" ", text)
+
+
 def _has_temporal_anchor(question: str) -> bool:
-    """Return True if the question contains any dominant temporal ordering marker."""
-    return any(marker in question for marker in _TEMPORAL_DOMINANT_MARKERS)
+    """Return True if the question contains a dominant temporal ordering marker.
+
+    Markers match as whole words. Callers pass the day-stripped text (see
+    :func:`_strip_day_phrases`) so "on the first day" alone never anchors.
+    """
+    return _TEMPORAL_DOMINANT_RE.search(question) is not None

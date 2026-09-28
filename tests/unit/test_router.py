@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from castlerag.routing.question_router import RouteHints, route_question
 
 
@@ -82,6 +84,57 @@ def test_route_hints_default_profile_matches_route_and_is_not_shared():
     assert speech_hints.evidence_profile.frames_per_candidate_video == 32
     assert visual_hints.evidence_profile.frames_per_candidate_video == 32
     assert speech_hints.evidence_profile is not visual_hints.evidence_profile
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What is on the back of Werner's t-shirt on the first day?",
+        "What colour was the rim of Werner's plate during breakfast on the first day?",
+        "What brand is the fridge in the kitchen on day 1?",
+    ],
+)
+def test_day_ordinal_is_a_day_hint_not_a_temporal_marker(question):
+    """'on the first day' / 'day 1' set the day but must not force temporal."""
+    hints = route_question(question, {})
+    assert hints.route == "static_visual"
+    assert hints.day == "day1"
+    assert "first" not in hints.extracted_keywords
+
+
+def test_day_ordinal_alone_sets_no_temporal_cue():
+    hints = route_question(
+        "What is on the back of Werner's t-shirt on the first day?", {}
+    )
+    assert hints.has_temporal_cue is False
+    assert hints.has_visual_cue is True
+
+
+@pytest.mark.parametrize(
+    ("question", "day"),
+    [
+        ("Who was the second person to present slides at the workshop on the first day?", "day1"),  # noqa: E501
+        ("Who gave the first presentation for the workshop on the first day?", "day1"),
+        ("Who dealt first in the first game of poker?", None),
+        ("What time did Allie and Linh plan to leave on Saturday at first?", None),
+        ("What was the first category in the happy quiz?", None),
+        ("On the first day, what did Allie say before entering the kitchen?", "day1"),
+        ("What did Bjorn do right after breakfast on day 2?", "day2"),
+    ],
+)
+def test_genuinely_temporal_questions_still_route_temporal(question, day):
+    """Ordering markers in their temporal sense keep the temporal route."""
+    hints = route_question(question, {})
+    assert hints.route == "temporal"
+    assert hints.day == day
+
+
+def test_temporal_markers_match_whole_words_only():
+    """'afternoon' / 'lasted' no longer anchor the temporal route by substring."""
+    hints = route_question("What was for lunch in the afternoon?", {})
+    assert hints.route != "temporal"
+    hints = route_question("How long the meeting lasted?", {})
+    assert hints.route != "temporal"
 
 
 def test_route_question_does_not_leak_filter_hints_from_answer_options():
