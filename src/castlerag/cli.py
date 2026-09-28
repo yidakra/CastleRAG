@@ -579,12 +579,8 @@ def index(
     if _count_records(scoped_all) == 0:
         console.print("[red]No chunk records found — run preprocess first.[/red]")
         raise typer.Exit(1)
-    if day is not None and _count_records(filter_records(records, cfg, day=day)) == 0:
-        console.print(
-            f"[red]No chunk records found for day {day} — "
-            f"run `castlerag preprocess --day {day}` first.[/red]"
-        )
-        raise typer.Exit(1)
+    # The lexical indexes are rebuilt from every loaded day, so --lexical-only
+    # does not need day-scoped records and skips the per-day guard below.
     if lexical_only:
         cache_dir = Path(cfg.embedding.cache_dir)
         bm25_path = build_bm25_artifact(scoped_all, cache_dir)
@@ -593,6 +589,12 @@ def index(
         console.print(f"  visual  : {visual_path}")
         console.print("  dense   : skipped (--lexical-only)")
         return
+    if day is not None and _count_records(filter_records(records, cfg, day=day)) == 0:
+        console.print(
+            f"[red]No chunk records found for day {day} — "
+            f"run `castlerag preprocess --day {day}` first.[/red]"
+        )
+        raise typer.Exit(1)
     # Always invoke cache_dense_embeddings — _cache_records short-circuits
     # per cache file, so existing artifacts are not re-embedded.
     embed_client = OmniEmbedClient(

@@ -859,3 +859,18 @@ def test_score_visual_docs_all_stopword_answer_phrase_is_not_evidence():
     )
     # "in the" substring-matches g1 but carries no content token.
     assert [h.record_id for h in hits] == ["k1"]
+
+
+def test_cli_index_lexical_only_ignores_day_scope_guard(tmp_path: Path):
+    """--day N --lexical-only rebuilds from all days even if day N has no records."""
+    chunks = tmp_path / "chunks" / "day1"
+    write_jsonl_records(_windows(), chunks / "transcripts.jsonl")
+    clips, events = _corpus()
+    write_jsonl_records(clips, chunks / "clips.jsonl")
+    write_jsonl_records(events, chunks / "events.jsonl")
+    cfg_path = _cli_cfg(tmp_path)
+    result = CliRunner().invoke(
+        app, ["index", "--day", "2", "--lexical-only", "--config", str(cfg_path)]
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "embeddings" / VISUAL_TEXT_INDEX_NAME).exists()
