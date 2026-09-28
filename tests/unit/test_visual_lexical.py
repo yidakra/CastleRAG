@@ -707,8 +707,11 @@ def test_cli_retrieve_reports_unreadable_visual_index(tmp_path: Path, monkeypatc
         ],
     )
     assert result.exit_code == 1
-    assert "failed to load" in result.output
-    assert "Traceback" not in result.output
+    # rich wraps long lines at the terminal width (the tmp path is longer on
+    # CI), so compare against whitespace-normalised output.
+    flat = " ".join(result.output.split())
+    assert "failed to load" in flat
+    assert "Traceback" not in flat
 
 
 def test_cli_index_lexical_only_dry_run_reports_and_writes_nothing(tmp_path: Path):
@@ -720,3 +723,22 @@ def test_cli_index_lexical_only_dry_run_reports_and_writes_nothing(tmp_path: Pat
     assert "--lexical-only would rebuild" in result.output
     assert not (tmp_path / "embeddings" / "transcripts.pkl").exists()
     assert not (tmp_path / "embeddings" / VISUAL_TEXT_INDEX_NAME).exists()
+
+
+def test_build_visual_bm25_index_write_is_atomic(tmp_path: Path, monkeypatch):
+    """A failed write must leave the previous index intact and no temp file."""
+    import castlerag.index.visual_lexical as vl_module
+
+    out = tmp_path / VISUAL_TEXT_INDEX_NAME
+    clips, events = _corpus()
+    build_visual_bm25_index(clips, events, out)
+    before = out.read_bytes()
+
+    def _boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(vl_module.pickle, "dump", _boom)
+    with pytest.raises(OSError):
+        build_visual_bm25_index(clips[:1], [], out)
+    assert out.read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == [VISUAL_TEXT_INDEX_NAME]

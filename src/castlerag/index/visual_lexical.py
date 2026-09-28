@@ -22,8 +22,10 @@ See retrieval/visual_lexical.py for query-time scoring with bonuses.
 
 from __future__ import annotations
 
+import os
 import pickle
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence
@@ -181,8 +183,19 @@ def build_visual_bm25_index(
         "docs": [doc.model_dump() for doc in docs],
         "tokenized_corpus": tokenized_corpus,
     }
-    with out_path.open("wb") as fh:
-        pickle.dump(payload, fh)
+    # Temp file + os.replace so a crash mid-write (or a concurrent reader)
+    # never sees a truncated pickle: the loader treats an unreadable file as
+    # a hard error, so a torn write would brick retrieval until a rebuild.
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{out_path.name}.", suffix=".tmp", dir=out_path.parent
+    )
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            pickle.dump(payload, fh)
+        os.replace(tmp_name, out_path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
     return bundle
 
 
