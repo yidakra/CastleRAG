@@ -110,6 +110,7 @@ _TEMPORAL_DOMINANT_MARKERS = (
 # last two", "first name") disqualifies the match. "next" is spatial in
 # "next to" and an ordering marker otherwise ("what did she do next").
 _POSITIONAL_FOLLOWERS = (
+    r"(?!-)"  # hyphenated compounds: first-aid, last-minute, first-person
     r"(?!\s+(?:two|three|four|five|few|\d+|rows?|drawers?|shelf|shelves|"
     r"cupboards?|cabinets?|floors?|pages?|columns?|seats?|doors?|aisles?|"
     r"names?|letters?|words?|digits?|numbers?|items?|slots?|positions?)\b)"

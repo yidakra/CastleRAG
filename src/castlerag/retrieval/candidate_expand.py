@@ -172,19 +172,20 @@ def _collect_frame_descriptions(
     for row in rows:
         if row.source_type != "main_clip":
             continue
-        if described >= max_clips:
-            break
-        described += 1
         caption = truncate_text(row.clip_caption, MAX_CAPTION_CHARS)
         scene = truncate_text(row.scene_graph_text, MAX_SCENE_GRAPH_CHARS)
-        label = f"clip {row.record_id}"
-        if row.camera_id:
-            label += f" ({row.camera_id})"
-        if caption:
-            values.append(f"{label} caption: {caption}")
-        if scene:
-            values.append(f"{label} scene graph: {scene}")
-        if not caption and not scene and row.asset_path:
+        # Only clips that actually render text count against the cap; every
+        # other main_clip row keeps the short asset-path line it always had.
+        if (caption or scene) and described < max_clips:
+            described += 1
+            label = f"clip {row.record_id}"
+            if row.camera_id:
+                label += f" ({row.camera_id})"
+            if caption:
+                values.append(f"{label} caption: {caption}")
+            if scene:
+                values.append(f"{label} scene graph: {scene}")
+        elif row.asset_path:
             values.append(f"clip asset: {row.asset_path}")
     return _unique_values(values)
 
