@@ -42,7 +42,10 @@ def reciprocal_rank_fusion(
             # carry different score scales (cosine vs BM25), so comparing raw
             # scores across them would let e.g. the visual-text lexical hit
             # replace the Qdrant point and its payload for any shared record.
-            # Callers pass dense lists first; the fused score is recomputed.
+            # List order therefore decides: the transcript pass lists BM25
+            # first (its window hit is the representative, as it always was),
+            # the multimodal pass lists the dense lanes before the visual-text
+            # lexical lane. The fused score is recomputed either way.
             if hit.record_id not in by_record:
                 by_record[hit.record_id] = hit
             # Preserve the best raw cosine similarity seen for this record across

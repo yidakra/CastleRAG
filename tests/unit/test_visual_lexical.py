@@ -814,3 +814,20 @@ def test_rrf_representative_is_first_seen_not_highest_raw_score():
     assert len(fused) == 1
     assert fused[0].point_id == "qdrant-uuid"
     assert fused[0].raw_score == 0.42
+
+
+def test_visual_text_route_weights_rejects_unknown_route_and_negative():
+    from castlerag.config import CastleRAGConfig
+
+    with pytest.raises(ValueError, match="unknown route"):
+        CastleRAGConfig.model_validate(
+            {"retrieval": {"visual_text_route_weights": {"visual": 2.0}}}
+        )
+    with pytest.raises(ValueError, match=">= 0"):
+        CastleRAGConfig.model_validate(
+            {"retrieval": {"visual_text_route_weights": {"mixed": -1.0}}}
+        )
+    cfg = CastleRAGConfig.model_validate(
+        {"retrieval": {"visual_text_route_weights": {"static_visual": 3.0}}}
+    )
+    assert cfg.retrieval.visual_text_route_weights == {"static_visual": 3.0}

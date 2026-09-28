@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, get_args
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class DatasetConfig(BaseModel):
@@ -119,6 +119,24 @@ class RetrievalConfig(BaseModel):
             "speech_text": 0.5,
         }
     )
+
+    @field_validator("visual_text_route_weights")
+    @classmethod
+    def _check_visual_route_weights(cls, value: Dict[str, float]) -> Dict[str, float]:
+        from castlerag.schemas import QuestionRoute
+
+        routes = set(get_args(QuestionRoute))
+        for route, weight in value.items():
+            if route not in routes:
+                raise ValueError(
+                    f"visual_text_route_weights: unknown route {route!r} "
+                    f"(expected one of {sorted(routes)})"
+                )
+            if weight < 0:
+                raise ValueError(
+                    f"visual_text_route_weights[{route!r}] must be >= 0, got {weight}"
+                )
+        return value
 
 
 class GenerationConfig(BaseModel):
