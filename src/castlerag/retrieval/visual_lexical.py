@@ -30,6 +30,15 @@ DEFAULT_VISUAL_TEXT_ROUTE_WEIGHTS: Dict[str, float] = {
 }
 
 
+# Function words that make almost any caption "match" a question; the evidence
+# gate ignores them so it tests for shared content terms only.
+_STOPWORDS = frozenset(
+    "a an the is are was were be been do does did what which who whom whose "
+    "where when why how of on in at to for with by from and or it its this that "
+    "these those there here his her their our your my he she they we you i s".split()
+)
+
+
 def _doc_features(visual_index: Any, docs: List[Any]) -> tuple[List[str], List[set]]:
     """Return per-doc (lowercase text, token set), computed once per index.
 
@@ -88,6 +97,7 @@ def score_visual_docs(
             answer_phrases.append(phrase)
 
     excluded = set(exclude_cameras or ())
+    content_query_tokens = set(query_tokens) - _STOPWORDS
     lowers, token_sets = _doc_features(visual_index, docs)
     scored: List[tuple[float, Any]] = []
     for idx, doc in enumerate(docs):
@@ -95,19 +105,30 @@ def score_visual_docs(
             continue
         text_lower = lowers[idx]
         doc_tokens = token_sets[idx]
-        score = float(base_scores[idx])
+        # rank_bm25 yields 0 or slightly negative scores for terms present in
+        # most of a small corpus, so the sign of the BM25 score is not a usable
+        # evidence test; clamp it and gate on actual term overlap instead.
+        score = max(0.0, float(base_scores[idx]))
 
         # Answer-option overlap: brand names, labels and prices show up in
         # OCR verbatim, so a single shared token is a strong signal here.
-        score += 0.15 * len(answer_tokens.intersection(doc_tokens))
+        answer_overlap = len(answer_tokens.intersection(doc_tokens))
+        phrase_hits = sum(1 for phrase in answer_phrases if phrase in text_lower)
+        has_lexical_evidence = (
+            bool(content_query_tokens & doc_tokens)
+            or answer_overlap > 0
+            or phrase_hits > 0
+            or query_lower in text_lower
+        )
+        if not has_lexical_evidence:
+            # The metadata bonuses below must not promote an unrelated
+            # same-day / same-person doc into the lane, where RRF would hand
+            # it a vote purely for being ranked.
+            continue
+        score += 0.15 * answer_overlap
         if query_lower in text_lower:
             score += 1.0
-        score += 0.4 * sum(1 for phrase in answer_phrases if phrase in text_lower)
-        if score <= 0.0:
-            # No lexical evidence at all. The metadata bonuses below must not
-            # promote an unrelated same-day / same-person doc into the lane,
-            # where RRF would hand it a vote purely for being ranked.
-            continue
+        score += 0.4 * phrase_hits
 
         if day_hint and doc.day == day_hint:
             score += 0.75
