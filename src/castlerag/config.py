@@ -190,6 +190,25 @@ class RerankingConfig(BaseModel):
     # restores the old behaviour where keep was always decisive.
     keep_gate_max_relevance: int = 1
 
+    @field_validator("min_relevance_by_route")
+    @classmethod
+    def _check_route_overrides(cls, value: Dict[str, int]) -> Dict[str, int]:
+        from castlerag.schemas import QuestionRoute
+
+        routes = set(get_args(QuestionRoute))
+        for route, threshold in value.items():
+            if route not in routes:
+                raise ValueError(
+                    f"min_relevance_by_route: unknown route {route!r} "
+                    f"(expected one of {sorted(routes)})"
+                )
+            if not 0 <= threshold <= 4:
+                raise ValueError(
+                    f"min_relevance_by_route[{route!r}] must be within 0-4, "
+                    f"got {threshold}"
+                )
+        return value
+
     def min_relevance_for(self, route: str) -> int:
         """Return the min_relevance threshold in force for ``route``."""
         return self.min_relevance_by_route.get(route, self.min_relevance)

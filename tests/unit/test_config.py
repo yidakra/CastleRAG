@@ -60,7 +60,8 @@ def test_reranking_gate_defaults_and_per_route_override():
 
 
 def test_base_yaml_documents_new_retrieval_and_reranking_keys():
-    cfg = load_config(Path("configs/base.yaml"))
+    base_path = Path(__file__).parent.parent.parent / "configs" / "base.yaml"
+    cfg = load_config(base_path)
     assert cfg.retrieval.max_event_summaries == 4
     assert cfg.retrieval.min_clip_hits == 2
     assert cfg.reranking.keep_gate_max_relevance == 1
@@ -147,3 +148,18 @@ def test_expand_env_vars(tmp_path: Path):
     os.environ["_CR_TEST_VAR"] = "expanded_value"
     result = _expand_env({"path": "/scratch/$_CR_TEST_VAR/data"})
     assert "expanded_value" in result["path"]
+
+
+def test_min_relevance_by_route_rejects_unknown_route_and_bad_values():
+    with pytest.raises(ValueError, match="unknown route"):
+        CastleRAGConfig.model_validate(
+            {"reranking": {"min_relevance_by_route": {"visual": 0}}}
+        )
+    with pytest.raises(ValueError, match="within 0-4"):
+        CastleRAGConfig.model_validate(
+            {"reranking": {"min_relevance_by_route": {"static_visual": 5}}}
+        )
+    cfg = CastleRAGConfig.model_validate(
+        {"reranking": {"min_relevance_by_route": {"static_visual": 0, "mixed": 2}}}
+    )
+    assert cfg.reranking.min_relevance_for("mixed") == 2

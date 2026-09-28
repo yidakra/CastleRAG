@@ -150,3 +150,38 @@ def test_route_question_does_not_leak_filter_hints_from_answer_options():
     assert hints.day is None
     assert hints.participant is None
     assert hints.room is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What colour is the car in the second row?",
+        "What is in the third drawer of the kitchen cabinet?",
+        "Which book is second from the left on the shelf?",
+    ],
+)
+def test_positional_ordinals_do_not_anchor_temporal(question):
+    """Bare 'second'/'third' are usually positional, not ordering markers."""
+    assert route_question(question, {}).route != "temporal"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What changed in the kitchen from the first day to the second day?",
+        "Did Allie wear the same shirt on day 1 and day 2?",
+        "Was the whiteboard fuller on the third day than on the first day?",
+    ],
+)
+def test_cross_day_comparison_routes_temporal_without_day_pin(question):
+    """Two day references are a temporal cue and must not pin one day."""
+    hints = route_question(question, {})
+    assert hints.route == "temporal"
+    assert hints.has_temporal_cue is True
+    assert hints.day is None
+
+
+def test_single_day_reference_still_sets_day_hint():
+    hints = route_question("What is on the whiteboard on day 2?", {})
+    assert hints.day == "day2"
+    assert hints.route != "temporal"

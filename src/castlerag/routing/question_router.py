@@ -49,6 +49,8 @@ _DAY_PHRASE_RE = re.compile(
 )
 _TEMPORAL_KEYWORDS = frozenset(
     [
+        "second",
+        "third",
         "before",
         "after",
         "while",
@@ -76,9 +78,11 @@ _TEMPORAL_PHRASES = (
 )
 # Markers that alone send a question to the temporal route. Matched as whole
 # words (so "after" no longer fires on "afternoon") on the day-stripped text,
-# so "first"/"second"/"last" only count in their ordering sense ("who dealt
-# first", "the second person to present", "at first", "the first time"), not
-# as part of "the first day".
+# so "first"/"last" only count in their ordering sense ("who dealt first",
+# "at first", "the first time"), not as part of "the first day". Bare
+# "second"/"third" are NOT anchors: they are usually positional ("the second
+# row", "the third drawer"); only their ordering phrases below anchor, and the
+# bare words just add to the multi-cue temporal score via _TEMPORAL_KEYWORDS.
 _TEMPORAL_DOMINANT_MARKERS = (
     "before",
     "after",
@@ -86,8 +90,14 @@ _TEMPORAL_DOMINANT_MARKERS = (
     "previously",
     "later",
     "first",
-    "second",
-    "third",
+    "second person to",
+    "second one to",
+    "second time",
+    "second to",
+    "third person to",
+    "third one to",
+    "third time",
+    "third to",
     "last",
     "finally",
     "once",
@@ -284,6 +294,11 @@ def route_question(
     tokens = set(re.findall(r"\b\w+\b", question_lower))
 
     day = _extract_day(question_lower)
+    day_comparison = _has_day_comparison(question_lower)
+    if day_comparison:
+        # A cross-day question must not be pinned to the first day mentioned:
+        # the dense lanes hard-filter on the day hint.
+        day = None
     participant_matches = [
         (m.start(), name)
         for name in _PARTICIPANTS
@@ -323,11 +338,12 @@ def route_question(
         visual_score += 1
         visual_hits.append(room.lower())
 
-    has_temporal_cue = temporal_score > 0
+    has_temporal_cue = temporal_score > 0 or day_comparison
     has_speech_cue = speech_score > 0
     has_visual_cue = visual_score > 0
 
     route = _choose_route(
+        day_comparison=day_comparison,
         temporal_score=temporal_score,
         speech_score=speech_score,
         visual_score=visual_score,
@@ -460,9 +476,10 @@ def _choose_route(
     speech_score: int,
     visual_score: int,
     question: str,
+    day_comparison: bool = False,
 ) -> QuestionRoute:
     """Return the best-matching route from temporal, speech, and visual cue scores."""
-    if _has_temporal_anchor(question) or temporal_score >= 3:
+    if day_comparison or _has_temporal_anchor(question) or temporal_score >= 3:
         return "temporal"
     if speech_score > 0 and visual_score > 0:
         return "mixed"
@@ -480,6 +497,21 @@ def _choose_route(
 def _strip_day_phrases(text: str) -> str:
     """Blank out day references ("first day", "day 1") so they carry no temporal cue."""
     return _DAY_PHRASE_RE.sub(" ", text)
+
+
+def _has_day_comparison(text: str) -> bool:
+    """Return True when the question references two or more distinct days.
+
+    "What changed from the first day to the second day?" is a temporal
+    question even though every ordering word in it belongs to a day phrase,
+    so this is checked on the raw text, before :func:`_strip_day_phrases`.
+    """
+    seen = set()
+    for match in _DAY_PHRASE_RE.finditer(text):
+        token = match.group(0)
+        digit = re.search(r"[1-4]", token)
+        seen.add(f"day{digit.group(0)}" if digit else _DAY_ORDINALS[token.split()[0]])
+    return len(seen) >= 2
 
 
 def _has_temporal_anchor(question: str) -> bool:
