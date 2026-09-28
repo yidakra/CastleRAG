@@ -35,7 +35,9 @@ DEFAULT_VISUAL_TEXT_ROUTE_WEIGHTS: Dict[str, float] = {
 _STOPWORDS = frozenset(
     "a an the is are was were be been do does did what which who whom whose "
     "where when why how of on in at to for with by from and or it its this that "
-    "these those there here his her their our your my he she they we you i s".split()
+    "these those there here his her their our your my he she they we you i s "
+    "no not yes has have had can will would could should may might any some "
+    "as if then than so but".split()
 )
 
 

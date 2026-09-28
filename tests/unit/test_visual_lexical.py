@@ -760,3 +760,20 @@ def test_score_visual_docs_answer_stopwords_do_not_count_as_evidence():
     )
     # g1 shares only "in" / "the" with the choices; that is not evidence.
     assert [h.record_id for h in hits] == ["k1"]
+
+
+def test_score_visual_docs_yes_no_choices_are_not_evidence():
+    from castlerag.retrieval.visual_lexical import score_visual_docs
+
+    docs = [
+        _vdoc("g1", "Allie", "no one is at the table"),
+        _vdoc("k1", "Bjorn", "the fridge door is open"),
+    ]
+    index = SimpleNamespace(bm25=_ScoresBM25([0.0, 0.0]), docs=docs)
+    hits = score_visual_docs(
+        visual_index=index,
+        query="Was the fridge open?",
+        choices={"a": "Yes", "b": "No", "c": "Unclear", "d": "Sometimes"},
+        day_hint="day1",
+    )
+    assert [h.record_id for h in hits] == ["k1"]
