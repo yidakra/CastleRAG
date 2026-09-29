@@ -256,6 +256,11 @@ class RetrievalHit(BaseModel):
     transcript_text: Optional[str] = None
     event_summary: Optional[str] = None
     ocr_text: Optional[str] = None
+    # VLM clip caption and object/position scene graph from the Qdrant payload
+    # (main_clip points only). These are what the reranker and generator read
+    # as the clip's "frame description"; without them a clip is just a path.
+    clip_caption: Optional[str] = None
+    scene_graph_text: Optional[str] = None
     asset_path: Optional[str] = None
     # Display-score fields — populated at different pipeline stages.
     # raw_score: cosine similarity from Qdrant before RRF overwrites `score`.

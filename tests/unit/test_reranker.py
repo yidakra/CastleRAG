@@ -20,6 +20,7 @@ from castlerag.rerank.llm_reranker import (
     parse_reranker_response,
     rerank_candidates,
 )
+from castlerag.retrieval.candidate_expand import expand_candidates
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import (
     EvalQuestion,
@@ -288,6 +289,163 @@ def test_rerank_candidates_zeroes_support_for_pruned_fallback(caplog):
         fallback.reranker_output
     )
     assert "fallback" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# keep / relevance gate (issue #50): keep=false must not discard a pack the
+# model itself rated relevant.
+# ---------------------------------------------------------------------------
+
+
+def _response(relevance: int, keep: bool, support_c: int = 0) -> str:
+    return (
+        f'{{"relevance": {relevance}, '
+        f'"support": {{"a": 0, "b": 0, "c": {support_c}, "d": 0}}, '
+        f'"keep": {"true" if keep else "false"}, "rationale": "r"}}'
+    )
+
+
+def test_rerank_keeps_high_relevance_pack_despite_keep_false():
+    high = _pack("pack_high", 0.9)
+    low = _pack("pack_low", 0.5)
+    client = _FakeLLMClient(
+        [_response(4, keep=False, support_c=3), _response(1, keep=False)]
+    )
+    result = rerank_candidates(
+        question=_question(),
+        hints=RouteHints(route="static_visual"),
+        candidate_packs=[high, low],
+        llm_client=client,
+        min_relevance=1,
+    )
+    assert [item.pack.pack_id for item in result.kept_packs] == ["pack_high"]
+    # Not a fallback: support is preserved because the pack passed the gate.
+    assert result.support_priors["c"] == 3.0
+
+
+def test_rerank_keep_false_is_decisive_at_or_below_gate():
+    """relevance 2 survives keep=false by default; relevance 1 does not."""
+    two = _pack("pack_two", 0.9)
+    one = _pack("pack_one", 0.8)
+    client = _FakeLLMClient([_response(2, keep=False), _response(1, keep=False)])
+    result = rerank_candidates(
+        question=_question(),
+        hints=RouteHints(route="static_visual"),
+        candidate_packs=[two, one],
+        llm_client=client,
+        min_relevance=0,
+    )
+    assert [item.pack.pack_id for item in result.kept_packs] == ["pack_two"]
+
+
+def test_rerank_keep_gate_max_relevance_4_restores_keep_decisive(caplog):
+    """keep_gate_max_relevance=4 reproduces the old gate: keep=false always prunes."""
+    high = _pack("pack_high", 0.9)
+    client = _FakeLLMClient([_response(4, keep=False, support_c=3)])
+    with caplog.at_level(logging.WARNING):
+        result = rerank_candidates(
+            question=_question(),
+            hints=RouteHints(route="static_visual"),
+            candidate_packs=[high],
+            llm_client=client,
+            min_relevance=1,
+            keep_gate_max_relevance=4,
+        )
+    # Everything pruned -> the fallback path keeps it with support zeroed.
+    assert [item.pack.pack_id for item in result.kept_packs] == ["pack_high"]
+    assert result.support_priors == {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0}
+    assert "fallback" in caplog.text
+
+
+def test_rerank_min_relevance_still_prunes_regardless_of_keep():
+    pack = _pack("pack_meh", 0.9)
+    other = _pack("pack_ok", 0.8)
+    client = _FakeLLMClient([_response(2, keep=True), _response(3, keep=True)])
+    result = rerank_candidates(
+        question=_question(),
+        hints=RouteHints(route="static_visual"),
+        candidate_packs=[pack, other],
+        llm_client=client,
+        min_relevance=2,
+    )
+    assert [item.pack.pack_id for item in result.kept_packs] == ["pack_ok"]
+
+
+# ---------------------------------------------------------------------------
+# Frame choice: spread the reranker's frames across the clip, not its first 4 s
+# ---------------------------------------------------------------------------
+
+
+def test_build_content_samples_frames_evenly(monkeypatch):
+    from castlerag.rerank import llm_reranker
+
+    seen: list[str] = []
+
+    def _fake_encode(path, max_pixels=768):
+        seen.append(path)
+        return ("b64", 10)
+
+    monkeypatch.setattr(llm_reranker, "encode_frame", _fake_encode)
+    frames = [f"/f/{i:02d}.jpg" for i in range(30)]
+    content = llm_reranker._build_content("prompt", frames, max_frames=4)
+    assert seen == ["/f/03.jpg", "/f/11.jpg", "/f/18.jpg", "/f/26.jpg"]
+    assert isinstance(content, list)
+    assert sum(1 for item in content if item["type"] == "image_url") == 4
+
+
+def test_build_content_short_frame_list_unchanged(monkeypatch):
+    from castlerag.rerank import llm_reranker
+
+    seen: list[str] = []
+
+    def _fake_encode(path, max_pixels=768):
+        seen.append(path)
+        return ("b", 1)
+
+    monkeypatch.setattr(llm_reranker, "encode_frame", _fake_encode)
+    llm_reranker._build_content("prompt", ["/a.jpg", "/b.jpg"], max_frames=4)
+    assert seen == ["/a.jpg", "/b.jpg"]
+
+
+# ---------------------------------------------------------------------------
+# format_candidate_pack — clip captions reach the reranker (issue #50)
+# ---------------------------------------------------------------------------
+
+
+def test_format_candidate_pack_renders_clip_caption_and_scene_graph():
+    """A clip with a caption shows the caption, not just its asset path."""
+    clip = _hit("clip_cap").model_copy(
+        update={
+            "camera_id": "Kitchen",
+            "clip_caption": "Werner stands at the stove wearing a white W3C apron.",
+            "scene_graph_text": "person at stove (center); fridge (left)",
+        }
+    )
+    (pack,) = expand_candidates([clip], route="static_visual")
+    text = format_candidate_pack(pack, rank=1)
+    assert "Sampled-frame descriptions:" in text
+    assert "clip clip_cap (Kitchen) caption: Werner stands at the stove" in text
+    assert "scene graph: person at stove (center); fridge (left)" in text
+    assert "clip asset:" not in text
+    assert "/tmp/clip.mp4" not in text
+
+
+def test_format_candidate_pack_falls_back_to_asset_path_without_caption():
+    clip = _hit("clip_plain")
+    (pack,) = expand_candidates([clip], route="static_visual")
+    text = format_candidate_pack(pack, rank=1)
+    assert "clip asset: /tmp/clip.mp4" in text
+
+
+def test_format_candidate_pack_truncates_runaway_caption():
+    clip = _hit("clip_long").model_copy(update={"clip_caption": "word " * 500})
+    (pack,) = expand_candidates([clip], route="static_visual")
+    text = format_candidate_pack(pack, rank=1)
+    caption_line = next(
+        line for line in text.splitlines() if "clip_long" in line and "caption" in line
+    )
+    assert len(caption_line) < 700
+    assert caption_line.endswith("...")
 
 
 # ---------------------------------------------------------------------------

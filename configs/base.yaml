@@ -70,7 +70,17 @@ retrieval:
   gaze_top_k: 8
   thermal_top_k: 8
   rrf_k: 60
-  max_candidate_videos: 4
+  # Post-fusion evidence budgets (per question, after RRF). Clips and event
+  # summaries are budgeted separately: sharing one budget meant temporal and
+  # speech routes (event summaries ranked first) kept zero clips, so no frames
+  # ever reached the reranker/generator, while static_visual kept zero event
+  # summaries and lost the aggregated OCR text they carry (issue #50).
+  max_candidate_videos: 4    # main_clip rows kept
+  max_event_summaries: 4     # main_event_summary rows kept
+  # Rows reserved for the top-ranked clips on every route so the
+  # max_evidence_rows cap cannot squeeze them out behind transcript windows.
+  # Only applies when clips were retrieved at all; capped at max_candidate_videos.
+  min_clip_hits: 2
   frames_per_candidate: 32
   max_aux_images: 16
   max_evidence_rows: 50  # TAHAKOM-validated working-memory cap
@@ -98,7 +108,17 @@ reranking:
   top_k: 4
   relevance_weight: 0.7
   support_weight: 0.3
+  # Packs rated relevance <= min_relevance are pruned. Per-route overrides win
+  # over the global value (e.g. static_visual: 0 to keep weak visual packs);
+  # a2_local.yaml instead sets the global value to 0.
+  #   min_relevance_by_route:
+  #     static_visual: 0
   min_relevance: 1
+  min_relevance_by_route: {}
+  # The model's keep=false only discards packs rated at or below this
+  # relevance; a pack it rated 2-4 survives regardless of keep. Set to 4 to
+  # make keep decisive again (pre-#50 behaviour).
+  keep_gate_max_relevance: 1
 
 outputs:
   dir: "outputs"

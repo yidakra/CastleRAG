@@ -8,6 +8,7 @@ from castlerag.generation.answer import (
     _format_citation,
     _format_evidence_row,
     _format_timestamp,
+    _gather_frame_paths,
     build_messages,
     build_prompt,
     choice_permutation,
@@ -289,6 +290,69 @@ def test_format_evidence_row_contains_citation_and_asset():
     assert "citation=[aux=aux_photo id=photo_day1_allie_00034]" in row
     assert "asset: aux/day1/allie/photo_00034.jpg" in row
     assert "ocr: Receipt on the kitchen counter." in row
+
+
+def test_gather_frame_paths_samples_evenly_across_top_clip():
+    frames = [f"/clip0/{i:02d}.jpg" for i in range(30)]
+    row = _make_hit().model_copy(update={"sampled_frame_paths": frames})
+    picked = _gather_frame_paths([row], max_frames=8)
+    assert len(picked) == 8
+    assert picked != frames[:8]  # not simply the first 8 s
+    # Behavioural: in order, no repeats, covering the whole clip evenly.
+    idx = [frames.index(p) for p in picked]
+    assert idx == sorted(idx) and len(set(idx)) == 8
+    assert idx[0] < 30 / 8 and idx[-1] >= 30 - 30 / 8  # first and last buckets
+    gaps = [b - a for a, b in zip(idx, idx[1:])]
+    assert max(gaps) - min(gaps) <= 1
+
+
+def test_gather_frame_paths_spills_into_next_row_and_dedupes():
+    first = _make_hit().model_copy(
+        update={"sampled_frame_paths": ["/a/0.jpg", "/a/1.jpg", "/a/2.jpg"]}
+    )
+    second = _make_hit().model_copy(
+        update={
+            "record_id": "clip_1",
+            "sampled_frame_paths": ["/a/2.jpg"] + [f"/b/{i}.jpg" for i in range(10)],
+        }
+    )
+    picked = _gather_frame_paths([first, second], max_frames=5)
+    assert picked[:3] == ["/a/0.jpg", "/a/1.jpg", "/a/2.jpg"]
+    assert len(picked) == 5
+    assert len(set(picked)) == 5
+    assert all(p.startswith("/b/") for p in picked[3:])
+
+
+def test_gather_frame_paths_zero_budget_returns_nothing():
+    row = _make_hit().model_copy(update={"sampled_frame_paths": ["/a/0.jpg"]})
+    assert _gather_frame_paths([row], max_frames=0) == []
+
+
+def test_format_evidence_row_renders_caption_and_scene_graph():
+    hit = _make_hit().model_copy(
+        update={
+            "transcript_text": None,
+            "clip_caption": "Werner at the stove wearing a W3C apron.",
+            "scene_graph_text": "person at stove (center)",
+            "ocr_text": "W3C",
+            "asset_path": "/tmp/clip_0.mp4",
+        }
+    )
+    row = _format_evidence_row(hit)
+    assert "caption: Werner at the stove wearing a W3C apron." in row
+    assert "scene: person at stove (center)" in row
+    assert "ocr: W3C" in row
+    assert "asset: /tmp/clip_0.mp4" in row
+
+
+def test_format_evidence_row_truncates_long_caption():
+    hit = _make_hit().model_copy(update={"clip_caption": "x" * 5000})
+    row = _format_evidence_row(hit)
+    caption_line = next(
+        line for line in row.splitlines() if line.startswith("caption:")
+    )
+    assert len(caption_line) <= len("caption: ") + 600
+    assert caption_line.endswith("...")
 
 
 def test_build_prompt_contains_question_and_route_block():
@@ -698,3 +762,17 @@ def test_generate_freeform_answer_plain_text_without_frames():
     )
 
     assert isinstance(captured["messages"][1]["content"], str)
+
+
+def test_trim_rows_to_budget_drops_tail_rows_until_text_fits():
+    from castlerag.generation.answer import _trim_rows_to_budget, estimate_text_tokens
+
+    rows = [f"row{i}" for i in range(6)]
+    render = lambda rs: "\n".join("x" * 400 for _ in rs)  # noqa: E731
+    budget = estimate_text_tokens(render(rows[:3]))
+    kept, text = _trim_rows_to_budget(list(rows), render, budget)
+    assert kept == rows[:3]
+    assert text == render(rows[:3])
+    # Never empties the list, even when one row is already over budget.
+    kept, _ = _trim_rows_to_budget(list(rows), render, 1)
+    assert kept == rows[:1]

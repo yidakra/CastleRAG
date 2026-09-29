@@ -32,6 +32,14 @@ _ROOM_PATTERNS = {
 }
 _DAY_PATTERNS = (
     (re.compile(r"\bday\s*([1-4])\b"), "digit"),
+    # "the third and final day" / "the fourth and last day": one glossed day.
+    (
+        re.compile(
+            r"\b(?:(first|second|third|fourth)\s+and\s+final"
+            r"|(fourth)\s+and\s+(?:the\s+)?(?:last|final))\s+day\b"
+        ),
+        "ordinal",
+    ),
     (re.compile(r"\b(first|second|third|fourth)\s+day\b"), "ordinal"),
 )
 _DAY_ORDINALS = {
@@ -40,8 +48,24 @@ _DAY_ORDINALS = {
     "third": "day3",
     "fourth": "day4",
 }
+# Day references ("on the first day", "day 1") are a DAY hint only. They are
+# blanked out before temporal cue matching so the bare ordinal does not read
+# as a temporal-ordering marker: "what is on the back of Werner's t-shirt on
+# the first day" is a static visual question, not a before/after one.
+_ORD = r"(?:first|second|third|fourth|last|final)"
+_DAY_PHRASE_RE = re.compile(
+    # Compound forms first, so the bare alternatives can't leave a stray
+    # ordinal behind that reads as an ordering marker: "second to last day",
+    # and the elliptical pair "from the first to the second day" / "the first
+    # and the last day", where only the second ordinal carries the noun.
+    r"\b(?:(?:second|third)[\s-]+to[\s-]+(?:the\s+)?last\s+days?"
+    rf"|{_ORD}\s+(?:to|and|or|versus|vs\.?|until|through)\s+(?:the\s+)?{_ORD}\s+days?"
+    rf"|{_ORD}\s+(?:(?:two|three|four|\d)\s+)?days?|day\s*[1-4])\b"
+)
 _TEMPORAL_KEYWORDS = frozenset(
     [
+        "second",
+        "third",
         "before",
         "after",
         "while",
@@ -67,19 +91,50 @@ _TEMPORAL_PHRASES = (
     "right before",
     "right after",
 )
+# Markers that alone send a question to the temporal route. Matched as whole
+# words (so "after" no longer fires on "afternoon") on the day-stripped text,
+# so "first"/"last" only count in their ordering sense ("who dealt first",
+# "at first", "the first time"), not as part of "the first day". Bare
+# "second"/"third" are NOT anchors: they are usually positional ("the second
+# row", "the third drawer"); only their ordering phrases below anchor, and the
+# bare words just add to the multi-cue temporal score via _TEMPORAL_KEYWORDS.
 _TEMPORAL_DOMINANT_MARKERS = (
     "before",
     "after",
-    "next",
     "previously",
     "later",
-    "first",
-    "last",
+    "second person to",
+    "second one to",
+    "second time",
+    "third person to",
+    "third one to",
+    "third time",
     "finally",
     "once",
     "in what order",
     "right before",
     "right after",
+)
+# "first"/"last" anchor only in their ordering sense. In CASTLE questions that
+# is the common case ("who dealt first", "the first category in the quiz",
+# "the first person to unfold the mat"), so the bare words stay anchors, but
+# a positional or quantity noun right after them ("the first drawer", "the
+# last two", "first name") disqualifies the match. "next" is spatial in
+# "next to" and an ordering marker otherwise ("what did she do next").
+_POSITIONAL_FOLLOWERS = (
+    r"(?!-)"  # hyphenated compounds: first-aid, last-minute, first-person
+    r"(?!\s+(?:two|three|four|five|few|\d+|rows?|drawers?|shelf|shelves|"
+    r"cupboards?|cabinets?|floors?|pages?|columns?|seats?|doors?|aisles?|"
+    r"names?|letters?|words?|digits?|numbers?|items?|slots?|positions?)\b)"
+)
+_TEMPORAL_DOMINANT_RE = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(m) for m in _TEMPORAL_DOMINANT_MARKERS)
+    + r"|next(?!\s+to\b)"
+    # "second to arrive" is ordering; "second to last drawer" is positional.
+    + r"|(?:second|third)\s+to(?!\s+(?:the\s+)?last\b)"
+    + r"|(?:first|last)" + _POSITIONAL_FOLLOWERS
+    + r")\b"
 )
 _SPEECH_KEYWORDS = frozenset(
     [
@@ -267,6 +322,11 @@ def route_question(
     tokens = set(re.findall(r"\b\w+\b", question_lower))
 
     day = _extract_day(question_lower)
+    day_comparison = _has_day_comparison(question_lower)
+    if day_comparison:
+        # A cross-day question must not be pinned to the first day mentioned:
+        # the dense lanes hard-filter on the day hint.
+        day = None
     participant_matches = [
         (m.start(), name)
         for name in _PARTICIPANTS
@@ -281,9 +341,12 @@ def route_question(
     ]
     room = min(room_matches, default=(None, None))[1]
 
+    # Temporal cues are scored on the text with day references blanked out:
+    # "the first day" is a day hint (extracted above), not an ordering marker.
+    temporal_text = _strip_day_phrases(question_lower)
     temporal_score, temporal_hits = _cue_score(
-        question_lower,
-        tokens,
+        temporal_text,
+        set(re.findall(r"\b\w+\b", temporal_text)),
         keywords=_TEMPORAL_KEYWORDS,
         phrases=_TEMPORAL_PHRASES,
     )
@@ -303,15 +366,16 @@ def route_question(
         visual_score += 1
         visual_hits.append(room.lower())
 
-    has_temporal_cue = temporal_score > 0
+    has_temporal_cue = temporal_score > 0 or day_comparison
     has_speech_cue = speech_score > 0
     has_visual_cue = visual_score > 0
 
     route = _choose_route(
+        day_comparison=day_comparison,
         temporal_score=temporal_score,
         speech_score=speech_score,
         visual_score=visual_score,
-        question=question_lower,
+        question=temporal_text,
     )
     extracted_keywords = sorted(
         {
@@ -405,7 +469,7 @@ def _extract_day(text: str) -> Optional[str]:
         match = pattern.search(text)
         if match is None:
             continue
-        value = match.group(1)
+        value = next(g for g in match.groups() if g)
         if kind == "digit":
             return f"day{value}"
         return _DAY_ORDINALS[value]
@@ -440,9 +504,10 @@ def _choose_route(
     speech_score: int,
     visual_score: int,
     question: str,
+    day_comparison: bool = False,
 ) -> QuestionRoute:
     """Return the best-matching route from temporal, speech, and visual cue scores."""
-    if _has_temporal_anchor(question) or temporal_score >= 3:
+    if day_comparison or _has_temporal_anchor(question) or temporal_score >= 3:
         return "temporal"
     if speech_score > 0 and visual_score > 0:
         return "mixed"
@@ -457,6 +522,84 @@ def _choose_route(
     return "static_visual"
 
 
+def _strip_day_phrases(text: str) -> str:
+    """Blank out day references ("first day", "day 1") so they carry no temporal cue."""
+    return _DAY_PHRASE_RE.sub(" ", text)
+
+
+def _has_day_comparison(text: str) -> bool:
+    """Return True when the question references two or more distinct days.
+
+    "What changed from the first day to the second day?" is a temporal
+    question even though every ordering word in it belongs to a day phrase,
+    so this is checked on the raw text, before :func:`_strip_day_phrases`.
+    """
+    seen = set()
+    for match in _DAY_PHRASE_RE.finditer(text):
+        token = match.group(0)
+        words = token.split()
+        # "between the first and final day" / "from the first and last day":
+        # a comparative lead-in overrides the single-day gloss reading.
+        lead_in = text[max(0, match.start() - 24) : match.start()].split()[-3:]
+        comparative = bool(_COMPARATIVE_LEAD_INS.intersection(lead_in))
+        digit = re.fullmatch(r"day\s*([1-4])", token)
+        if digit:  # "day 1" and the no-space "day1" alike
+            seen.add(f"day{digit.group(1)}")
+        elif re.fullmatch(
+            r"(?:second|third)[\s-]+to[\s-]+(?:the\s+)?last\s+days?", token
+        ):
+            seen.add(f"{words[0].rstrip('-')}-to-last")
+        elif len(words) >= 4:
+            first, second = words[0], words[-2]
+            if _is_appositive_final_day(words) and not comparative:
+                # "the fourth and final day": one day glossed twice, not two.
+                seen.add(_day_bucket(first))
+            else:
+                # Elliptical pair, "first to the second day": both count.
+                seen.update(_day_bucket(w) for w in (first, second))
+        elif len(words) == 3:
+            # "first two days": a span. Keyed by ordinal and length so "the
+            # first two days" vs "the last two days" stay distinct.
+            seen.add(f"{_day_bucket(words[0])}-span-{words[1]}")
+        else:
+            seen.add(_day_bucket(words[0]))
+    return len(seen) >= 2
+
+
+_COMPARATIVE_LEAD_INS = frozenset(
+    ["between", "from", "compare", "compared", "comparing", "versus", "vs"]
+)
+
+
+def _is_appositive_final_day(words: List[str]) -> bool:
+    """True for "<ordinal> and final day" / "fourth and last day" glosses.
+
+    "first and last day" is a pair of days, so only the word "final" (a gloss,
+    never a day reference on its own here) or the collection's actual last
+    ordinal ("fourth") makes the phrase a single day.
+    """
+    if len(words) == 5 and words[2] == "the":
+        gloss, article = words[3], True
+    elif len(words) == 4:
+        gloss, article = words[2], False
+    else:
+        return False
+    if words[1] != "and" or gloss not in ("last", "final"):
+        return False
+    if words[0] == "fourth":
+        return True  # "the fourth and (the) final/last day": already the last day
+    return gloss == "final" and not article
+
+
+def _day_bucket(ordinal: str) -> str:
+    """Map an ordinal word to its comparison bucket ("day1", ..., "last")."""
+    return _DAY_ORDINALS.get(ordinal, "last")  # "last" / "final"
+
+
 def _has_temporal_anchor(question: str) -> bool:
-    """Return True if the question contains any dominant temporal ordering marker."""
-    return any(marker in question for marker in _TEMPORAL_DOMINANT_MARKERS)
+    """Return True if the question contains a dominant temporal ordering marker.
+
+    Markers match as whole words. Callers pass the day-stripped text (see
+    :func:`_strip_day_phrases`) so "on the first day" alone never anchors.
+    """
+    return _TEMPORAL_DOMINANT_RE.search(question) is not None

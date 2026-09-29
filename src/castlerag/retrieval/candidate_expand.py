@@ -5,6 +5,12 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import List, Optional
 
+from castlerag.evidence_text import (
+    MAX_CAPTION_CHARS,
+    MAX_SCENE_GRAPH_CHARS,
+    truncate_text,
+)
+from castlerag.frame_encoding import sample_frames_evenly
 from castlerag.routing.question_router import QuestionRoute
 from castlerag.schemas import EvidencePack, RetrievalHit
 
@@ -146,11 +152,41 @@ def _collect_ocr(rows: List[RetrievalHit]) -> List[str]:
     return _unique_values([row.ocr_text for row in rows if row.ocr_text])
 
 
-def _collect_frame_descriptions(rows: List[RetrievalHit]) -> List[str]:
-    """Return deduplicated clip asset path strings from main_clip hits."""
+# Clips described (caption + scene graph) per reranker pack.
+MAX_DESCRIBED_CLIPS = 8
+
+
+def _collect_frame_descriptions(
+    rows: List[RetrievalHit], max_clips: int = MAX_DESCRIBED_CLIPS
+) -> List[str]:
+    """Return deduplicated frame descriptions from main_clip hits.
+
+    Renders the VLM clip caption and scene graph (truncated) so the reranker
+    can actually read what the clip shows; the asset path alone (the previous
+    output) told the model nothing about the frames. At most ``max_clips``
+    clips are described (rows arrive primary-first), because a bundle can
+    hold every clip sharing day+camera+participant and the reranker enforces
+    no token budget.
+    """
     values = []
+    described = 0
     for row in rows:
-        if row.source_type == "main_clip" and row.asset_path:
+        if row.source_type != "main_clip":
+            continue
+        caption = truncate_text(row.clip_caption, MAX_CAPTION_CHARS)
+        scene = truncate_text(row.scene_graph_text, MAX_SCENE_GRAPH_CHARS)
+        # Only clips that actually render text count against the cap; every
+        # other main_clip row keeps the short asset-path line it always had.
+        if (caption or scene) and described < max_clips:
+            described += 1
+            label = f"clip {row.record_id}"
+            if row.camera_id:
+                label += f" ({row.camera_id})"
+            if caption:
+                values.append(f"{label} caption: {caption}")
+            if scene:
+                values.append(f"{label} scene graph: {scene}")
+        elif row.asset_path:
             values.append(f"clip asset: {row.asset_path}")
     return _unique_values(values)
 
@@ -158,19 +194,46 @@ def _collect_frame_descriptions(rows: List[RetrievalHit]) -> List[str]:
 def _collect_frame_paths(
     rows: List[RetrievalHit], max_frames: Optional[int] = None
 ) -> List[str]:
-    """Return deduplicated sampled frame JPEG paths from all hits, capped at max_frames."""  # noqa: E501
+    """Return deduplicated frame paths from all hits, capped at ``max_frames``.
+
+    The budget is shared across the rows that carry frames (primary row
+    first, leftover frames to the earliest rows) and each row's share is
+    sampled evenly across that clip. Taking the first N paths in row order
+    would hand the whole budget to the primary clip's opening seconds and
+    never show the reranker a mid-clip frame of a bundled clip.
+    """
     if max_frames is not None and max_frames <= 0:
         return []
+    with_frames = [row for row in rows if row.sampled_frame_paths]
     paths: List[str] = []
     seen: set = set()
-    for row in rows:
-        for p in row.sampled_frame_paths:
+    if max_frames is None:
+        for row in with_frames:
+            for p in row.sampled_frame_paths:
+                if p not in seen:
+                    seen.add(p)
+                    paths.append(p)
+        return paths
+    if not with_frames:
+        return []
+    # Round-robin allocation, primary row first: a row that runs out of
+    # frames stops taking slots, so its unused share goes to the others.
+    capacity = [len(row.sampled_frame_paths) for row in with_frames]
+    alloc = [0] * len(with_frames)
+    remaining = max_frames
+    while remaining > 0 and any(a < c for a, c in zip(alloc, capacity)):
+        for i in range(len(with_frames)):
+            if remaining == 0:
+                break
+            if alloc[i] < capacity[i]:
+                alloc[i] += 1
+                remaining -= 1
+    for row, budget in zip(with_frames, alloc):
+        for p in sample_frames_evenly(row.sampled_frame_paths, budget):
             if p not in seen:
                 seen.add(p)
                 paths.append(p)
-                if max_frames is not None and len(paths) >= max_frames:
-                    return paths
-    return paths
+    return paths[:max_frames]
 
 
 def _collect_aux_notes(rows: List[RetrievalHit]) -> List[str]:

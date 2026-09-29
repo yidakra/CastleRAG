@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Any, List, Mapping, Optional, Sequence
 
-from castlerag.frame_encoding import encode_frame
+from castlerag.frame_encoding import encode_frame, sample_frames_evenly
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import (
     EvalQuestion,
@@ -23,6 +23,10 @@ from castlerag.schemas import (
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_RERANK_MODEL = "Qwen/Qwen3-VL-8B-Instruct"
+# keep=false from the model only discards a pack whose relevance is at or
+# below this value; a pack rated relevance >= 2 survives regardless of the
+# keep flag. Set to 4 to restore the old "keep is always decisive" gate.
+DEFAULT_KEEP_GATE_MAX_RELEVANCE = 1
 
 _RERANKER_PROMPT_TEMPLATE = """\
 You are ranking a route-specific evidence pack for a multiple-choice CASTLE question.
@@ -231,8 +235,17 @@ def rerank_candidates(
     model: str = DEFAULT_RERANK_MODEL,
     relevance_weight: float = 0.7,
     support_weight: float = 0.3,
+    keep_gate_max_relevance: int = DEFAULT_KEEP_GATE_MAX_RELEVANCE,
 ) -> RerankResult:
-    """Rerank evidence packs with a local Qwen3-VL-compatible chat client."""
+    """Rerank evidence packs with a local Qwen3-VL-compatible chat client.
+
+    A pack is pruned when ``relevance <= min_relevance``, or when the model
+    said ``keep=false`` *and* ``relevance <= keep_gate_max_relevance``. The
+    second clause is what stops a pack the model itself rated relevance 4
+    from being thrown away on a stray ``keep=false`` (issue #50); pass
+    ``keep_gate_max_relevance=4`` for the old behaviour where ``keep`` was
+    always decisive.
+    """
     ranked: list[RerankedEvidencePack] = []
     best_fallback: Optional[RerankedEvidencePack] = None
 
@@ -278,7 +291,7 @@ def rerank_candidates(
         if best_fallback is None or final_score > best_fallback.final_rerank_score:
             best_fallback = candidate
 
-        if not reranker_output.keep or reranker_output.relevance <= min_relevance:
+        if _is_rejected(reranker_output, min_relevance, keep_gate_max_relevance):
             continue
         ranked.append(candidate)
 
@@ -290,9 +303,8 @@ def rerank_candidates(
             best_fallback.reranker_output.relevance,
         )
         fallback_output = best_fallback.reranker_output
-        was_rejected = (
-            not fallback_output.keep
-            or fallback_output.relevance <= min_relevance
+        was_rejected = _is_rejected(
+            fallback_output, min_relevance, keep_gate_max_relevance
         )
         if was_rejected:
             # The fallback was pruned by keep/min_relevance, so reranking does not
@@ -335,6 +347,17 @@ def rerank_candidates(
     )
 
 
+def _is_rejected(
+    output: RerankerOutput,
+    min_relevance: int,
+    keep_gate_max_relevance: int,
+) -> bool:
+    """Return True if the reranker output fails the relevance / keep gate."""
+    if output.relevance <= min_relevance:
+        return True
+    return not output.keep and output.relevance <= keep_gate_max_relevance
+
+
 def _coerce_pack(
     raw_pack: EvidencePack | Mapping[str, Any],
     hints: RouteHints,
@@ -364,12 +387,14 @@ def _build_content(
     Frames are downscaled to ``frame_max_pixels`` on their longest edge before
     encoding so a few candidate frames cannot push the reranker prompt past the
     model context (full-resolution frames previously produced 33k-token prompts).
+    The ``max_frames`` frames are spread evenly across the pack's sampled frames
+    rather than taken from its first few seconds.
     """
     encoded = [
         enc[0]
         for enc in (
             encode_frame(p, max_pixels=frame_max_pixels)
-            for p in frame_paths[:max_frames]
+            for p in sample_frames_evenly(frame_paths, max_frames)
         )
         if enc is not None
     ]

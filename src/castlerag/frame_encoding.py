@@ -19,7 +19,7 @@ import base64
 import io
 import math
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from PIL import Image
 
@@ -37,6 +37,25 @@ def estimate_text_tokens(text: str) -> int:
 def estimate_image_tokens(width: int, height: int) -> int:
     """Estimate Qwen-VL visual tokens for an image of the given pixel dimensions."""
     return math.ceil(width / _PATCH) * math.ceil(height / _PATCH)
+
+
+def sample_frames_evenly(paths: Sequence[str], max_frames: int) -> List[str]:
+    """Pick up to ``max_frames`` paths spread evenly across ``paths``.
+
+    Clips are sampled at 1 fps, so ``paths[:n]`` is the first ``n`` seconds of
+    a 30 s clip: an object shown mid-clip (a t-shirt back, a fridge logo) is
+    never seen. This picks the centre of ``max_frames`` equal-width buckets
+    instead, so 4 of 30 frames become seconds 3, 11, 18, 26. Order is
+    preserved; ``max_frames <= 0`` returns an empty list and a list already
+    within the cap is returned unchanged.
+    """
+    if max_frames <= 0:
+        return []
+    frames = list(paths)
+    if len(frames) <= max_frames:
+        return frames
+    total = len(frames)
+    return [frames[int((i + 0.5) * total / max_frames)] for i in range(max_frames)]
 
 
 def encode_frame(

@@ -33,9 +33,39 @@ def test_evidence_budget_defaults():
     cfg = CastleRAGConfig()
     assert cfg.retrieval.transcript_top_k == 30
     assert cfg.retrieval.max_candidate_videos == 4
+    assert cfg.retrieval.max_event_summaries == 4
+    assert cfg.retrieval.min_clip_hits == 2
     assert cfg.retrieval.frames_per_candidate == 32
     assert cfg.retrieval.max_aux_images == 16
     assert cfg.retrieval.max_evidence_rows == 50
+
+
+def test_reranking_gate_defaults_and_per_route_override():
+    cfg = CastleRAGConfig()
+    assert cfg.reranking.min_relevance == 1
+    assert cfg.reranking.keep_gate_max_relevance == 1
+    assert cfg.reranking.min_relevance_by_route == {}
+    assert cfg.reranking.min_relevance_for("static_visual") == 1
+
+    cfg = CastleRAGConfig.model_validate(
+        {
+            "reranking": {
+                "min_relevance": 1,
+                "min_relevance_by_route": {"static_visual": 0},
+            }
+        }
+    )
+    assert cfg.reranking.min_relevance_for("static_visual") == 0
+    assert cfg.reranking.min_relevance_for("temporal") == 1
+
+
+def test_base_yaml_documents_new_retrieval_and_reranking_keys():
+    base_path = Path(__file__).parent.parent.parent / "configs" / "base.yaml"
+    cfg = load_config(base_path)
+    assert cfg.retrieval.max_event_summaries == 4
+    assert cfg.retrieval.min_clip_hits == 2
+    assert cfg.reranking.keep_gate_max_relevance == 1
+    assert cfg.reranking.min_relevance_by_route == {}
 
 
 def test_reranking_weights_sum_to_one():
@@ -118,3 +148,33 @@ def test_expand_env_vars(tmp_path: Path):
     os.environ["_CR_TEST_VAR"] = "expanded_value"
     result = _expand_env({"path": "/scratch/$_CR_TEST_VAR/data"})
     assert "expanded_value" in result["path"]
+
+
+def test_min_relevance_by_route_rejects_unknown_route_and_bad_values():
+    with pytest.raises(ValueError, match="unknown route"):
+        CastleRAGConfig.model_validate(
+            {"reranking": {"min_relevance_by_route": {"visual": 0}}}
+        )
+    with pytest.raises(ValueError, match="within 0-4"):
+        CastleRAGConfig.model_validate(
+            {"reranking": {"min_relevance_by_route": {"static_visual": 5}}}
+        )
+    cfg = CastleRAGConfig.model_validate(
+        {"reranking": {"min_relevance_by_route": {"static_visual": 0, "mixed": 2}}}
+    )
+    assert cfg.reranking.min_relevance_for("mixed") == 2
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value"),
+    [
+        ("retrieval", "min_clip_hits", -1),
+        ("retrieval", "max_event_summaries", -1),
+        ("retrieval", "max_candidate_videos", -2),
+        ("reranking", "min_relevance", 5),
+        ("reranking", "keep_gate_max_relevance", -1),
+    ],
+)
+def test_budget_and_gate_knobs_reject_out_of_range_values(section, key, value):
+    with pytest.raises(ValueError):
+        CastleRAGConfig.model_validate({section: {key: value}})

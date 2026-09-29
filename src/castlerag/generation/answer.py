@@ -16,9 +16,18 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from castlerag.frame_encoding import encode_frame, estimate_text_tokens
+from castlerag.evidence_text import (
+    MAX_CAPTION_CHARS,
+    MAX_SCENE_GRAPH_CHARS,
+    truncate_text,
+)
+from castlerag.frame_encoding import (
+    encode_frame,
+    estimate_text_tokens,
+    sample_frames_evenly,
+)
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import AnswerChoice, EvalQuestion, Prediction, RetrievalHit
 
@@ -150,16 +159,25 @@ def build_prompt(
 def _gather_frame_paths(
     evidence_rows: List[RetrievalHit], max_frames: int = 8
 ) -> List[str]:
-    """Collect deduped frame paths from evidence rows, capped at max_frames."""
+    """Collect deduped frame paths from evidence rows, capped at max_frames.
+
+    Rows are visited in evidence order and each row's frames are sampled
+    evenly across the clip (see :func:`sample_frames_evenly`) rather than
+    taken from its first seconds, so the generator sees the whole 30 s span
+    of the top clip instead of only its opening moment.
+    """
+    if max_frames <= 0:
+        return []
     paths: List[str] = []
     seen: set = set()
     for row in evidence_rows:
-        for p in row.sampled_frame_paths:
-            if p not in seen:
-                seen.add(p)
-                paths.append(p)
-            if len(paths) >= max_frames:
-                return paths
+        remaining = max_frames - len(paths)
+        if remaining <= 0:
+            break
+        fresh = [p for p in row.sampled_frame_paths if p not in seen]
+        for p in sample_frames_evenly(fresh, remaining):
+            seen.add(p)
+            paths.append(p)
     return paths
 
 
@@ -327,6 +345,12 @@ def _format_evidence_row(hit: RetrievalHit) -> str:
         body_parts.append(f"event: {hit.event_summary}")
     if hit.ocr_text:
         body_parts.append(f"ocr: {hit.ocr_text}")
+    caption = truncate_text(hit.clip_caption, MAX_CAPTION_CHARS)
+    if caption:
+        body_parts.append(f"caption: {caption}")
+    scene = truncate_text(hit.scene_graph_text, MAX_SCENE_GRAPH_CHARS)
+    if scene:
+        body_parts.append(f"scene: {scene}")
     if hit.asset_path:
         body_parts.append(f"asset: {hit.asset_path}")
     body = "\n".join(body_parts) if body_parts else "[no text]"
@@ -654,6 +678,23 @@ def clean_answer_text(raw_text: str) -> str:
     return text.strip()
 
 
+def _trim_rows_to_budget(
+    rows: List[RetrievalHit],
+    render: "Callable[[List[RetrievalHit]], str]",
+    text_budget: int,
+) -> "tuple[List[RetrievalHit], str]":
+    """Drop rows from the tail until ``render(rows)`` fits ``text_budget`` tokens.
+
+    Always keeps at least one row so the prompt is never empty; returns the
+    surviving rows and their rendered text.
+    """
+    text = render(rows)
+    while len(rows) > 1 and estimate_text_tokens(text) > text_budget:
+        rows = rows[:-1]
+        text = render(rows)
+    return rows, text
+
+
 def generate_freeform_answer(
     question: EvalQuestion,
     hints: RouteHints,
@@ -679,8 +720,6 @@ def generate_freeform_answer(
     evidence rather than text alone. Falls back to a plain-text message when
     no frames are available.
     """
-    rows = evidence_rows[:max_evidence_rows]
-    evidence_text = "\n\n".join(_enumerate_evidence_rows(rows)) or _MISSING_EVIDENCE_ROW
     context_block = (
         f"\n\nReviewer feedback on previous evidence (use as guidance only — "
         f"do NOT cite timestamps from this block; only cite timestamps from "
@@ -688,16 +727,29 @@ def generate_freeform_answer(
         if refinement_context
         else ""
     )
-    user = _FREEFORM_USER_TEMPLATE.format(
-        route=hints.route,
-        route_block=_ROUTE_PROMPT_BLOCKS.get(hints.route, ""),
-        question=question.query,
-        evidence=evidence_text,
-        context_block=context_block,
+
+    def _render(rows_subset: List[RetrievalHit]) -> str:
+        evidence_text = (
+            "\n\n".join(_enumerate_evidence_rows(rows_subset)) or _MISSING_EVIDENCE_ROW
+        )
+        return _FREEFORM_USER_TEMPLATE.format(
+            route=hints.route,
+            route_block=_ROUTE_PROMPT_BLOCKS.get(hints.route, ""),
+            question=question.query,
+            evidence=evidence_text,
+            context_block=context_block,
+        )
+
+    # Same tail-trim as build_messages: captions and scene graphs make rows
+    # longer, and over-budget text must not be sent with the frames dropped.
+    usable_budget = prompt_token_budget - 512
+    rows, user = _trim_rows_to_budget(
+        list(evidence_rows[:max_evidence_rows]),
+        _render,
+        usable_budget - estimate_text_tokens(_FREEFORM_SYSTEM_PROMPT),
     )
     image_budget = (
-        prompt_token_budget
-        - 512
+        usable_budget
         - estimate_text_tokens(_FREEFORM_SYSTEM_PROMPT)
         - estimate_text_tokens(user)
     )
