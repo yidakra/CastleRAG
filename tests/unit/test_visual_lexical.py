@@ -903,3 +903,50 @@ def test_zero_route_weight_disables_visual_lane(tmp_path: Path):
     without_lane = [(h.record_id, h.point_id) for h in _run(base_cfg, None)]
     zero_weight = [(h.record_id, h.point_id) for h in _run(zero_cfg, bundle)]
     assert zero_weight == without_lane
+
+
+def test_all_stopword_query_substring_is_not_evidence():
+    from castlerag.retrieval.visual_lexical import score_visual_docs
+
+    docs = [
+        _vdoc("g1", "Allie", "someone in the on the table"),
+        _vdoc("k1", "Bjorn", "the fridge in the kitchen"),
+    ]
+    index = SimpleNamespace(bm25=_ScoresBM25([0.0, 0.0]), docs=docs)
+    hits = score_visual_docs(
+        visual_index=index,
+        query="in the on the",
+        choices={"a": "fridge", "b": "x", "c": "y", "d": "z"},
+        day_hint="day1",
+    )
+    # g1 contains the raw query as a substring but shares no content token.
+    assert [h.record_id for h in hits] == ["k1"]
+
+
+def test_visual_lane_defaults_match_config_and_base_yaml():
+    from castlerag.config import RetrievalConfig, load_config
+    from castlerag.retrieval import visual_lexical as vl
+
+    defaults = RetrievalConfig()
+    assert vl.DEFAULT_VISUAL_TEXT_TOP_K == defaults.visual_text_top_k
+    assert vl.DEFAULT_VISUAL_TEXT_ROUTE_WEIGHTS == defaults.visual_text_route_weights
+    repo = Path(__file__).resolve().parents[2]
+    base = load_config(repo / "configs" / "base.yaml").retrieval
+    assert base.visual_text_top_k == defaults.visual_text_top_k
+    assert base.visual_text_route_weights == defaults.visual_text_route_weights
+
+
+def test_atomic_writers_fsync_before_replace(tmp_path: Path, monkeypatch):
+    import os as os_module
+
+    from castlerag.index import io as io_module
+    from castlerag.index import visual_lexical as vl_module
+
+    synced = []
+    monkeypatch.setattr(os_module, "fsync", lambda fd: synced.append(fd))
+    clips, events = _corpus()
+    vl_module.build_visual_bm25_index(clips, events, tmp_path / VISUAL_TEXT_INDEX_NAME)
+    io_module.write_embedding_cache(
+        ["a"], np.ones((1, 2), dtype=np.float32), tmp_path / "x.npz"
+    )
+    assert len(synced) == 2

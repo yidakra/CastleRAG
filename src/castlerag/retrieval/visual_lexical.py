@@ -14,20 +14,20 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import numpy as np
 
+from castlerag.config import RetrievalConfig
 from castlerag.schemas import RetrievalHit
 
 _TOKEN_RE = re.compile(r"\b\w+\b")
 
 # Defaults used when the retrieval config predates the lane (e.g. the
-# SimpleNamespace configs in older tests).  Keep in sync with
-# RetrievalConfig / configs/base.yaml.
-DEFAULT_VISUAL_TEXT_TOP_K = 20
-DEFAULT_VISUAL_TEXT_ROUTE_WEIGHTS: Dict[str, float] = {
-    "static_visual": 2.0,
-    "mixed": 1.5,
-    "temporal": 1.0,
-    "speech_text": 0.5,
-}
+# SimpleNamespace configs in older tests). Read from RetrievalConfig so there
+# is a single source of truth; configs/base.yaml documents the same values
+# and a test guards against drift.
+_DEFAULT_RETRIEVAL = RetrievalConfig()
+DEFAULT_VISUAL_TEXT_TOP_K: int = _DEFAULT_RETRIEVAL.visual_text_top_k
+DEFAULT_VISUAL_TEXT_ROUTE_WEIGHTS: Dict[str, float] = dict(
+    _DEFAULT_RETRIEVAL.visual_text_route_weights
+)
 
 
 # Function words that make almost any caption "match" a question; the evidence
@@ -120,11 +120,13 @@ def score_visual_docs(
         # OCR verbatim, so a single shared token is a strong signal here.
         answer_overlap = len(answer_tokens.intersection(doc_tokens))
         phrase_hits = sum(1 for phrase in answer_phrases if phrase in text_lower)
+        # A raw-substring match of an all-stopword query is not evidence; it
+        # only counts when the query carries a content token (in which case
+        # the first clause already holds).
         has_lexical_evidence = (
             bool(content_query_tokens & doc_tokens)
             or answer_overlap > 0
             or phrase_hits > 0
-            or query_lower in text_lower
         )
         if not has_lexical_evidence:
             # The metadata bonuses below must not promote an unrelated

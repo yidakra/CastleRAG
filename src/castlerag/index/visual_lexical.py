@@ -189,6 +189,8 @@ def build_visual_bm25_index(
     try:
         with os.fdopen(fd, "wb") as fh:
             pickle.dump(payload, fh)
+            fh.flush()
+            os.fsync(fh.fileno())  # rename atomicity is not data durability
         os.replace(tmp_name, out_path)
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)
