@@ -216,9 +216,19 @@ def _collect_frame_paths(
         return paths
     if not with_frames:
         return []
-    share, leftover = divmod(max_frames, len(with_frames))
-    for i, row in enumerate(with_frames):
-        budget = share + (1 if i < leftover else 0)
+    # Round-robin allocation, primary row first: a row that runs out of
+    # frames stops taking slots, so its unused share goes to the others.
+    capacity = [len(row.sampled_frame_paths) for row in with_frames]
+    alloc = [0] * len(with_frames)
+    remaining = max_frames
+    while remaining > 0 and any(a < c for a, c in zip(alloc, capacity)):
+        for i in range(len(with_frames)):
+            if remaining == 0:
+                break
+            if alloc[i] < capacity[i]:
+                alloc[i] += 1
+                remaining -= 1
+    for row, budget in zip(with_frames, alloc):
         for p in sample_frames_evenly(row.sampled_frame_paths, budget):
             if p not in seen:
                 seen.add(p)

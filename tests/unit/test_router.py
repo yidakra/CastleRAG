@@ -351,3 +351,13 @@ def test_final_day_gloss_still_single_without_lead_in():
     hints = route_question("What was served at dinner on the fourth and final day?", {})
     assert hints.route != "temporal"
     assert hints.day == "day4"
+
+
+def test_second_to_last_noun_is_positional_not_temporal():
+    hints = route_question("What was in the second to last drawer?", {})
+    assert hints.route != "temporal"
+
+
+def test_second_to_verb_is_still_an_ordering_anchor():
+    hints = route_question("Who was second to arrive at the workshop?", {})
+    assert hints.route == "temporal"

@@ -977,3 +977,16 @@ def test_collect_frame_paths_shares_budget_and_samples_each_row_evenly():
         assert secs[0] < 5 and secs[-1] > 24
     # Without a cap, all frames are kept in order (deduplicated).
     assert len(_collect_frame_paths(rows, max_frames=None)) == 90
+
+
+def test_collect_frame_paths_redistributes_unused_row_share():
+    from types import SimpleNamespace
+
+    from castlerag.retrieval.candidate_expand import _collect_frame_paths
+
+    short = SimpleNamespace(sampled_frame_paths=["/a/00.jpg"])
+    long = SimpleNamespace(sampled_frame_paths=[f"/b/{i:02d}.jpg" for i in range(30)])
+    picked = _collect_frame_paths([short, long], max_frames=10)
+    assert len(picked) == 10
+    assert picked[0] == "/a/00.jpg"
+    assert sum(p.startswith("/b/") for p in picked) == 9

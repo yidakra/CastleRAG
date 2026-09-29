@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from castlerag.evidence_text import (
     MAX_CAPTION_CHARS,
@@ -678,6 +678,23 @@ def clean_answer_text(raw_text: str) -> str:
     return text.strip()
 
 
+def _trim_rows_to_budget(
+    rows: List[RetrievalHit],
+    render: "Callable[[List[RetrievalHit]], str]",
+    text_budget: int,
+) -> "tuple[List[RetrievalHit], str]":
+    """Drop rows from the tail until ``render(rows)`` fits ``text_budget`` tokens.
+
+    Always keeps at least one row so the prompt is never empty; returns the
+    surviving rows and their rendered text.
+    """
+    text = render(rows)
+    while len(rows) > 1 and estimate_text_tokens(text) > text_budget:
+        rows = rows[:-1]
+        text = render(rows)
+    return rows, text
+
+
 def generate_freeform_answer(
     question: EvalQuestion,
     hints: RouteHints,
@@ -703,8 +720,6 @@ def generate_freeform_answer(
     evidence rather than text alone. Falls back to a plain-text message when
     no frames are available.
     """
-    rows = evidence_rows[:max_evidence_rows]
-    evidence_text = "\n\n".join(_enumerate_evidence_rows(rows)) or _MISSING_EVIDENCE_ROW
     context_block = (
         f"\n\nReviewer feedback on previous evidence (use as guidance only — "
         f"do NOT cite timestamps from this block; only cite timestamps from "
@@ -712,16 +727,29 @@ def generate_freeform_answer(
         if refinement_context
         else ""
     )
-    user = _FREEFORM_USER_TEMPLATE.format(
-        route=hints.route,
-        route_block=_ROUTE_PROMPT_BLOCKS.get(hints.route, ""),
-        question=question.query,
-        evidence=evidence_text,
-        context_block=context_block,
+
+    def _render(rows_subset: List[RetrievalHit]) -> str:
+        evidence_text = (
+            "\n\n".join(_enumerate_evidence_rows(rows_subset)) or _MISSING_EVIDENCE_ROW
+        )
+        return _FREEFORM_USER_TEMPLATE.format(
+            route=hints.route,
+            route_block=_ROUTE_PROMPT_BLOCKS.get(hints.route, ""),
+            question=question.query,
+            evidence=evidence_text,
+            context_block=context_block,
+        )
+
+    # Same tail-trim as build_messages: captions and scene graphs make rows
+    # longer, and over-budget text must not be sent with the frames dropped.
+    usable_budget = prompt_token_budget - 512
+    rows, user = _trim_rows_to_budget(
+        list(evidence_rows[:max_evidence_rows]),
+        _render,
+        usable_budget - estimate_text_tokens(_FREEFORM_SYSTEM_PROMPT),
     )
     image_budget = (
-        prompt_token_budget
-        - 512
+        usable_budget
         - estimate_text_tokens(_FREEFORM_SYSTEM_PROMPT)
         - estimate_text_tokens(user)
     )

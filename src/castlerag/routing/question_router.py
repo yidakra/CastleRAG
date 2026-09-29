@@ -106,11 +106,9 @@ _TEMPORAL_DOMINANT_MARKERS = (
     "second person to",
     "second one to",
     "second time",
-    "second to",
     "third person to",
     "third one to",
     "third time",
-    "third to",
     "finally",
     "once",
     "in what order",
@@ -133,6 +131,8 @@ _TEMPORAL_DOMINANT_RE = re.compile(
     r"\b(?:"
     + "|".join(re.escape(m) for m in _TEMPORAL_DOMINANT_MARKERS)
     + r"|next(?!\s+to\b)"
+    # "second to arrive" is ordering; "second to last drawer" is positional.
+    + r"|(?:second|third)\s+to(?!\s+(?:the\s+)?last\b)"
     + r"|(?:first|last)" + _POSITIONAL_FOLLOWERS
     + r")\b"
 )

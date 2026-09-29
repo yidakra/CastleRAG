@@ -762,3 +762,17 @@ def test_generate_freeform_answer_plain_text_without_frames():
     )
 
     assert isinstance(captured["messages"][1]["content"], str)
+
+
+def test_trim_rows_to_budget_drops_tail_rows_until_text_fits():
+    from castlerag.generation.answer import _trim_rows_to_budget, estimate_text_tokens
+
+    rows = [f"row{i}" for i in range(6)]
+    render = lambda rs: "\n".join("x" * 400 for _ in rs)  # noqa: E731
+    budget = estimate_text_tokens(render(rows[:3]))
+    kept, text = _trim_rows_to_budget(list(rows), render, budget)
+    assert kept == rows[:3]
+    assert text == render(rows[:3])
+    # Never empties the list, even when one row is already over budget.
+    kept, _ = _trim_rows_to_budget(list(rows), render, 1)
+    assert kept == rows[:1]
