@@ -538,6 +538,10 @@ def _has_day_comparison(text: str) -> bool:
     for match in _DAY_PHRASE_RE.finditer(text):
         token = match.group(0)
         words = token.split()
+        # "between the first and final day" / "from the first and last day":
+        # a comparative lead-in overrides the single-day gloss reading.
+        lead_in = text[max(0, match.start() - 24) : match.start()].split()[-3:]
+        comparative = bool(_COMPARATIVE_LEAD_INS.intersection(lead_in))
         digit = re.fullmatch(r"day\s*([1-4])", token)
         if digit:  # "day 1" and the no-space "day1" alike
             seen.add(f"day{digit.group(1)}")
@@ -547,7 +551,7 @@ def _has_day_comparison(text: str) -> bool:
             seen.add(f"{words[0].rstrip('-')}-to-last")
         elif len(words) >= 4:
             first, second = words[0], words[-2]
-            if _is_appositive_final_day(words):
+            if _is_appositive_final_day(words) and not comparative:
                 # "the fourth and final day": one day glossed twice, not two.
                 seen.add(_day_bucket(first))
             else:
@@ -560,6 +564,11 @@ def _has_day_comparison(text: str) -> bool:
         else:
             seen.add(_day_bucket(words[0]))
     return len(seen) >= 2
+
+
+_COMPARATIVE_LEAD_INS = frozenset(
+    ["between", "from", "compare", "compared", "comparing", "versus", "vs"]
+)
 
 
 def _is_appositive_final_day(words: List[str]) -> bool:

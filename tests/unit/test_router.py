@@ -332,3 +332,22 @@ def test_fourth_and_the_final_day_with_article_is_a_single_day(question):
     hints = route_question(question, {})
     assert hints.route != "temporal"
     assert hints.day == "day4"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How did the kitchen change between the first and final day?",
+        "Compare the whiteboard from the third and final day with the first.",
+    ],
+)
+def test_comparative_lead_in_overrides_final_day_gloss(question):
+    hints = route_question(question, {})
+    assert hints.route == "temporal"
+    assert hints.day is None
+
+
+def test_final_day_gloss_still_single_without_lead_in():
+    hints = route_question("What was served at dinner on the fourth and final day?", {})
+    assert hints.route != "temporal"
+    assert hints.day == "day4"
