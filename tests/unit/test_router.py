@@ -307,3 +307,15 @@ def test_from_the_first_to_the_last_day_is_a_comparison():
     )
     assert hints.route == "temporal"
     assert hints.day is None
+
+
+def test_first_and_last_day_without_article_is_a_comparison():
+    hints = route_question("Was the menu the same on the first and last day?", {})
+    assert hints.route == "temporal"
+    assert hints.day is None
+
+
+def test_third_and_final_day_is_a_single_day():
+    hints = route_question("What was on the whiteboard on the third and final day?", {})
+    assert hints.route != "temporal"
+    assert hints.day == "day3"

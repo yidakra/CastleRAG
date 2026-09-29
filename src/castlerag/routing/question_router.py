@@ -32,9 +32,12 @@ _ROOM_PATTERNS = {
 }
 _DAY_PATTERNS = (
     (re.compile(r"\bday\s*([1-4])\b"), "digit"),
-    # "the fourth and final day": the ordinal names the day.
+    # "the third and final day" / "the fourth and last day": one glossed day.
     (
-        re.compile(r"\b(first|second|third|fourth)\s+(?:and|or)\s+(?:last|final)\s+day\b"),
+        re.compile(
+            r"\b(?:(first|second|third|fourth)\s+and\s+final|(fourth)\s+and\s+last)"
+            r"\s+day\b"
+        ),
         "ordinal",
     ),
     (re.compile(r"\b(first|second|third|fourth)\s+day\b"), "ordinal"),
@@ -466,7 +469,7 @@ def _extract_day(text: str) -> Optional[str]:
         match = pattern.search(text)
         if match is None:
             continue
-        value = match.group(1)
+        value = next(g for g in match.groups() if g)
         if kind == "digit":
             return f"day{value}"
         return _DAY_ORDINALS[value]
@@ -544,8 +547,8 @@ def _has_day_comparison(text: str) -> bool:
             seen.add(f"{words[0].rstrip('-')}-to-last")
         elif len(words) >= 4:
             first, second = words[0], words[-2]
-            if words[1] in ("and", "or") and words[2] in ("last", "final"):
-                # Appositive, "the fourth and final day": one day, not two.
+            if _is_appositive_final_day(words):
+                # "the fourth and final day": one day glossed twice, not two.
                 seen.add(_day_bucket(first))
             else:
                 # Elliptical pair, "first to the second day": both count.
@@ -557,6 +560,18 @@ def _has_day_comparison(text: str) -> bool:
         else:
             seen.add(_day_bucket(words[0]))
     return len(seen) >= 2
+
+
+def _is_appositive_final_day(words: List[str]) -> bool:
+    """True for "<ordinal> and final day" / "fourth and last day" glosses.
+
+    "first and last day" is a pair of days, so only the word "final" (a gloss,
+    never a day reference on its own here) or the collection's actual last
+    ordinal ("fourth") makes the phrase a single day.
+    """
+    return len(words) == 4 and words[1] == "and" and (
+        words[2] == "final" or (words[0] == "fourth" and words[2] == "last")
+    )
 
 
 def _day_bucket(ordinal: str) -> str:
