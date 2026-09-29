@@ -10,6 +10,7 @@ from castlerag.evidence_text import (
     MAX_SCENE_GRAPH_CHARS,
     truncate_text,
 )
+from castlerag.frame_encoding import sample_frames_evenly
 from castlerag.routing.question_router import QuestionRoute
 from castlerag.schemas import EvidencePack, RetrievalHit
 
@@ -193,19 +194,36 @@ def _collect_frame_descriptions(
 def _collect_frame_paths(
     rows: List[RetrievalHit], max_frames: Optional[int] = None
 ) -> List[str]:
-    """Return deduplicated sampled frame JPEG paths from all hits, capped at max_frames."""  # noqa: E501
+    """Return deduplicated frame paths from all hits, capped at ``max_frames``.
+
+    The budget is shared across the rows that carry frames (primary row
+    first, leftover frames to the earliest rows) and each row's share is
+    sampled evenly across that clip. Taking the first N paths in row order
+    would hand the whole budget to the primary clip's opening seconds and
+    never show the reranker a mid-clip frame of a bundled clip.
+    """
     if max_frames is not None and max_frames <= 0:
         return []
+    with_frames = [row for row in rows if row.sampled_frame_paths]
     paths: List[str] = []
     seen: set = set()
-    for row in rows:
-        for p in row.sampled_frame_paths:
+    if max_frames is None:
+        for row in with_frames:
+            for p in row.sampled_frame_paths:
+                if p not in seen:
+                    seen.add(p)
+                    paths.append(p)
+        return paths
+    if not with_frames:
+        return []
+    share, leftover = divmod(max_frames, len(with_frames))
+    for i, row in enumerate(with_frames):
+        budget = share + (1 if i < leftover else 0)
+        for p in sample_frames_evenly(row.sampled_frame_paths, budget):
             if p not in seen:
                 seen.add(p)
                 paths.append(p)
-                if max_frames is not None and len(paths) >= max_frames:
-                    return paths
-    return paths
+    return paths[:max_frames]
 
 
 def _collect_aux_notes(rows: List[RetrievalHit]) -> List[str]:

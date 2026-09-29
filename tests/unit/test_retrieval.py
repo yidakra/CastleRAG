@@ -956,3 +956,24 @@ def test_collect_frame_descriptions_cap_counts_only_described_clips():
     assert captions[0].startswith("clip clip100 ")
     # Every other main_clip row, including the two past the cap, keeps its path.
     assert len(assets) == MAX_DESCRIBED_CLIPS + 2
+
+
+def test_collect_frame_paths_shares_budget_and_samples_each_row_evenly():
+    from types import SimpleNamespace
+
+    from castlerag.retrieval.candidate_expand import _collect_frame_paths
+
+    rows = [
+        SimpleNamespace(sampled_frame_paths=[f"/c{r}/{i:02d}.jpg" for i in range(30)])
+        for r in range(3)
+    ]
+    picked = _collect_frame_paths(rows, max_frames=32)
+    assert len(picked) == 32 and len(set(picked)) == 32
+    per_row = {r: [p for p in picked if p.startswith(f"/c{r}/")] for r in range(3)}
+    assert [len(per_row[r]) for r in range(3)] == [11, 11, 10]
+    # Every row contributes mid- and late-clip frames, not just its opening.
+    for r in range(3):
+        secs = sorted(int(p.split("/")[-1][:2]) for p in per_row[r])
+        assert secs[0] < 5 and secs[-1] > 24
+    # Without a cap, all frames are kept in order (deduplicated).
+    assert len(_collect_frame_paths(rows, max_frames=None)) == 90
