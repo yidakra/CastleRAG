@@ -288,3 +288,22 @@ def test_elliptical_and_two_span_day_comparisons_route_temporal(question):
 def test_single_span_is_not_a_comparison():
     hints = route_question("How did the kitchen look on the first two days?", {})
     assert hints.route != "temporal"
+
+
+def test_appositive_final_day_is_a_single_day():
+    hints = route_question("What was served at dinner on the fourth and final day?", {})
+    assert hints.route != "temporal"
+    assert hints.day == "day4"
+
+
+def test_second_to_the_last_day_is_a_single_day_phrase():
+    hints = route_question("Which game was played on the second to the last day?", {})
+    assert hints.route != "temporal"
+
+
+def test_from_the_first_to_the_last_day_is_a_comparison():
+    hints = route_question(
+        "How did the whiteboard change from the first to the last day?", {}
+    )
+    assert hints.route == "temporal"
+    assert hints.day is None

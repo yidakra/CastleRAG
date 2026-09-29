@@ -297,7 +297,7 @@ def test_gather_frame_paths_samples_evenly_across_top_clip():
     row = _make_hit().model_copy(update={"sampled_frame_paths": frames})
     picked = _gather_frame_paths([row], max_frames=8)
     assert len(picked) == 8
-    assert picked[0] != frames[0] or picked[-1] != frames[7]  # not the first 8 s
+    assert picked != frames[:8]  # not simply the first 8 s
     # Behavioural: in order, no repeats, covering the whole clip evenly.
     idx = [frames.index(p) for p in picked]
     assert idx == sorted(idx) and len(set(idx)) == 8

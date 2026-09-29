@@ -32,6 +32,11 @@ _ROOM_PATTERNS = {
 }
 _DAY_PATTERNS = (
     (re.compile(r"\bday\s*([1-4])\b"), "digit"),
+    # "the fourth and final day": the ordinal names the day.
+    (
+        re.compile(r"\b(first|second|third|fourth)\s+(?:and|or)\s+(?:last|final)\s+day\b"),
+        "ordinal",
+    ),
     (re.compile(r"\b(first|second|third|fourth)\s+day\b"), "ordinal"),
 )
 _DAY_ORDINALS = {
@@ -50,7 +55,7 @@ _DAY_PHRASE_RE = re.compile(
     # ordinal behind that reads as an ordering marker: "second to last day",
     # and the elliptical pair "from the first to the second day" / "the first
     # and the last day", where only the second ordinal carries the noun.
-    r"\b(?:(?:second|third)[\s-]+to[\s-]+last\s+days?"
+    r"\b(?:(?:second|third)[\s-]+to[\s-]+(?:the\s+)?last\s+days?"
     rf"|{_ORD}\s+(?:to|and|or|versus|vs\.?|until|through)\s+(?:the\s+)?{_ORD}\s+days?"
     rf"|{_ORD}\s+(?:(?:two|three|four|\d)\s+)?days?|day\s*[1-4])\b"
 )
@@ -533,11 +538,18 @@ def _has_day_comparison(text: str) -> bool:
         digit = re.fullmatch(r"day\s*([1-4])", token)
         if digit:  # "day 1" and the no-space "day1" alike
             seen.add(f"day{digit.group(1)}")
-        elif re.search(r"\bto[\s-]+last\b", token):
+        elif re.fullmatch(
+            r"(?:second|third)[\s-]+to[\s-]+(?:the\s+)?last\s+days?", token
+        ):
             seen.add(f"{words[0].rstrip('-')}-to-last")
         elif len(words) >= 4:
-            # Elliptical pair, "first to the second day": both ordinals count.
-            seen.update(_day_bucket(w) for w in (words[0], words[-2]))
+            first, second = words[0], words[-2]
+            if words[1] in ("and", "or") and words[2] in ("last", "final"):
+                # Appositive, "the fourth and final day": one day, not two.
+                seen.add(_day_bucket(first))
+            else:
+                # Elliptical pair, "first to the second day": both count.
+                seen.update(_day_bucket(w) for w in (first, second))
         elif len(words) == 3:
             # "first two days": a span. Keyed by ordinal and length so "the
             # first two days" vs "the last two days" stay distinct.
