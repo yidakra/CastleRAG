@@ -22,8 +22,8 @@ See retrieval/visual_lexical.py for query-time scoring with bonuses.
 
 from __future__ import annotations
 
+import json
 import os
-import pickle
 import re
 import tempfile
 from dataclasses import dataclass
@@ -35,7 +35,7 @@ from rank_bm25 import BM25Okapi
 
 from castlerag.schemas import ClipRecord, EventSummaryRecord
 
-VISUAL_TEXT_INDEX_NAME = "visual_text.pkl"
+VISUAL_TEXT_INDEX_NAME = "visual_text.json"
 
 _TOKEN_RE = re.compile(r"\b\w+\b")
 
@@ -187,8 +187,11 @@ def build_visual_bm25_index(
         prefix=f".{out_path.name}.", suffix=".tmp", dir=out_path.parent
     )
     try:
-        with os.fdopen(fd, "wb") as fh:
-            pickle.dump(payload, fh)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            # JSON, not pickle: the cache dir is treated as untrusted input
+            # elsewhere (np.load(..., allow_pickle=False)), and a query-time
+            # artifact must fail closed rather than execute code on load.
+            json.dump(payload, fh)
             fh.flush()
             os.fsync(fh.fileno())  # rename atomicity is not data durability
         os.replace(tmp_name, out_path)
@@ -220,8 +223,10 @@ def _drop_tokenless(
 
 def load_visual_bm25_index(index_path: Path) -> VisualBM25IndexBundle:
     """Load a persisted visual-text BM25 index from disk."""
-    with index_path.open("rb") as fh:
-        payload = pickle.load(fh)
+    with index_path.open("r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    if not isinstance(payload, dict) or not isinstance(payload.get("docs"), list):
+        raise ValueError(f"{index_path}: not a visual-text index payload")
     docs = [VisualTextDoc.model_validate(doc) for doc in payload["docs"]]
     # Re-derive the token lists rather than trusting the pickle, so a corpus
     # written before the tokenless filter existed still loads safely.
@@ -235,7 +240,7 @@ def load_visual_bm25_index(index_path: Path) -> VisualBM25IndexBundle:
 def load_visual_bm25_index_if_present(
     cache_dir: Path,
 ) -> Optional[VisualBM25IndexBundle]:
-    """Load ``visual_text.pkl`` from ``cache_dir`` or return None when absent.
+    """Load ``visual_text.json`` from ``cache_dir`` or return None when absent.
 
     The lane is optional: deployments indexed before it existed keep working
     unchanged until ``castlerag index`` is re-run.  A pickle that exists but

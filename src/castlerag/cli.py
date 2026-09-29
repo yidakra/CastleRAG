@@ -530,7 +530,7 @@ def index(
         False,
         "--lexical-only",
         help="Only rebuild the CPU BM25 artifacts (transcripts.pkl and "
-        "visual_text.pkl) from the chunk records; skip embedding and Qdrant.",
+        "visual_text.json) from the chunk records; skip embedding and Qdrant.",
     ),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
@@ -544,7 +544,7 @@ def index(
 
     BM25 is always rebuilt from the full transcript scope so retrieval keeps
     matching previously-ingested days. The same run also rebuilds the
-    visual-text BM25 index (``visual_text.pkl``: clip captions + OCR + scene
+    visual-text BM25 index (``visual_text.json``: clip captions + OCR + scene
     graphs, event summaries + aggregated OCR). ``--lexical-only`` rebuilds
     just those two pickles from the chunk records — no vLLM, no Qdrant — which
     is how an existing deployment picks up the visual-text lane without
@@ -561,6 +561,8 @@ def index(
     """
     cfg = _resolve_config(config, snellius)
     scope = f"day{day}" if day is not None else "all-days"
+    if lexical_only:
+        scope = "all-days (--lexical-only rebuilds the lexical indexes from every day)"
     console.print(
         f"[bold]castlerag index[/bold]  collection={cfg.qdrant.collection}  "
         f"scope={scope}"
@@ -571,7 +573,7 @@ def index(
         if lexical_only:
             console.print(
                 "[yellow]dry-run: --lexical-only would rebuild transcripts.pkl "
-                f"and visual_text.pkl under {cfg.embedding.cache_dir}[/yellow]"
+                f"and visual_text.json under {cfg.embedding.cache_dir}[/yellow]"
             )
         return
     records = load_chunk_records(Path(cfg.preprocessing.chunks_dir))
@@ -683,7 +685,7 @@ def retrieve(
     )
     console.print(f"  route    : {hints.route}")
     console.print(
-        f"  visual   : {'visual_text.pkl loaded' if visual_index else 'absent'}"
+        f"  visual   : {'visual_text.json loaded' if visual_index else 'absent'}"
     )
     console.print(f"  evidence : {len(hits)} hits")
     for hit in hits[:10]:

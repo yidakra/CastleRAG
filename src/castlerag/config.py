@@ -107,10 +107,10 @@ class RetrievalConfig(BaseModel):
     modality_score_thresholds: Dict[str, float] = Field(default_factory=dict)
     # Visual-text lexical lane (issue #50, modality gap): BM25 over per-clip
     # captions + OCR + scene-graph text and per-event summaries + aggregated
-    # OCR, built by `castlerag index` as visual_text.pkl. `visual_text_top_k`
+    # OCR, built by `castlerag index` as visual_text.json. `visual_text_top_k`
     # is the lane size; `visual_text_route_weights` is its RRF weight in the
     # multimodal fusion pass per question route (dense lanes weigh 1.0/0.7/0.9
-    # per query variant). Only used when visual_text.pkl exists.
+    # per query variant). Only used when visual_text.json exists.
     visual_text_top_k: int = 20
     visual_text_route_weights: Dict[str, float] = Field(
         default_factory=lambda: {

@@ -90,7 +90,7 @@ def retrieve(
     """Full dual-path retrieval for one question.
 
     ``visual_index`` is the optional BM25 bundle over clip captions, OCR and
-    scene-graph text (``visual_text.pkl``). When given, it adds a lexical
+    scene-graph text (``visual_text.json``). When given, it adds a lexical
     lane to the multimodal RRF pass so object / on-screen-text questions can
     match verbatim (issue #50, modality gap). When ``None`` (index not built
     yet) retrieval is byte-for-byte the pre-lane behaviour.

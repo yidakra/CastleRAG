@@ -99,7 +99,7 @@ def score_visual_docs(
         phrase = choice.strip().lower()
         # A phrase of pure function words ("in the kitchen") would substring-
         # match most captions; it only counts if it carries a content token.
-        if len(phrase.split()) > 1 and set(phrase.split()) - _STOPWORDS:
+        if len(phrase.split()) > 1 and set(_tokenize(phrase)) - _STOPWORDS:
             answer_phrases.append(phrase)
 
     excluded = set(exclude_cameras or ())

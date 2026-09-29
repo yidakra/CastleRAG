@@ -75,7 +75,7 @@ retrieval:
   max_aux_images: 16
   max_evidence_rows: 50  # TAHAKOM-validated working-memory cap
   # Visual-text lexical lane: BM25 over clip captions + OCR + scene graphs
-  # (visual_text.pkl, built by `castlerag index`). top_k is the lane size;
+  # (visual_text.json, built by `castlerag index`). top_k is the lane size;
   # route weights are its RRF weight in the multimodal fusion pass.
   visual_text_top_k: 20
   visual_text_route_weights:

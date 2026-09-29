@@ -204,7 +204,7 @@ def test_build_visual_bm25_artifact_writes_next_to_transcript_pickle(tmp_path: P
     clips, events = _corpus()
     records = LoadedArtifacts(transcripts=[], clips=clips, events=events, aux=[])
     out = build_visual_bm25_artifact(records, tmp_path / "embeddings")
-    assert out == tmp_path / "embeddings" / "visual_text.pkl"
+    assert out == tmp_path / "embeddings" / "visual_text.json"
     assert len(load_visual_bm25_index(out).docs) == 3
 
 
@@ -737,7 +737,7 @@ def test_build_visual_bm25_index_write_is_atomic(tmp_path: Path, monkeypatch):
     def _boom(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(vl_module.pickle, "dump", _boom)
+    monkeypatch.setattr(vl_module.json, "dump", _boom)
     with pytest.raises(OSError):
         build_visual_bm25_index(clips[:1], [], out)
     assert out.read_bytes() == before
@@ -950,3 +950,34 @@ def test_atomic_writers_fsync_before_replace(tmp_path: Path, monkeypatch):
         ["a"], np.ones((1, 2), dtype=np.float32), tmp_path / "x.npz"
     )
     assert len(synced) == 2
+
+
+def test_visual_index_is_json_not_pickle(tmp_path: Path):
+    import json
+
+    out = tmp_path / VISUAL_TEXT_INDEX_NAME
+    clips, events = _corpus()
+    build_visual_bm25_index(clips, events, out)
+    assert out.suffix == ".json"
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert set(payload) == {"docs"} and len(payload["docs"]) == 3
+    (tmp_path / "bad.json").write_text("[1, 2, 3]", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_visual_bm25_index(tmp_path / "bad.json")
+
+
+def test_score_visual_docs_phrase_gate_uses_tokenizer():
+    from castlerag.retrieval.visual_lexical import score_visual_docs
+
+    docs = [
+        _vdoc("g1", "Allie", "it's on the table, there's a book"),
+        _vdoc("k1", "Bjorn", "the fridge in the kitchen"),
+    ]
+    index = SimpleNamespace(bm25=_ScoresBM25([0.0, 0.0]), docs=docs)
+    hits = score_visual_docs(
+        visual_index=index,
+        query="Where was the fridge?",
+        choices={"a": "it's on the", "b": "kitchen", "c": "x", "d": "y"},
+        day_hint="day1",
+    )
+    assert [h.record_id for h in hits] == ["k1"]

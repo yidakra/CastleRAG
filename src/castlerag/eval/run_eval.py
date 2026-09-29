@@ -667,7 +667,7 @@ def _prepare_default_runtime(
 def _load_optional_visual_index(
     cfg: CastleRAGConfig, artifact_report: IndexArtifactReport
 ) -> Any:
-    """Load ``visual_text.pkl`` when present; ``None`` keeps the old behaviour.
+    """Load ``visual_text.json`` when present; ``None`` keeps the old behaviour.
 
     The visual-text lexical lane is additive (issue #50): an index built
     before it existed has no pickle, and retrieval must then run exactly as
@@ -683,7 +683,7 @@ def _load_optional_visual_index(
         raise PipelineDependencyError(
             f"failed to load visual-text BM25 index under {cache_dir}: {exc}. "
             "The lane is optional: rebuild the index with "
-            "`castlerag index --lexical-only`, or delete visual_text.pkl to run "
+            "`castlerag index --lexical-only`, or delete visual_text.json to run "
             "without the caption/OCR lane."
         ) from exc
 
