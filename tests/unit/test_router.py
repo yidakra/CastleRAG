@@ -269,3 +269,22 @@ def test_second_to_last_day_versus_last_day_is_a_comparison():
         "Was the kitchen tidier on the second to last day than on the last day?", {}
     )
     assert hints.route == "temporal"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How did the score change from the first to the second day?",
+        "Was the same lamp on the desk on the first and the last day?",
+        "How did the kitchen change between the first two days and the last two days?",
+    ],
+)
+def test_elliptical_and_two_span_day_comparisons_route_temporal(question):
+    hints = route_question(question, {})
+    assert hints.route == "temporal"
+    assert hints.day is None
+
+
+def test_single_span_is_not_a_comparison():
+    hints = route_question("How did the kitchen look on the first two days?", {})
+    assert hints.route != "temporal"

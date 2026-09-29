@@ -44,13 +44,15 @@ _DAY_ORDINALS = {
 # blanked out before temporal cue matching so the bare ordinal does not read
 # as a temporal-ordering marker: "what is on the back of Werner's t-shirt on
 # the first day" is a static visual question, not a before/after one.
+_ORD = r"(?:first|second|third|fourth|last|final)"
 _DAY_PHRASE_RE = re.compile(
-    # Compound forms first ("second to last day", "second-to-last day") so the
-    # bare "last day" alternative can't leave a stray "second to" behind,
-    # which would read as an ordering marker.
+    # Compound forms first, so the bare alternatives can't leave a stray
+    # ordinal behind that reads as an ordering marker: "second to last day",
+    # and the elliptical pair "from the first to the second day" / "the first
+    # and the last day", where only the second ordinal carries the noun.
     r"\b(?:(?:second|third)[\s-]+to[\s-]+last\s+days?"
-    r"|(?:first|second|third|fourth|last|final)\s+"
-    r"(?:(?:two|three|four|\d)\s+)?days?|day\s*[1-4])\b"
+    rf"|{_ORD}\s+(?:to|and|or|versus|vs\.?|until|through)\s+(?:the\s+)?{_ORD}\s+days?"
+    rf"|{_ORD}\s+(?:(?:two|three|four|\d)\s+)?days?|day\s*[1-4])\b"
 )
 _TEMPORAL_KEYWORDS = frozenset(
     [
@@ -533,14 +535,21 @@ def _has_day_comparison(text: str) -> bool:
             seen.add(f"day{digit.group(1)}")
         elif re.search(r"\bto[\s-]+last\b", token):
             seen.add(f"{words[0].rstrip('-')}-to-last")
+        elif len(words) >= 4:
+            # Elliptical pair, "first to the second day": both ordinals count.
+            seen.update(_day_bucket(w) for w in (words[0], words[-2]))
         elif len(words) == 3:
-            # "first two days": a span, not a specific day to compare against.
-            seen.add("span")
-        elif words[0] in _DAY_ORDINALS:
-            seen.add(_DAY_ORDINALS[words[0]])
+            # "first two days": a span. Keyed by ordinal and length so "the
+            # first two days" vs "the last two days" stay distinct.
+            seen.add(f"{_day_bucket(words[0])}-span-{words[1]}")
         else:
-            seen.add("last")  # "last day" / "final day"
+            seen.add(_day_bucket(words[0]))
     return len(seen) >= 2
+
+
+def _day_bucket(ordinal: str) -> str:
+    """Map an ordinal word to its comparison bucket ("day1", ..., "last")."""
+    return _DAY_ORDINALS.get(ordinal, "last")  # "last" / "final"
 
 
 def _has_temporal_anchor(question: str) -> bool:

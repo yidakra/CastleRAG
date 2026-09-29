@@ -748,6 +748,7 @@ class RagEngine:
                         payload.get("transcript_text")
                         or payload.get("event_summary")
                         or payload.get("ocr_text")
+                        or payload.get("clip_caption")
                         or None
                     ),
                 )
