@@ -874,3 +874,32 @@ def test_cli_index_lexical_only_ignores_day_scope_guard(tmp_path: Path):
     )
     assert result.exit_code == 0, result.output
     assert (tmp_path / "embeddings" / VISUAL_TEXT_INDEX_NAME).exists()
+
+
+def test_zero_route_weight_disables_visual_lane(tmp_path: Path):
+    """weight 0 must behave exactly like no visual index at all."""
+    from castlerag.retrieval.search import retrieve
+
+    clips, events = _corpus()
+    bundle = build_visual_bm25_index(clips, events, tmp_path / VISUAL_TEXT_INDEX_NAME)
+    q = _fridge_question()
+    hints = route_question(q.query, q.answers)
+    base_cfg = _legacy_retrieval_cfg()
+    zero_cfg = _legacy_retrieval_cfg()
+    zero_cfg.visual_text_route_weights = {hints.route: 0.0}
+
+    def _run(cfg, index):
+        return retrieve(
+            question=q,
+            hints=hints,
+            qdrant_client=_FakeQdrant(),
+            collection_name="c",
+            bm25_index=SimpleNamespace(bm25=_FakeBM25(1), windows=_windows()),
+            embed_client=_FakeEmbedClient(),
+            retrieval_cfg=cfg,
+            visual_index=index,
+        )
+
+    without_lane = [(h.record_id, h.point_id) for h in _run(base_cfg, None)]
+    zero_weight = [(h.record_id, h.point_id) for h in _run(zero_cfg, bundle)]
+    assert zero_weight == without_lane

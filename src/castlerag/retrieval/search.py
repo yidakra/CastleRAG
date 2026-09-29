@@ -227,9 +227,13 @@ def retrieve(
             # cameras cannot consume lane slots.
             exclude_cameras=hints.exclude_cameras,
         )
-        if visual_hits:
+        # A zero weight disables the lane for this route. Appending the list
+        # anyway would let visual-only hits enter the final fusion pass with a
+        # rank-based (positive) score and consume evidence slots.
+        weight = visual_lane_weight(hints.route, retrieval_cfg)
+        if visual_hits and weight > 0:
             multimodal_lists.append(visual_hits)
-            multimodal_weights.append(visual_lane_weight(hints.route, retrieval_cfg))
+            multimodal_weights.append(weight)
 
     multimodal_lane = reciprocal_rank_fusion(
         multimodal_lists,
