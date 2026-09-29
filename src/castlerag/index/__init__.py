@@ -13,6 +13,7 @@ from castlerag.index.io import (
 from castlerag.index.pipeline import (
     build_bm25_artifact,
     build_qdrant_index,
+    build_visual_bm25_artifact,
     cache_dense_embeddings,
     discover_chunk_artifacts,
     filter_records,
@@ -32,14 +33,25 @@ from castlerag.index.transcript_lexical import (
     build_bm25_index,
     load_bm25_index,
 )
+from castlerag.index.visual_lexical import (
+    VISUAL_TEXT_INDEX_NAME,
+    VisualBM25IndexBundle,
+    build_visual_bm25_index,
+    load_visual_bm25_index,
+    load_visual_bm25_index_if_present,
+)
 
 __all__ = [
     "BM25IndexBundle",
+    "VISUAL_TEXT_INDEX_NAME",
+    "VisualBM25IndexBundle",
     "bootstrap_collection",
     "build_bm25_artifact",
     "build_bm25_index",
     "build_point_batches",
     "build_qdrant_index",
+    "build_visual_bm25_artifact",
+    "build_visual_bm25_index",
     "cache_dense_embeddings",
     "create_collection",
     "create_payload_indexes",
@@ -53,6 +65,8 @@ __all__ = [
     "load_embedding_cache",
     "load_event_summary_records",
     "load_transcript_windows",
+    "load_visual_bm25_index",
+    "load_visual_bm25_index_if_present",
     "record_to_qdrant_point",
     "upsert_batch",
     "write_embedding_cache",

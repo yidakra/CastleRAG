@@ -26,6 +26,10 @@ from castlerag.index.qdrant import (
     upsert_batch,
 )
 from castlerag.index.transcript_lexical import build_bm25_index
+from castlerag.index.visual_lexical import (
+    VISUAL_TEXT_INDEX_NAME,
+    build_visual_bm25_index,
+)
 from castlerag.schemas import (
     AuxRecord,
     ClipRecord,
@@ -156,6 +160,19 @@ def build_bm25_artifact(records: LoadedArtifacts, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "transcripts.pkl"
     build_bm25_index(records.transcripts, out_path)
+    return out_path
+
+
+def build_visual_bm25_artifact(records: LoadedArtifacts, out_dir: Path) -> Path:
+    """Build the visual-text BM25 artifact (captions + OCR + scene graphs).
+
+    CPU-only and rebuilt from every loaded clip/event record, like the
+    transcript artifact, so a day- or camera-scoped ingest never drops
+    earlier records from the lane.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / VISUAL_TEXT_INDEX_NAME
+    build_visual_bm25_index(records.clips, records.events, out_path)
     return out_path
 
 

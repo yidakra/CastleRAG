@@ -74,6 +74,15 @@ retrieval:
   frames_per_candidate: 32
   max_aux_images: 16
   max_evidence_rows: 50  # TAHAKOM-validated working-memory cap
+  # Visual-text lexical lane: BM25 over clip captions + OCR + scene graphs
+  # (visual_text.json, built by `castlerag index`). top_k is the lane size;
+  # route weights are its RRF weight in the multimodal fusion pass.
+  visual_text_top_k: 20
+  visual_text_route_weights:
+    static_visual: 2.0
+    mixed: 1.5
+    temporal: 1.0
+    speech_text: 0.5
 
 generation:
   model: "Qwen/Qwen3-VL-8B-Instruct"

@@ -17,6 +17,7 @@ a retrieve → rerank → generate pipeline.
 | Ablation baseline | `OpenGVLab/InternVL3-8B` |
 | Retrieval embedding | `Tevatron/OmniEmbed-v0.1-multivent` |
 | Transcript retrieval | Dual-path: BM25 + OmniEmbed dense, merged with RRF |
+| Visual-text retrieval | BM25 over clip captions + OCR + scene graphs (`visual_text.json`), fused into the multimodal RRF pass; weighted per route (`retrieval.visual_text_route_weights`) |
 | Video scope (baseline) | 10 egocentric cameras only |
 | Clip policy | 30 s clips, 30 s stride, 1 fps sampled frames |
 | Evidence budget | Top 50 rows to generator |
@@ -80,8 +81,16 @@ castlerag preprocess --aux --snellius
 castlerag embed --snellius --modality transcript --day 1
 castlerag embed --snellius --modality video --day 1
 
-# Create Qdrant collection and upsert evidence points
+# Create Qdrant collection and upsert evidence points. Also (re)builds the two
+# CPU BM25 pickles next to the embedding caches: transcripts.pkl (speech) and
+# visual_text.json (clip captions + OCR + scene graphs; event summaries +
+# aggregated OCR). The visual-text lane is optional at query time — retrieval
+# is unchanged until the pickle exists.
 castlerag index --snellius --create-collection
+
+# Existing deployment: build just the BM25 pickles from the chunk records.
+# No vLLM, no Qdrant, no re-annotation; picks up the visual-text lane.
+castlerag index --snellius --lexical-only
 
 # Run full pipeline on CASTLE questions
 castlerag answer questions.json --snellius

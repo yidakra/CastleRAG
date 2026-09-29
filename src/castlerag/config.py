@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, get_args
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class DatasetConfig(BaseModel):
@@ -104,6 +105,40 @@ class RetrievalConfig(BaseModel):
     max_aux_images: int = 16
     max_evidence_rows: int = 50
     modality_score_thresholds: Dict[str, float] = Field(default_factory=dict)
+    # Visual-text lexical lane (issue #50, modality gap): BM25 over per-clip
+    # captions + OCR + scene-graph text and per-event summaries + aggregated
+    # OCR, built by `castlerag index` as visual_text.json. `visual_text_top_k`
+    # is the lane size; `visual_text_route_weights` is its RRF weight in the
+    # multimodal fusion pass per question route (dense lanes weigh 1.0/0.7/0.9
+    # per query variant). Only used when visual_text.json exists.
+    visual_text_top_k: int = 20
+    visual_text_route_weights: Dict[str, float] = Field(
+        default_factory=lambda: {
+            "static_visual": 2.0,
+            "mixed": 1.5,
+            "temporal": 1.0,
+            "speech_text": 0.5,
+        }
+    )
+
+    @field_validator("visual_text_route_weights")
+    @classmethod
+    def _check_visual_route_weights(cls, value: Dict[str, float]) -> Dict[str, float]:
+        from castlerag.schemas import QuestionRoute
+
+        routes = set(get_args(QuestionRoute))
+        for route, weight in value.items():
+            if route not in routes:
+                raise ValueError(
+                    f"visual_text_route_weights: unknown route {route!r} "
+                    f"(expected one of {sorted(routes)})"
+                )
+            if not math.isfinite(weight) or weight < 0:
+                raise ValueError(
+                    f"visual_text_route_weights[{route!r}] must be a finite "
+                    f"float >= 0, got {weight}"
+                )
+        return value
 
 
 class GenerationConfig(BaseModel):

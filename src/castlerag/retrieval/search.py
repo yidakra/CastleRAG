@@ -9,6 +9,11 @@ import numpy as np
 
 from castlerag.retrieval.filters import build_filter
 from castlerag.retrieval.transcript_lexical import score_windows
+from castlerag.retrieval.visual_lexical import (
+    score_visual_docs,
+    visual_lane_top_k,
+    visual_lane_weight,
+)
 from castlerag.routing.question_router import RouteHints
 from castlerag.schemas import EvalQuestion, RetrievalHit
 
@@ -33,8 +38,15 @@ def reciprocal_rank_fusion(
         w = (weights[i] if i < len(weights) else 1.0) if weights is not None else 1.0
         for rank, hit in enumerate(ranked, start=1):
             scores[hit.record_id] += w / (k + rank)
-            existing = by_record.get(hit.record_id)
-            if existing is None or hit.score > existing.score:
+            # The representative hit for a record is the first one seen. Lanes
+            # carry different score scales (cosine vs BM25), so comparing raw
+            # scores across them would let e.g. the visual-text lexical hit
+            # replace the Qdrant point and its payload for any shared record.
+            # List order therefore decides: the transcript pass lists BM25
+            # first (its window hit is the representative, as it always was),
+            # the multimodal pass lists the dense lanes before the visual-text
+            # lexical lane. The fused score is recomputed either way.
+            if hit.record_id not in by_record:
                 by_record[hit.record_id] = hit
             # Preserve the best raw cosine similarity seen for this record across
             # all query variants and modality lanes. Seed from the existing value
@@ -73,8 +85,15 @@ def retrieve(
     embed_client: Any,
     retrieval_cfg: Any,
     known_participants: Optional[Sequence[str]] = None,
+    visual_index: Any = None,
 ) -> List[RetrievalHit]:
     """Full dual-path retrieval for one question.
+
+    ``visual_index`` is the optional BM25 bundle over clip captions, OCR and
+    scene-graph text (``visual_text.json``). When given, it adds a lexical
+    lane to the multimodal RRF pass so object / on-screen-text questions can
+    match verbatim (issue #50, modality gap). When ``None`` (index not built
+    yet) retrieval is byte-for-byte the pre-lane behaviour.
 
     The dense participant filter is only kept when that participant actually
     has indexed ego evidence for the hinted day, judged from the loaded BM25
@@ -189,6 +208,32 @@ def retrieve(
                 if hits:
                     multimodal_lists.append(hits)
                     multimodal_weights.append(variant_weights[qi])
+
+    # Visual-text lexical lane: BM25 over captions + OCR + scene graphs, fused
+    # as one more list in the multimodal pass. Hits share record_ids with the
+    # dense main_clip / main_event_summary lanes, so a clip whose OCR carries
+    # the answer verbatim gets both a dense and a lexical vote. Weighted per
+    # route (visual routes up, speech_text down); see visual_lane_weight.
+    if visual_index is not None:
+        visual_hits = score_visual_docs(
+            visual_index=visual_index,
+            query=question.query,
+            choices=question.answers,
+            day_hint=hints.day,
+            person_hint=hints.participant,
+            room_hint=hints.room,
+            top_k=visual_lane_top_k(retrieval_cfg),
+            # Applied inside the scorer, before top-k truncation, so rejected
+            # cameras cannot consume lane slots.
+            exclude_cameras=hints.exclude_cameras,
+        )
+        # A zero weight disables the lane for this route. Appending the list
+        # anyway would let visual-only hits enter the final fusion pass with a
+        # rank-based (positive) score and consume evidence slots.
+        weight = visual_lane_weight(hints.route, retrieval_cfg)
+        if visual_hits and weight > 0:
+            multimodal_lists.append(visual_hits)
+            multimodal_weights.append(weight)
 
     multimodal_lane = reciprocal_rank_fusion(
         multimodal_lists,

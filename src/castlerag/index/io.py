@@ -95,6 +95,8 @@ def write_embedding_cache(
                 record_ids=np.asarray(record_ids, dtype=str),
                 vectors=np.asarray(vectors, dtype=np.float32),
             )
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(tmp_name, path)
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)
