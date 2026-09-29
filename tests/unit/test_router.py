@@ -319,3 +319,16 @@ def test_third_and_final_day_is_a_single_day():
     hints = route_question("What was on the whiteboard on the third and final day?", {})
     assert hints.route != "temporal"
     assert hints.day == "day3"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What was served on the fourth and the final day?",
+        "What was served on the fourth and the last day?",
+    ],
+)
+def test_fourth_and_the_final_day_with_article_is_a_single_day(question):
+    hints = route_question(question, {})
+    assert hints.route != "temporal"
+    assert hints.day == "day4"

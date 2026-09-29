@@ -35,8 +35,8 @@ _DAY_PATTERNS = (
     # "the third and final day" / "the fourth and last day": one glossed day.
     (
         re.compile(
-            r"\b(?:(first|second|third|fourth)\s+and\s+final|(fourth)\s+and\s+last)"
-            r"\s+day\b"
+            r"\b(?:(first|second|third|fourth)\s+and\s+final"
+            r"|(fourth)\s+and\s+(?:the\s+)?(?:last|final))\s+day\b"
         ),
         "ordinal",
     ),
@@ -569,9 +569,17 @@ def _is_appositive_final_day(words: List[str]) -> bool:
     never a day reference on its own here) or the collection's actual last
     ordinal ("fourth") makes the phrase a single day.
     """
-    return len(words) == 4 and words[1] == "and" and (
-        words[2] == "final" or (words[0] == "fourth" and words[2] == "last")
-    )
+    if len(words) == 5 and words[2] == "the":
+        gloss, article = words[3], True
+    elif len(words) == 4:
+        gloss, article = words[2], False
+    else:
+        return False
+    if words[1] != "and" or gloss not in ("last", "final"):
+        return False
+    if words[0] == "fourth":
+        return True  # "the fourth and (the) final/last day": already the last day
+    return gloss == "final" and not article
 
 
 def _day_bucket(ordinal: str) -> str:
