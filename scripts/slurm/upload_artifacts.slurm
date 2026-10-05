@@ -10,8 +10,13 @@
 # captioning/embedding (~15k SBU per day). Usage, after the day's ingest and
 # scripts/thin_frames.py --apply:
 #   sbatch --export=ALL,DAY=1 scripts/slurm/upload_artifacts.slurm
-# Optional: REPO=<owner/name> (default yidakra/castlerag-artifacts), FRAMES=0
-# to skip frames, CONF=<config> (default configs/snellius_fixedcams.yaml).
+# Optional: REPO=<owner/name> (default yidakra/castlerag-artifacts), FRAMES=1
+# to add the thinned frames, CONF=<config> (default configs/snellius_fixedcams.yaml).
+#
+# Frames are off by default: a free HF account has 100 GB of private storage
+# and thinned frames are ~130 GB per day. They are also the cheap part, cut on
+# CPU from the raw video; the GPU-made chunks and embeddings are what this
+# backup protects. Use FRAMES=1 only with a plan that has the room (PRO: 1 TB).
 #
 # CASTLE's terms forbid distributing the dataset or derivative works, so the
 # job refuses to upload unless the repo exists and is private. Create it once
@@ -21,7 +26,7 @@ set -uo pipefail
 DAY="${DAY:?set DAY=1..4}"
 case "$DAY" in 1|2|3|4) ;; *) echo "ABORT: DAY must be 1-4"; exit 1;; esac
 REPO="${REPO:-yidakra/castlerag-artifacts}"
-FRAMES="${FRAMES:-1}"
+FRAMES="${FRAMES:-0}"
 CONF="${CONF:-configs/snellius_fixedcams.yaml}"
 HF_VENV="${HF_VENV:-$HOME/hfdl_venv}"
 SC="/scratch-shared/$USER"
@@ -65,7 +70,7 @@ for f in transcripts.pkl visual_text.json; do
 done
 cp -p "$CONF" "$STAGE/common/$(basename "$CONF")" || { echo "ABORT: cannot copy config $CONF"; exit 2; }
 if [ "$FRAMES" = 1 ]; then
-  [ -d "$FRAMES_DIR/day${DAY}" ] || { echo "ABORT: no frames for day${DAY} in $FRAMES_DIR (FRAMES=0 to skip)"; exit 2; }
+  [ -d "$FRAMES_DIR/day${DAY}" ] || { echo "ABORT: no frames for day${DAY} in $FRAMES_DIR (drop FRAMES=1)"; exit 2; }
   # One tar per camera-hour keeps the repo's file count low (a day of thinned
   # frames is ~170k JPEGs).
   for camdir in "$FRAMES_DIR/day${DAY}"/*/; do

@@ -279,10 +279,11 @@ so already-indexed days need no re-index. That cuts frames from ~500 GB to
 
 ### Back up each day off scratch
 
-The 14-day purge and the loss of a login are both real risks, and with the raw
-video deleted frames can't be regenerated. After a day is ingested and
-thinned, back it up to the team's **private** Hugging Face dataset repo (CASTLE's
-terms forbid distributing derivative works, so the job refuses a public repo):
+The 14-day purge and the loss of a login are both real risks. What costs GPU
+time to rebuild (~15k SBU a day) is the captions, chunks and embeddings, so
+after a day is ingested and thinned, back those up to the team's **private**
+Hugging Face dataset repo (CASTLE's terms forbid distributing derivative
+works, so the job refuses a public repo):
 
 ```bash
 # once: create the private dataset repo on huggingface.co, then on a login node
@@ -290,14 +291,23 @@ hf auth login                     # write token; the job never handles it
 sbatch --account=gisr109364 --export=ALL,DAY=1 scripts/slurm/upload_artifacts.slurm
 ```
 
-Per day it uploads the chunks, the embedding caches and manifest, the thinned
-frames (one tar per camera-hour), plus the current `transcripts.pkl` and
-`visual_text.json`. It's resumable: files already on the Hub are skipped.
+Per day it uploads the chunks, the embedding caches and manifest, plus the
+current `transcripts.pkl` and `visual_text.json`. It's resumable: files whose
+content is already on the Hub are skipped.
 Restore = download, untar into `castle_derived/`, `castlerag index --day N`
 (CPU only, no re-embedding).
 
+Frames are not uploaded by default. A free HF account has 100 GB of private
+storage and thinned frames are ~130 GB per day, while the frames are the cheap
+part: `preprocess/media.py::extract_frames_1fps` cuts them on CPU from the raw
+video with deterministic names (`-ss <clip start>`, `fps=1`, `%04d.jpg`), so
+after a fresh CASTLE download they come back at the paths the chunks list
+(there is no frames-only script yet; rerun the extraction per clip, then
+`thin_frames.py --apply`). On a plan with room (PRO: 1 TB private) add
+`FRAMES=1` to upload them as one tar per camera-hour.
+
 A second copy on a laptop costs nothing (`scripts/pull_artifacts.sh`, run
-locally; `FRAMES=1` adds the frames).
+locally; `FRAMES=1` adds the frames, ~130 GB per day).
 
 ### Delete before wave 2
 
