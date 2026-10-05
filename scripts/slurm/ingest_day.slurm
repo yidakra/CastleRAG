@@ -66,6 +66,8 @@ CONF="${CONF:-configs/snellius_fixedcams.yaml}"
 COLL="castle_multimodal_v1"
 CAMS="${CAMS:-auto}"
 SKIP_BASE="${SKIP_BASE:-0}"       # 1 = chunks/frames already exist for CAMS
+SKIP_PREPROCESS="${SKIP_PREPROCESS:-0}" # 1 = Phase 1 (base+caption+events) finished for CAMS in an
+                                  #     earlier job: validate, embed and index only
 SNAPSHOT="${SNAPSHOT:-1}"         # 1 = Qdrant snapshot before upserting
 MIN_POINTS="${MIN_POINTS:-25000}" # whole collection; the ego-only day-1 index had 25,920
 BOOTSTRAP="${BOOTSTRAP:-0}"       # 1 = empty scratch: no collection yet (first job only)
@@ -302,6 +304,8 @@ else
 fi
 
 # --- GPU servers: 2x Qwen3-VL (caption/events) + OmniEmbed (embed) --------
+G0=""; G1=""
+if [ "${SKIP_PREPROCESS}" != "1" ]; then
 CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3-VL-8B-Instruct --port 8201 \
     --served-model-name Qwen/Qwen3-VL-8B-Instruct qwen3vl \
     --gpu-memory-utilization 0.85 --max-model-len 4096 --trust-remote-code \
@@ -312,12 +316,15 @@ CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-VL-8B-Instruct --port 8202 \
     --gpu-memory-utilization 0.85 --max-model-len 4096 --trust-remote-code \
     > "${L}_gen1_${J}.log" 2>&1 &
 G1=$!
+fi
 CUDA_VISIBLE_DEVICES=2 python scripts/omniembed_server.py --port 8200 \
     > "${L}_omni_${J}.log" 2>&1 &
 EMBP=$!
 PIDS_TO_KILL="${QP} ${G0} ${G1} ${EMBP}"
-wait_ready "http://localhost:8201/v1/models" gen0 "${L}_gen0_${J}.log" "${G0}" || exit 1
-wait_ready "http://localhost:8202/v1/models" gen1 "${L}_gen1_${J}.log" "${G1}" || exit 1
+if [ "${SKIP_PREPROCESS}" != "1" ]; then
+  wait_ready "http://localhost:8201/v1/models" gen0 "${L}_gen0_${J}.log" "${G0}" || exit 1
+  wait_ready "http://localhost:8202/v1/models" gen1 "${L}_gen1_${J}.log" "${G1}" || exit 1
+fi
 # Check OmniEmbed now, not after the multi-hour caption phase (re-checked before embed).
 wait_ready "http://localhost:8200/v1/models" embed "${L}_omni_${J}.log" "${EMBP}" || exit 1
 
@@ -345,6 +352,9 @@ case "${SPLIT}" in
   ''|*[!0-9]*|0) echo "${T} ABORT: SPLIT='${SPLIT}' is not a positive integer"; exit 1;;
 esac
 [ "${SPLIT}" -gt "${#HOUR_ARR[@]}" ] && SPLIT="${#HOUR_ARR[@]}"
+if [ "${SKIP_PREPROCESS}" = "1" ]; then
+  echo "${T} === Phase 1 skipped (SKIP_PREPROCESS=1): reusing chunks of ${CAM_ARR[*]} ==="
+else
 echo "${T} === Phase 1: preprocess ${CAM_ARR[*]} hours=${HOURS} split=${SPLIT} $(date -Iseconds) ==="
 BASE_FLAG=(); [ "${SKIP_BASE}" = "1" ] && BASE_FLAG=(--skip-base)
 declare -a P PC
@@ -369,19 +379,23 @@ FAIL=0
 for i in "${!P[@]}"; do wait "${P[$i]}" || { echo "${T} CAMERA ${PC[$i]} FAILED"; FAIL=1; }; done
 echo "${T} === Phase 1 done $(date -Iseconds) FAIL=${FAIL} ==="
 [ "${FAIL}" -ne 0 ] && { echo "${T} ABORT before embed/index (see ${L}_cam_*_${J}.log)"; exit 1; }
+fi
 
 # --- Phase 1b: validate ----------------------------------------------------
 # Fixed cams: camera_type == {"fixed"}, room == {<cam>}. Ego cams:
-# camera_type == {"ego"}, room == {None}. Both: >=98 % captioned, events, no
-# corrupt lines.
+# camera_type == {"ego"}, room == {None}. Both: >=98 % captioned, no corrupt
+# lines, and events wherever they can exist: event compression needs 4 adjacent
+# non-placeholder clips, which a mostly idle camera may never have (day 1
+# Reading: 1147 of 1201 clips blank or frozen, 0 events).
 FIXED_CAMS="${FIXED_CAMS}" python3 - "${CHUNKS}" "${CAM_ARR[@]}" <<'PY' || { echo "${T} VALIDATION FAILED"; exit 1; }
 import glob, json, os, sys
 root, cams = sys.argv[1], sys.argv[2:]
 fixed = set(os.environ.get("FIXED_CAMS", "").split())
 ok = True
 for cam in cams:
-    tot = cap = bad = ev = 0; rooms = set(); types = set()
+    tot = cap = bad = ev = groups = 0; rooms = set(); types = set()
     for f in glob.glob(f"{root}/{cam}/*/clips.jsonl"):
+        usable = []
         for line in open(f):
             if not line.strip():
                 continue
@@ -391,13 +405,21 @@ for cam in cams:
                 bad += 1; continue
             tot += 1; cap += bool(d.get("clip_caption"))
             rooms.add(d.get("room")); types.add(d.get("camera_type"))
+            if not d.get("is_placeholder"):
+                usable.append((d.get("absolute_start"), d.get("absolute_end")))
+        # Same grouping as `preprocess --events`: consecutive runs of 4 usable
+        # clips, kept only when each clip ends where the next one starts.
+        usable.sort(key=lambda c: c[0])
+        for i in range(0, len(usable) - 3, 4):
+            g = usable[i:i + 4]
+            groups += all(g[k][1] == g[k + 1][0] for k in range(3))
     for f in glob.glob(f"{root}/{cam}/*/events.jsonl"):
         ev += sum(1 for line in open(f) if line.strip())
     pct = 100 * cap / max(tot, 1)
     want_type, want_room = ({"fixed"}, {cam}) if cam in fixed else ({"ego"}, {None})
-    print(f"  {cam}: clips={tot} captioned={cap} ({pct:.0f}%) events={ev} bad={bad} "
-          f"camera_type={types} room={rooms}")
-    if bad or tot == 0 or ev == 0 or pct < 98 or types != want_type or rooms != want_room:
+    print(f"  {cam}: clips={tot} captioned={cap} ({pct:.0f}%) events={ev} "
+          f"(possible {groups}) bad={bad} camera_type={types} room={rooms}")
+    if bad or tot == 0 or (groups and ev == 0) or pct < 98 or types != want_type or rooms != want_room:
         ok = False
 sys.exit(0 if ok else 1)
 PY
