@@ -3,7 +3,11 @@
 # Reuses base (all 10 cams) + captions for the 6 done cams. Re-captions the 4 incomplete
 # cams (Onanong/Stevan/Tien/Werner), regenerates the corrupt Klaus/11, then runs --events
 # ONCE single-process (the cross-camera race that corrupted the first run), embed, index, eval.
-#   sbatch --account=gpuuva082 scripts/slurm/resume_day1.slurm
+#   sbatch --account=gisr109364 scripts/slurm/resume_day1.slurm
+#
+# DAY-1 ONLY, kept for the record. For days 2-4 use scripts/slurm/ingest_day.slurm
+# (DAY=N, additive) and docs/ingest_all_days.md. Its camera list is specific to the
+# timed-out full_day1 run it resumed.
 
 #SBATCH --job-name=castle-resume-day1
 #SBATCH --partition=gpu_a100
@@ -25,7 +29,7 @@ J="${SLURM_JOB_ID}"
 echo "[resume] host=$(hostname) start=$(date -Iseconds)"; nvidia-smi -L 2>/dev/null|head -3
 
 module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
-source "${HOME}/castlerag_venv/bin/activate"; cd /gpfs/home2/scur0225/CastleRAG; mkdir -p logs
+source "${HOME}/castlerag_venv/bin/activate"; cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}" || exit 1; mkdir -p logs
 
 wait_ready(){ for i in $(seq 1 150); do curl -sf "http://localhost:$1/v1/models">/dev/null 2>&1 && { echo "[resume] $2 ready ($((i*10))s)";return 0;}; sleep 10; done; echo "[resume] $2 NOT ready"; tail -30 "$3"; return 1; }
 

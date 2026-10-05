@@ -124,7 +124,10 @@ VLLM_BASE_URL=http://localhost:11434/v1 python scripts/smoke_local.py --real
 
 See [docs/snellius.md](docs/snellius.md) for the full end-to-end setup
 guide (account, venv, dataset download, vLLM servers, SLURM chain, and
-incremental ingest with `--day N`).  The TL;DR for the SLURM chain:
+incremental ingest with `--day N`).  For ingesting days 1-4 with every
+camera on `/scratch-shared` (`--account=gisr109364`; the account is per user,
+`accinfo` shows yours), follow [docs/ingest_all_days.md](docs/ingest_all_days.md).
+The TL;DR for the generic SLURM chain:
 
 Edit `configs/snellius.yaml` to set your account and scratch paths, then:
 

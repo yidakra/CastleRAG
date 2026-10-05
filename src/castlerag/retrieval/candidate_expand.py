@@ -10,7 +10,7 @@ from castlerag.evidence_text import (
     MAX_SCENE_GRAPH_CHARS,
     truncate_text,
 )
-from castlerag.frame_encoding import sample_frames_evenly
+from castlerag.frame_encoding import available_frames, sample_frames_evenly
 from castlerag.routing.question_router import QuestionRoute
 from castlerag.schemas import EvidencePack, RetrievalHit
 
@@ -204,32 +204,35 @@ def _collect_frame_paths(
     """
     if max_frames is not None and max_frames <= 0:
         return []
-    with_frames = [row for row in rows if row.sampled_frame_paths]
+    # Sample from the frames still on disk (frames may be thinned after
+    # embedding while the payload lists all of them).
+    frame_lists = [available_frames(row.sampled_frame_paths) for row in rows]
+    frame_lists = [frames for frames in frame_lists if frames]
     paths: List[str] = []
     seen: set = set()
     if max_frames is None:
-        for row in with_frames:
-            for p in row.sampled_frame_paths:
+        for frames in frame_lists:
+            for p in frames:
                 if p not in seen:
                     seen.add(p)
                     paths.append(p)
         return paths
-    if not with_frames:
+    if not frame_lists:
         return []
     # Round-robin allocation, primary row first: a row that runs out of
     # frames stops taking slots, so its unused share goes to the others.
-    capacity = [len(row.sampled_frame_paths) for row in with_frames]
-    alloc = [0] * len(with_frames)
+    capacity = [len(frames) for frames in frame_lists]
+    alloc = [0] * len(frame_lists)
     remaining = max_frames
     while remaining > 0 and any(a < c for a, c in zip(alloc, capacity)):
-        for i in range(len(with_frames)):
+        for i in range(len(frame_lists)):
             if remaining == 0:
                 break
             if alloc[i] < capacity[i]:
                 alloc[i] += 1
                 remaining -= 1
-    for row, budget in zip(with_frames, alloc):
-        for p in sample_frames_evenly(row.sampled_frame_paths, budget):
+    for frames, budget in zip(frame_lists, alloc):
+        for p in sample_frames_evenly(frames, budget):
             if p not in seen:
                 seen.add(p)
                 paths.append(p)

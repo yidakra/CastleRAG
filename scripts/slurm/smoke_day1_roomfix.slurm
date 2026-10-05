@@ -9,7 +9,7 @@
 # the room hint), so the existing index needs NO rebuild — only the working-tree
 # code on the fix/room-hard-filter branch (editable install) must be checked out.
 #
-#   sbatch --account=gpuuva082 scripts/slurm/smoke_day1_roomfix.slurm
+#   sbatch --account=gisr109364 scripts/slurm/smoke_day1_roomfix.slurm
 
 #SBATCH --job-name=castle-smoke-roomfix
 #SBATCH --partition=gpu_a100
@@ -37,11 +37,7 @@ export VLLM_LOGGING_LEVEL=WARNING
 echo "[smoke] host=$(hostname) gpu=$(nvidia-smi -L 2>/dev/null | head -1) start=$(date -Iseconds)"
 echo "[smoke] branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) commit=$(git rev-parse --short HEAD 2>/dev/null)"
 
-module purge
-module load 2024
-module load Python/3.12.3-GCCcore-13.3.0
-module load CUDA/12.6.0
-module load FFmpeg/7.0.2-GCCcore-13.3.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source "${HOME}/castlerag_venv/bin/activate"
 cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 mkdir -p logs

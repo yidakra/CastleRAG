@@ -24,6 +24,7 @@ from castlerag.evidence_text import (
     truncate_text,
 )
 from castlerag.frame_encoding import (
+    available_frames,
     encode_frame,
     estimate_text_tokens,
     sample_frames_evenly,
@@ -174,7 +175,7 @@ def _gather_frame_paths(
         remaining = max_frames - len(paths)
         if remaining <= 0:
             break
-        fresh = [p for p in row.sampled_frame_paths if p not in seen]
+        fresh = [p for p in available_frames(row.sampled_frame_paths) if p not in seen]
         for p in sample_frames_evenly(fresh, remaining):
             seen.add(p)
             paths.append(p)

@@ -39,6 +39,22 @@ def estimate_image_tokens(width: int, height: int) -> int:
     return math.ceil(width / _PATCH) * math.ceil(height / _PATCH)
 
 
+def available_frames(paths: Sequence[str]) -> List[str]:
+    """Return the frames in ``paths`` that still exist on disk.
+
+    Frames may be thinned after a day is embedded (see scripts/thin_frames.py)
+    while older Qdrant payloads still list every sampled frame. Sampling from
+    the full list would then pick positions whose files are gone, so readers
+    sample from the surviving frames instead. If none of the paths exist (for
+    example the day's frames were never kept, or the paths are synthetic in
+    tests) the list is returned unchanged and callers skip unreadable files as
+    before.
+    """
+    frames = list(paths)
+    existing = [p for p in frames if Path(p).exists()]
+    return existing if existing else frames
+
+
 def sample_frames_evenly(paths: Sequence[str], max_frames: int) -> List[str]:
     """Pick up to ``max_frames`` paths spread evenly across ``paths``.
 

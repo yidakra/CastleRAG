@@ -8,7 +8,7 @@
 # collection looks emptied.  Queries embed LIVE via OmniEmbed (no query cache),
 # so fresh day-1 questions from the bank work.
 #
-#   sbatch --account=gpuuva082 scripts/slurm/_smoke_wandb.slurm
+#   sbatch --account=gisr109364 scripts/slurm/_smoke_wandb.slurm
 
 #SBATCH --job-name=castle-smoke-wandb
 #SBATCH --partition=gpu_a100
@@ -38,11 +38,7 @@ export WANDB__SERVICE_WAIT=300
 
 echo "[smoke] host=$(hostname) gpu=$(nvidia-smi -L 2>/dev/null | head -1) start=$(date -Iseconds)"
 
-module purge
-module load 2024
-module load Python/3.12.3-GCCcore-13.3.0
-module load CUDA/12.6.0
-module load FFmpeg/7.0.2-GCCcore-13.3.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source "${HOME}/castlerag_venv/bin/activate"
 cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 mkdir -p logs

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=castle-eval-ui-demo
 #SBATCH --partition=gpu_a100
-#SBATCH --account=gpuuva082
+#SBATCH --account=gisr109364
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=16 --mem=120G --gres=gpu:2
 #SBATCH --time=03:00:00
 #SBATCH --output=logs/%x_%j.out
@@ -13,12 +13,12 @@ CONF="configs/snellius_me.yaml"
 QFILE="data/smoke_day1.csv"   # 40 day-1 questions with ground truth
 
 export HF_HOME="${SC}/hf_cache" HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 VLLM_LOGGING_LEVEL=WARNING
-module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0; module load CUDA/12.6.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source "${HOME}/castlerag_venv/bin/activate"
 cd "${SLURM_SUBMIT_DIR}"
 
 wait_ready() {
-  for i in $(seq 1 120); do curl -sf "$1" >/dev/null 2>&1 && return 0; sleep 10; done; return 1
+  for _ in $(seq 1 120); do curl -sf "$1" >/dev/null 2>&1 && return 0; sleep 10; done; return 1
 }
 
 # Hard gate: a server that never binds must fail the job immediately (and dump its
@@ -45,7 +45,7 @@ require_embed() {  # url
   for attempt in 1 2 3; do
     CUDA_VISIBLE_DEVICES=0 python scripts/omniembed_server.py --port 8200 > "${EMBED_LOG}" 2>&1 &
     local pid=$!
-    for i in $(seq 1 120); do
+    for _ in $(seq 1 120); do
       curl -sf "$1" >/dev/null 2>&1 && { echo "[eval] embed ready (attempt ${attempt})"; return 0; }
       kill -0 "$pid" 2>/dev/null || break  # process died → stop polling, retry now
       sleep 10
