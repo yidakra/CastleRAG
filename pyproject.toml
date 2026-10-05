@@ -40,6 +40,8 @@ inference = [
     "transformers>=4.43",
     "vllm>=0.5",
     "accelerate>=0.30",
+    # scripts/omniembed_server.py loads the OmniEmbed LoRA adapter
+    "peft>=0.11",
 ]
 # Dash dashboard (Dash Mantine Components + YouTube embeds + Plotly analytics)
 ui = [
