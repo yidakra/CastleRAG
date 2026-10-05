@@ -7,7 +7,8 @@ Thinker, L2-normalised) behind the OpenAI /v1/embeddings interface so the existi
 client works unchanged.  Text-only (the castlerag pipeline only ever text-embeds).
 
 Run:  python scripts/omniembed_server.py --port 8200
-Env:  OMNIEMBED_BASE, OMNIEMBED_ADAPTER, OMNIEMBED_PROCESSOR, OMNIEMBED_SERVED_NAME
+Env:  OMNIEMBED_BASE, OMNIEMBED_ADAPTER, OMNIEMBED_PROCESSOR, OMNIEMBED_SERVED_NAME,
+      OMNIEMBED_MAX_BATCH, OMNIEMBED_MAX_TEXT_TOKENS, OMNIEMBED_TOKEN_BUDGET
 """
 from __future__ import annotations
 
@@ -22,11 +23,23 @@ from peft import PeftModel
 from pydantic import BaseModel
 from transformers import AutoProcessor, Qwen2_5OmniThinkerForConditionalGeneration
 
+from castlerag.embed.batching import plan_batches
+
 BASE = os.getenv("OMNIEMBED_BASE", "Tevatron/Qwen2.5-Omni-7B-Thinker")
 ADAPTER = os.getenv("OMNIEMBED_ADAPTER", "Tevatron/OmniEmbed-v0.1-multivent")
 PROCESSOR = os.getenv("OMNIEMBED_PROCESSOR", "Qwen/Qwen2.5-Omni-7B")
 SERVED_NAME = os.getenv("OMNIEMBED_SERVED_NAME", "Tevatron/OmniEmbed-v0.1-multivent")
 MAX_BATCH = int(os.getenv("OMNIEMBED_MAX_BATCH", "16"))
+# Texts longer than this are cut (the tail of a Whisper repetition loop adds
+# nothing), and a batch is capped at TOKEN_BUDGET padded tokens. See
+# castlerag.embed.batching for the OOM this prevents.
+MAX_TEXT_TOKENS = int(os.getenv("OMNIEMBED_MAX_TEXT_TOKENS", "1024"))
+TOKEN_BUDGET = int(os.getenv("OMNIEMBED_TOKEN_BUDGET", "8192"))
+if min(MAX_BATCH, MAX_TEXT_TOKENS, TOKEN_BUDGET) < 1:
+    raise SystemExit(
+        "OMNIEMBED_MAX_BATCH, OMNIEMBED_MAX_TEXT_TOKENS and "
+        "OMNIEMBED_TOKEN_BUDGET must be >= 1"
+    )
 LOAD_IN_8BIT = os.getenv("OMNIEMBED_LOAD_IN_8BIT", "0") == "1"
 
 _device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -66,28 +79,33 @@ _model.padding_side = "left"
 print("[omniembed] model ready", flush=True)
 
 
+def _render(text: str) -> str:
+    ids = _processor.tokenizer(text, add_special_tokens=False)["input_ids"]
+    if len(ids) > MAX_TEXT_TOKENS:
+        text = _processor.tokenizer.decode(ids[:MAX_TEXT_TOKENS])
+    msg = [{"role": "user", "content": [{"type": "text", "text": text}]}]
+    s = _processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
+    if isinstance(s, list):
+        s = s[0]
+    return s + "<|endoftext|>"
+
+
 @torch.no_grad()
 def _embed(texts: List[str]) -> List[List[float]]:
-    out_vecs: List[List[float]] = []
-    for start in range(0, len(texts), MAX_BATCH):
-        batch = texts[start : start + MAX_BATCH]
-        rendered = []
-        for t in batch:
-            msg = [{"role": "user", "content": [{"type": "text", "text": t}]}]
-            s = _processor.apply_chat_template(
-                msg, tokenize=False, add_generation_prompt=True
-            )
-            if isinstance(s, list):
-                s = s[0]
-            rendered.append(s + "<|endoftext|>")
+    rendered = [_render(t) for t in texts]
+    lengths = [len(_processor.tokenizer(r)["input_ids"]) for r in rendered]
+    out_vecs: List[Optional[List[float]]] = [None] * len(texts)
+    for batch in plan_batches(lengths, MAX_BATCH, TOKEN_BUDGET):
         inputs = _processor.tokenizer(
-            rendered, return_tensors="pt", padding="longest"
+            [rendered[i] for i in batch], return_tensors="pt", padding="longest"
         ).to(_device)
         model_out = _model(**inputs, return_dict=True, output_hidden_states=True)
         reps = model_out.hidden_states[-1][:, -1]
         reps = torch.nn.functional.normalize(reps, p=2, dim=-1)
-        out_vecs.extend(reps.float().cpu().tolist())
-    return out_vecs
+        for i, vec in zip(batch, reps.float().cpu().tolist()):
+            out_vecs[i] = vec
+        del model_out, reps, inputs
+    return out_vecs  # type: ignore[return-value]
 
 
 class EmbeddingRequest(BaseModel):
