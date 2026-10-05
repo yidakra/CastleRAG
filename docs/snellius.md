@@ -10,11 +10,15 @@ to.  No prior CastleRAG context required.
 - A project account with GPU SBUs (the `gpu_a100` partition is what every
   SLURM script in this repo targets; one quarter-node = 1 A100 + 18 CPU
   cores + 120 GiB RAM)
+- The account to charge. Jobs here use `--account=gisr109364`; the account
+  is per user, so run `accinfo` and use the one it shows for you.
 - About **600 GiB** of scratch space.  `/scratch` is per-user, fast, and
   purged after 14 days of inactivity — do *not* keep anything important
   there long-term.
-- The `2024` software stack (the SLURM scripts `module load 2024` and pin
-  Python 3.11 + CUDA 12.6 from it)
+- The `2024` software stack. Every SLURM script loads
+  `module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0`.
+  `Python/3.11.3-GCCcore-12.3.0` is not in the 2024 stack (it only exists in
+  the 2023 stack, as an RHEL8 build), so don't mix it in.
 
 ```bash
 ssh <user>@snellius.surf.nl
@@ -27,18 +31,31 @@ cd CastleRAG
 ## 2. One-time environment
 
 Build the venv on a login node — the SLURM scripts pick it up from `${HOME}/castlerag_venv` by default.
+Use the same module versions the jobs load, or the venv's Python will not match
+at run time.
 
 ```bash
 module purge
 module load 2024
-module load Python/3.11.3-GCCcore-12.3.0
-module load CUDA/12.6.0
-module load FFmpeg/6.0-GCCcore-12.3.0
+module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
+which python   # must be the module's Python, not ~/anaconda3/... or similar
 
 python -m venv ~/castlerag_venv
 source ~/castlerag_venv/bin/activate
 pip install --upgrade pip
 pip install -e ".[dev,inference]"
+```
+
+If your `~/.bashrc` has a `conda init` block, Anaconda's `python` comes first
+on `PATH` and the venv gets built on the wrong interpreter. Either run
+`conda deactivate` (until `which python` shows the module's Python) first, or
+build the venv from a clean shell:
+
+```bash
+env -i HOME=$HOME bash --noprofile --norc -c 'source /etc/profile; \
+  module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0; \
+  python -m venv ~/castlerag_venv && ~/castlerag_venv/bin/pip install --upgrade pip && \
+  cd ~/code/CastleRAG && ~/castlerag_venv/bin/pip install -e ".[dev,inference]"'
 ```
 
 Smoke check:
@@ -82,7 +99,7 @@ so the only mandatory edits are:
 
 ```yaml
 slurm:
-  account: "your-snellius-project-account"   # e.g. EINF-1234
+  account: "gisr109364"   # per user: `accinfo` shows yours
   mail_user: "you@example.com"
 ```
 
@@ -117,7 +134,7 @@ two separate nodes:
 # Terminal A — OmniEmbed
 srun --account=$ACCOUNT --partition=gpu_a100 --gres=gpu:1 --cpus-per-task=18 \
      --mem=120G --time=24:00:00 --pty bash
-module purge && module load 2024 CUDA/12.6.0 Python/3.11.3-GCCcore-12.3.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source ~/castlerag_venv/bin/activate
 vllm serve Tevatron/OmniEmbed-v0.1-multivent \
     --task embedding \
@@ -130,7 +147,7 @@ vllm serve Tevatron/OmniEmbed-v0.1-multivent \
 # Terminal B — Qwen3-VL
 srun --account=$ACCOUNT --partition=gpu_a100 --gres=gpu:1 --cpus-per-task=18 \
      --mem=120G --time=24:00:00 --pty bash
-module purge && module load 2024 CUDA/12.6.0 Python/3.11.3-GCCcore-12.3.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source ~/castlerag_venv/bin/activate
 vllm serve Qwen/Qwen3-VL-8B-Instruct \
     --port 8201 \
@@ -182,7 +199,7 @@ and Qdrant on the existing persisted index, then launches
 `castlerag ui --require-live --config configs/snellius_me.yaml`:
 
 ```bash
-sbatch --account=gpuuva082 scripts/slurm/ui_live.slurm
+sbatch --account=gisr109364 scripts/slurm/ui_live.slurm
 # watch logs/castle-ui-live_<jobid>.out for the SSH-tunnel command it prints, then
 # from your laptop:  ssh -L 8050:<NODE>:8050 $USER@snellius.surf.nl
 # open http://localhost:8050  -> top-bar chip should read "live RAG"
@@ -215,7 +232,7 @@ suggestions specifically is `scripts/_live_ui_check.sh` (run inside a 1-GPU
 that mirrors `castlerag preprocess → embed → index`.  Submit them in order:
 
 ```bash
-ACCOUNT=EINF-1234   # whatever you set in snellius.yaml
+ACCOUNT=gisr109364   # per user: `accinfo` shows yours
 
 # 1. Base preprocessing — windowing, 1 fps frames, transcript normalization
 JOB1=$(sbatch --parsable --account=$ACCOUNT scripts/slurm/preprocess_main.slurm)
@@ -294,6 +311,9 @@ run rather than a full rebuild.
 > existing `*_dayN.npz` keeps the cached rows and embeds only records that are
 > not in it yet.  That is what lets new **cameras** join an existing day (the
 > fixed room cameras, #50 Bug B) — see `docs/fixedcams_reingest.md`.
+>
+> For days 2-4 with the GPU-server layout used on `/scratch-shared` (one
+> 3-A100 job per camera group, `DAY=N`), follow `docs/ingest_all_days.md`.
 
 
 ```bash
