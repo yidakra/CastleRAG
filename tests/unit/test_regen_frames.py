@@ -126,18 +126,32 @@ def test_regen_matches_original_extraction(tmp_path: Path):
     assert {p: Path(p).read_bytes() for p in kept} == before
 
 
-def test_frame_extraction_caps_decoder_threads(tmp_path: Path, monkeypatch):
+def test_frame_extraction_retries_a_stalled_clip(tmp_path: Path, monkeypatch):
     from castlerag.preprocess import media
 
-    seen = {}
+    calls = []
 
-    def fake_run(cmd, **kw):
-        seen["cmd"], seen["timeout"] = cmd, kw.get("timeout")
+    def flaky_run(cmd, **kw):
+        calls.append(kw["timeout"])
+        out = Path(cmd[-1]).parent
+        (out / "0001.jpg").write_bytes(b"partial")
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+        for i in range(1, 31):
+            (out / f"{i:04d}.jpg").write_bytes(b"jpg")
 
-    monkeypatch.setattr(media.subprocess, "run", fake_run)
-    media.extract_frames_1fps(tmp_path / "v.mp4", tmp_path / "out", 0.0, 30.0)
-    cmd = seen["cmd"]
-    # -threads must come before -i to limit the decoder
-    assert cmd.index("-threads") < cmd.index("-i")
-    assert cmd[cmd.index("-threads") + 1] == str(media.FRAME_DECODE_THREADS)
-    assert seen["timeout"] == media.FRAME_TIMEOUT_SECONDS
+    monkeypatch.setattr(media.subprocess, "run", flaky_run)
+    frames = media.extract_frames_1fps(tmp_path / "v.mp4", tmp_path / "out", 0.0, 30.0)
+    assert len(calls) == 2 and calls[0] == media.FRAME_TIMEOUT_SECONDS
+    assert len(frames) == 30
+
+
+def test_frame_extraction_gives_up_after_all_attempts(tmp_path: Path, monkeypatch):
+    from castlerag.preprocess import media
+
+    def stalled(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+
+    monkeypatch.setattr(media.subprocess, "run", stalled)
+    with pytest.raises(subprocess.TimeoutExpired):
+        media.extract_frames_1fps(tmp_path / "v.mp4", tmp_path / "out", 0.0, 30.0)
