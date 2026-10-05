@@ -65,7 +65,7 @@ for embedding) and does, in order:
 
 Knobs (`--export=ALL,...`): `DAY`, `CAMS` (default `auto`: every in-scope
 camera with raw video and 0 `main_clip` points that day), `BOOTSTRAP`,
-`MIN_POINTS`, `SKIP_BASE`, `HOURS`, `SPLIT`, `TARGET_WORKERS`, `SNAPSHOT`,
+`MIN_POINTS`, `SKIP_BASE`, `SKIP_PREPROCESS`, `HOURS`, `SPLIT`, `TARGET_WORKERS`, `SNAPSHOT`,
 `CONF` (default `configs/snellius_fixedcams.yaml`, which has
 `camera_scope: "all"`).
 
@@ -86,7 +86,11 @@ Each job is a complete additive ingest of its own group. The second and third
 jobs checksum the chunks written by the earlier ones. If a job fails, the
 later ones never start (`afterok`). Fix the cause and resubmit the failed
 group with the same command. If the base pass (frames and chunks) already
-finished for that group, add `SKIP_BASE=1`. If it only ran out of time, raise
+finished for that group, add `SKIP_BASE=1`. If the whole Phase 1 (base,
+captions and events) finished and the job failed later, at validation, embed
+or index, add `SKIP_PREPROCESS=1` instead: it starts no caption servers and
+goes straight to validation, embedding and indexing, so the captioning hours
+aren't spent again. If it only ran out of time, raise
 `--time` on the resubmit (`gpu_a100` allows more than 20 h) or split the group
 with `HOURS=`.
 
