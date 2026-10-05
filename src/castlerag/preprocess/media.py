@@ -8,10 +8,17 @@ Preservation rule (SPEC §2.3):
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import List
 
 FFMPEG_TIMEOUT_SECONDS = 120
+# A 30 s clip normally takes ~10 s, but reads from the shared scratch
+# filesystem can stall for minutes; the first day-1 ingest on Snellius lost all
+# ten workers to one such stall. Give frame extraction more time and retry a
+# clip that still times out, rather than failing the whole camera.
+FRAME_TIMEOUT_SECONDS = 600
+FRAME_ATTEMPTS = 3
 
 
 def get_video_duration(source_path: Path) -> float:
@@ -51,26 +58,37 @@ def extract_frames_1fps(
     for stale in out_dir.glob("*.jpg"):
         stale.unlink()
     duration = end_seconds - start_seconds
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-ss",
-            str(start_seconds),
-            "-i",
-            str(source_path),
-            "-t",
-            str(duration),
-            "-vf",
-            f"fps={fps}",
-            "-q:v",
-            "2",
-            str(out_dir / "%04d.jpg"),
-        ],
-        capture_output=True,
-        check=True,
-        timeout=FFMPEG_TIMEOUT_SECONDS,
-    )
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        str(start_seconds),
+        "-i",
+        str(source_path),
+        "-t",
+        str(duration),
+        "-vf",
+        f"fps={fps}",
+        "-q:v",
+        "2",
+        str(out_dir / "%04d.jpg"),
+    ]
+    for attempt in range(1, FRAME_ATTEMPTS + 1):
+        try:
+            subprocess.run(
+                cmd, capture_output=True, check=True, timeout=FRAME_TIMEOUT_SECONDS
+            )
+            break
+        except subprocess.TimeoutExpired:
+            if attempt == FRAME_ATTEMPTS:
+                raise
+            print(
+                f"ffmpeg timed out on {source_path} @ {start_seconds}s "
+                f"(attempt {attempt}/{FRAME_ATTEMPTS}); retrying",
+                file=sys.stderr,
+            )
+            for partial in out_dir.glob("*.jpg"):
+                partial.unlink()
     return sorted(out_dir.glob("*.jpg"))
 
 

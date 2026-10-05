@@ -124,3 +124,38 @@ def test_regen_matches_original_extraction(tmp_path: Path):
     day = _day(tmp_path, video, kept)
     assert rf.regen_day(day, apply=True)["written"] == 8
     assert {p: Path(p).read_bytes() for p in kept} == before
+
+
+def test_frame_extraction_retries_a_stalled_clip(tmp_path: Path, monkeypatch):
+    from castlerag.preprocess import media
+
+    calls = []
+
+    def flaky_run(cmd, **kw):
+        calls.append(kw["timeout"])
+        out = Path(cmd[-1]).parent
+        (out / "0001.jpg").write_bytes(b"partial")
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+        for i in range(1, 31):
+            (out / f"{i:04d}.jpg").write_bytes(b"jpg")
+
+    monkeypatch.setattr(media.subprocess, "run", flaky_run)
+    frames = media.extract_frames_1fps(tmp_path / "v.mp4", tmp_path / "out", 0.0, 30.0)
+    assert len(calls) == 2 and calls[0] == media.FRAME_TIMEOUT_SECONDS
+    assert len(frames) == 30
+
+
+def test_frame_extraction_gives_up_after_all_attempts(tmp_path: Path, monkeypatch):
+    from castlerag.preprocess import media
+
+    calls = []
+
+    def stalled(cmd, **kw):
+        calls.append(kw["timeout"])
+        raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+
+    monkeypatch.setattr(media.subprocess, "run", stalled)
+    with pytest.raises(subprocess.TimeoutExpired):
+        media.extract_frames_1fps(tmp_path / "v.mp4", tmp_path / "out", 0.0, 30.0)
+    assert len(calls) == media.FRAME_ATTEMPTS
