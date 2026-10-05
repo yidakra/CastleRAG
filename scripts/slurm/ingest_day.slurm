@@ -317,7 +317,8 @@ CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-VL-8B-Instruct --port 8202 \
     > "${L}_gen1_${J}.log" 2>&1 &
 G1=$!
 fi
-CUDA_VISIBLE_DEVICES=2 python scripts/omniembed_server.py --port 8200 \
+CUDA_VISIBLE_DEVICES=2 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    python scripts/omniembed_server.py --port 8200 \
     > "${L}_omni_${J}.log" 2>&1 &
 EMBP=$!
 PIDS_TO_KILL="${QP} ${G0} ${G1} ${EMBP}"
