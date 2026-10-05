@@ -149,9 +149,13 @@ def test_frame_extraction_retries_a_stalled_clip(tmp_path: Path, monkeypatch):
 def test_frame_extraction_gives_up_after_all_attempts(tmp_path: Path, monkeypatch):
     from castlerag.preprocess import media
 
+    calls = []
+
     def stalled(cmd, **kw):
+        calls.append(kw["timeout"])
         raise subprocess.TimeoutExpired(cmd, kw["timeout"])
 
     monkeypatch.setattr(media.subprocess, "run", stalled)
     with pytest.raises(subprocess.TimeoutExpired):
         media.extract_frames_1fps(tmp_path / "v.mp4", tmp_path / "out", 0.0, 30.0)
+    assert len(calls) == media.FRAME_ATTEMPTS
