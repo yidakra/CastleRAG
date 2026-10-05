@@ -35,6 +35,11 @@ MAX_BATCH = int(os.getenv("OMNIEMBED_MAX_BATCH", "16"))
 # castlerag.embed.batching for the OOM this prevents.
 MAX_TEXT_TOKENS = int(os.getenv("OMNIEMBED_MAX_TEXT_TOKENS", "1024"))
 TOKEN_BUDGET = int(os.getenv("OMNIEMBED_TOKEN_BUDGET", "8192"))
+if min(MAX_BATCH, MAX_TEXT_TOKENS, TOKEN_BUDGET) < 1:
+    raise SystemExit(
+        "OMNIEMBED_MAX_BATCH, OMNIEMBED_MAX_TEXT_TOKENS and "
+        "OMNIEMBED_TOKEN_BUDGET must be >= 1"
+    )
 LOAD_IN_8BIT = os.getenv("OMNIEMBED_LOAD_IN_8BIT", "0") == "1"
 
 _device = "cuda" if torch.cuda.is_available() else "cpu"
