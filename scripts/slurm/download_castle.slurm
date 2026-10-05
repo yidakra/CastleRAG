@@ -19,6 +19,7 @@ HF_VENV="${HF_VENV:-$HOME/hfdl_venv}"
 DEST="${DEST:-/scratch-shared/$USER/castle2024}"
 export HF_HUB_DISABLE_TELEMETRY=1
 read -r -a DAY_ARR <<< "${DAYS}"
+[ "${#DAY_ARR[@]}" -gt 0 ] || { echo "ABORT: DAYS is empty"; exit 1; }
 for d in "${DAY_ARR[@]}"; do
   case "$d" in 1|2|3|4) ;; *) echo "ABORT: bad day '$d' (1-4)"; exit 1;; esac
 done
@@ -38,9 +39,16 @@ PY
   then ok=1; echo "download ok after attempt $attempt"; break; fi
   echo "attempt $attempt failed $(date -Iseconds); retrying in 120s"; sleep 120
 done
-if [ "$ok" = 1 ] && [ "$AUX" = 1 ] && [ -f "$DEST/auxiliary.zip" ]; then
-  (cd "$DEST" && sha256sum -c auxiliary.zip.sha256) || echo "WARN: auxiliary.zip checksum not verified"
-  unzip -q -n "$DEST/auxiliary.zip" -d "$DEST" && echo "auxiliary unzipped"
+if [ "$ok" = 1 ] && [ "$AUX" = 1 ]; then
+  if [ ! -f "$DEST/auxiliary.zip" ] || [ ! -f "$DEST/auxiliary.zip.sha256" ]; then
+    echo "ERROR: auxiliary.zip or its .sha256 is missing"; ok=0
+  elif ! (cd "$DEST" && sha256sum -c auxiliary.zip.sha256); then
+    echo "ERROR: auxiliary.zip checksum mismatch"; ok=0
+  elif ! unzip -q -n "$DEST/auxiliary.zip" -d "$DEST"; then
+    echo "ERROR: unzipping auxiliary.zip failed"; ok=0
+  else
+    echo "auxiliary verified and unzipped"
+  fi
 fi
 for d in "${DAY_ARR[@]}"; do
   echo "day${d}: $(find "$DEST/main/day${d}" -name '*.mp4' 2>/dev/null | wc -l) mp4 files, $(du -sh "$DEST/main/day${d}" 2>/dev/null | cut -f1)"

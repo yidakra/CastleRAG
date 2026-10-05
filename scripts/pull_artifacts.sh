@@ -9,7 +9,10 @@ DAYS="${DAYS:?set DAYS, e.g. DAYS=\"1 2\"}"
 HOST="${HOST:-snellius}"
 DEST="${DEST:-$HOME/CastleRAG-artifacts}"
 FRAMES="${FRAMES:-0}"
-REMOTE='/scratch-shared/$USER/castle_derived'
+# Resolve the remote login here: rsync won't expand $USER inside a remote path.
+RUSER="${RUSER:-$(ssh "$HOST" 'echo "$USER"')}"
+[ -n "$RUSER" ] || { echo "could not resolve the remote user on $HOST"; exit 1; }
+REMOTE="/scratch-shared/$RUSER/castle_derived"
 mkdir -p "$DEST/chunks" "$DEST/embeddings" "$DEST/frames_1fps"
 for d in $DAYS; do
   case "$d" in 1|2|3|4) ;; *) echo "bad day '$d'"; exit 1;; esac

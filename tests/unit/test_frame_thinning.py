@@ -83,3 +83,66 @@ def test_thin_day_dry_run_then_apply(tmp_path: Path):
 
     again = tf.thin_day(tmp_path / "chunks" / "day1", keep=8, apply=True)
     assert again["dropped"] == 0  # idempotent
+
+
+def _day_with_clip(tmp_path: Path, paths: list[str]) -> Path:
+    chunks = tmp_path / "chunks" / "day1" / "Allie" / "08"
+    chunks.mkdir(parents=True)
+    clip = {"clip_id": "c0", "sampled_frame_paths": paths}
+    event = {"event_summary_id": "e0", "sampled_frame_paths": paths}
+    (chunks / "clips.jsonl").write_text(json.dumps(clip) + "\n")
+    (chunks / "events.jsonl").write_text(json.dumps(event) + "\n")
+    return tmp_path / "chunks" / "day1"
+
+
+def test_thin_day_keeps_only_existing_frames(tmp_path: Path):
+    tf = _load_thin_frames()
+    paths = _clip_frames(tmp_path / "frames", "clip0")
+    for p in paths[8:]:
+        Path(p).unlink()  # only the first 8 of 30 listed frames survive
+    day = _day_with_clip(tmp_path, paths)
+    tf.thin_day(day, keep=8, apply=True)
+    row = json.loads(next(day.rglob("clips.jsonl")).read_text())
+    assert row["sampled_frame_paths"] == paths[:8]
+    assert all(Path(p).exists() for p in row["sampled_frame_paths"])
+
+
+def test_thin_day_resumes_an_interrupted_apply(tmp_path: Path, monkeypatch):
+    tf = _load_thin_frames()
+    paths = _clip_frames(tmp_path / "frames", "clip0")
+    day = _day_with_clip(tmp_path, paths)
+    real_rewrite = tf._rewrite_jsonl
+
+    def crash_after_clips(path, rows):
+        real_rewrite(path, rows)
+        if path.name == "clips.jsonl":
+            raise RuntimeError("killed")
+
+    monkeypatch.setattr(tf, "_rewrite_jsonl", crash_after_clips)
+    try:
+        tf.thin_day(day, keep=8, apply=True)
+    except RuntimeError:
+        pass
+    assert (day / tf.PLAN_NAME).exists()
+    monkeypatch.setattr(tf, "_rewrite_jsonl", real_rewrite)
+    tf.thin_day(day, keep=8, apply=True)
+    kept = sample_frames_evenly(paths, 8)
+    ev = json.loads(next(day.rglob("events.jsonl")).read_text())
+    assert ev["sampled_frame_paths"] == kept
+    assert sorted(str(p) for p in Path(paths[0]).parent.glob("*.jpg")) == sorted(kept)
+    assert not (day / tf.PLAN_NAME).exists()
+
+
+def test_main_rejects_missing_config(tmp_path: Path, monkeypatch, capsys):
+    tf = _load_thin_frames()
+    monkeypatch.setattr(
+        "sys.argv",
+        ["thin_frames.py", "--config", str(tmp_path / "nope.yaml"), "--day", "1"],
+    )
+    try:
+        tf.main()
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("missing --config was accepted")
+    assert "does not exist" in capsys.readouterr().err

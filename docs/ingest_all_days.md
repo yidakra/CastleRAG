@@ -119,10 +119,8 @@ skip day 1 in §3. Then run `ingest_day.slurm` with `DAY=1` and the default
 ```bash
 export HF_HOME=/scratch-shared/$USER/hf_cache
 cd ~/code/CastleRAG
-sbatch --account=gisr109364 --export=ALL,DAYS="1 2" scripts/slurm/download_castle.slurm
-# ~4.4 TB, roughly 3 h. When the job has finished:
-ls /scratch-shared/$USER/castle2024/main/day1      # 15 camera dirs expected (no Bao)
-myquota                                            # scratch headroom: see §5 for sizes
+DL=$(sbatch --parsable --account=gisr109364 --export=ALL,DAYS="1 2" scripts/slurm/download_castle.slurm)
+# ~4.4 TB, roughly 3 h. The ingest chain below waits for $DL (afterok).
 ```
 
 The jobs never run `--aux`, so the `auxiliary/` tree is not needed.
@@ -139,7 +137,7 @@ S=scripts/slurm/ingest_day.slurm
 
 # Day 1 on an empty scratch: the first job creates the collection (BOOTSTRAP=1),
 # the next two accept the then-partial collection (MIN_POINTS=1).
-D1A=$(sbatch --parsable --account=$A --job-name=castle-ingest-day1 \
+D1A=$(sbatch --parsable --account=$A --job-name=castle-ingest-day1 --dependency=afterok:$DL \
         --export=ALL,DAY=1,BOOTSTRAP=1,CAMS="$FIXED" $S)
 D1B=$(sbatch --parsable --account=$A --job-name=castle-ingest-day1 --dependency=afterok:$D1A \
         --export=ALL,DAY=1,MIN_POINTS=1,CAMS="$EGO_A" $S)
@@ -159,6 +157,14 @@ squeue -u $USER
 The jobs must run one at a time. They share the Qdrant storage, the embedding
 caches and `transcripts.pkl`, so keep the `afterok` chain. Do not submit two
 days side by side.
+
+Once the download job has finished, check what arrived:
+
+```bash
+tail -n 5 logs/castle-download_${DL}.out           # mp4 count and size per day
+ls /scratch-shared/$USER/castle2024/main/day1      # 15 camera dirs expected (no Bao)
+myquota                                            # scratch headroom: see §5 for sizes
+```
 
 After each day:
 
@@ -188,10 +194,10 @@ EGO_A="Allie Bjorn Cathal Florian Klaus"
 EGO_B="Luca Onanong Stevan Tien Werner"
 S=scripts/slurm/ingest_day.slurm
 
-# Download days 3+4 (~3.8 TB). Wait for it to finish before the D3A chain.
-sbatch --account=$A --export=ALL,DAYS="3 4",AUX=0 scripts/slurm/download_castle.slurm
+# Download days 3+4 (~3.8 TB). D3A waits for it (afterok).
+DL=$(sbatch --parsable --account=$A --export=ALL,DAYS="3 4",AUX=0 scripts/slurm/download_castle.slurm)
 
-D3A=$(sbatch --parsable --account=$A --job-name=castle-ingest-day3 \
+D3A=$(sbatch --parsable --account=$A --job-name=castle-ingest-day3 --dependency=afterok:$DL \
         --export=ALL,DAY=3,CAMS="$FIXED" $S)
 D3B=$(sbatch --parsable --account=$A --job-name=castle-ingest-day3 --dependency=afterok:$D3A \
         --export=ALL,DAY=3,CAMS="$EGO_A" $S)

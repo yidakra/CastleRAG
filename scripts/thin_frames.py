@@ -17,7 +17,10 @@ full frame set. Dry run by default:
     python scripts/thin_frames.py --config configs/snellius_fixedcams.yaml \
         --day 1 --apply
 
-Each rewritten JSONL keeps a ``.prethin`` copy of the original.
+Each rewritten JSONL keeps a ``.prethin`` copy of the original. ``--apply``
+first writes the drop plan to ``.thin_plan.json`` in the day's chunk dir and
+removes it only after every rewrite and deletion has finished, so an
+interrupted run picks up where it stopped when re-run.
 """
 
 from __future__ import annotations
@@ -31,12 +34,18 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 from castlerag.config import load_config
-from castlerag.frame_encoding import sample_frames_evenly
+from castlerag.frame_encoding import available_frames, sample_frames_evenly
+
+PLAN_NAME = ".thin_plan.json"
 
 
 def plan_clip(paths: List[str], keep: int) -> Tuple[List[str], List[str]]:
-    """Return (kept, dropped) frame paths for one clip."""
-    kept = sample_frames_evenly(paths, keep)
+    """Return (kept, dropped) frame paths for one clip.
+
+    Kept frames are picked from the files that still exist, the same way the
+    readers pick them, so a record never ends up listing missing files.
+    """
+    kept = sample_frames_evenly(available_frames(paths), keep)
     kept_set = set(kept)
     return kept, [p for p in paths if p not in kept_set]
 
@@ -62,8 +71,13 @@ def _rewrite_jsonl(path: Path, rows: List[dict]) -> None:
 def thin_day(chunks_day: Path, keep: int, apply: bool) -> Dict[str, int]:
     """Thin every clip under ``chunks_day``; return counters."""
     stats = {"clips": 0, "kept": 0, "dropped": 0, "dropped_bytes": 0, "files": 0}
+    plan_file = chunks_day / PLAN_NAME
+    # Paths an interrupted --apply already removed from clips.jsonl: they are
+    # no longer listed there, so only the saved plan still knows them.
     dropped_all: Set[str] = set()
-    kept_by_clip: Dict[str, List[str]] = {}
+    if plan_file.exists():
+        dropped_all.update(json.loads(plan_file.read_text()))
+    planned: List[Tuple[Path, List[dict]]] = []
     for clips_file in sorted(chunks_day.rglob("clips.jsonl")):
         lines = clips_file.read_text().splitlines()
         rows = [json.loads(line) for line in lines if line.strip()]
@@ -83,10 +97,14 @@ def thin_day(chunks_day: Path, keep: int, apply: bool) -> Dict[str, int]:
                 except OSError:
                     pass
             dropped_all.update(dropped)
-            kept_by_clip[row.get("clip_id", "")] = kept
             row["sampled_frame_paths"] = kept
             changed = True
-        if changed and apply:
+        if changed:
+            planned.append((clips_file, rows))
+    if apply and dropped_all:
+        _write_plan(plan_file, dropped_all)
+    for clips_file, rows in planned:
+        if apply:
             _rewrite_jsonl(clips_file, rows)
             stats["files"] += 1
     # Other chunk files (events, ...) may list the same frames; drop deleted
@@ -108,7 +126,22 @@ def thin_day(chunks_day: Path, keep: int, apply: bool) -> Dict[str, int]:
     if apply:
         for p in dropped_all:
             Path(p).unlink(missing_ok=True)
+        plan_file.unlink(missing_ok=True)
     return stats
+
+
+def _write_plan(path: Path, dropped: Set[str]) -> None:
+    """Atomically save the paths to drop, so a re-run can finish the job."""
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(sorted(dropped), fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def main() -> int:
@@ -124,6 +157,10 @@ def main() -> int:
     args = ap.parse_args()
     if args.keep < 1:
         ap.error("--keep must be >= 1")
+    # load_config skips a missing override silently and would fall back to the
+    # default chunks dir; refuse instead.
+    if not args.config.is_file():
+        ap.error(f"--config {args.config} does not exist")
     cfg = load_config(override_path=args.config)
     chunks_day = Path(cfg.preprocessing.chunks_dir) / f"day{args.day}"
     if not chunks_day.is_dir():
