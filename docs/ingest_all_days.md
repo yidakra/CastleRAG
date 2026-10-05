@@ -300,11 +300,25 @@ Restore = download, untar into `castle_derived/`, `castlerag index --day N`
 Frames are not uploaded by default. A free HF account has 100 GB of private
 storage and thinned frames are ~130 GB per day, while the frames are the cheap
 part: `preprocess/media.py::extract_frames_1fps` cuts them on CPU from the raw
-video with deterministic names (`-ss <clip start>`, `fps=1`, `%04d.jpg`), so
-after a fresh CASTLE download they come back at the paths the chunks list
-(there is no frames-only script yet; rerun the extraction per clip, then
-`thin_frames.py --apply`). On a plan with room (PRO: 1 TB private) add
-`FRAMES=1` to upload them as one tar per camera-hour.
+video with deterministic names (`-ss <clip start>`, `fps=1`, `%04d.jpg`). On a
+plan with room (PRO: 1 TB private) add `FRAMES=1` to upload them as one tar
+per camera-hour.
+
+That makes scratch the only copy of the frames, and scratch is cleared every
+14 days, so expect to lose them. Without frames a day's answers are text-only.
+Before anything that needs image-grounded answers (paper eval, demo), check
+and rebuild:
+
+```bash
+python scripts/regen_frames.py --config configs/snellius_fixedcams.yaml --day 1   # dry run: N missing
+# if frames are missing: download the day's video again, then
+DL=$(sbatch --parsable --account=gisr109364 --export=ALL,DAYS="1",AUX=0 scripts/slurm/download_castle.slurm)
+sbatch --account=gisr109364 --dependency=afterok:$DL --export=ALL,DAY=1 scripts/slurm/regen_frames.slurm
+```
+
+It re-extracts each clip that lists a missing frame and moves only the listed
+(thinned) frames into place; with the same FFmpeg module they are
+byte-identical to the originals. Re-runs skip complete clips.
 
 A second copy on a laptop costs nothing (`scripts/pull_artifacts.sh`, run
 locally; `FRAMES=1` adds the frames, ~130 GB per day).
