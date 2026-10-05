@@ -124,3 +124,20 @@ def test_regen_matches_original_extraction(tmp_path: Path):
     day = _day(tmp_path, video, kept)
     assert rf.regen_day(day, apply=True)["written"] == 8
     assert {p: Path(p).read_bytes() for p in kept} == before
+
+
+def test_frame_extraction_caps_decoder_threads(tmp_path: Path, monkeypatch):
+    from castlerag.preprocess import media
+
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"], seen["timeout"] = cmd, kw.get("timeout")
+
+    monkeypatch.setattr(media.subprocess, "run", fake_run)
+    media.extract_frames_1fps(tmp_path / "v.mp4", tmp_path / "out", 0.0, 30.0)
+    cmd = seen["cmd"]
+    # -threads must come before -i to limit the decoder
+    assert cmd.index("-threads") < cmd.index("-i")
+    assert cmd[cmd.index("-threads") + 1] == str(media.FRAME_DECODE_THREADS)
+    assert seen["timeout"] == media.FRAME_TIMEOUT_SECONDS

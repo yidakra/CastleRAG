@@ -7,11 +7,19 @@ Preservation rule (SPEC §2.3):
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import List
 
 FFMPEG_TIMEOUT_SECONDS = 120
+# Frame extraction decodes every frame of the clip (CASTLE is 4K H.264 at
+# 50 fps with a keyframe every 5 s), ~26 s per 30 s clip on 4 cores. ffmpeg
+# defaults to one decoder thread per visible core, so the ingest's ~10
+# parallel workers oversubscribe the node and single clips stall past the
+# timeout. Cap the decoder threads and allow a slow clip more time.
+FRAME_DECODE_THREADS = int(os.environ.get("CASTLE_FFMPEG_THREADS", "4"))
+FRAME_TIMEOUT_SECONDS = 600
 
 
 def get_video_duration(source_path: Path) -> float:
@@ -55,6 +63,8 @@ def extract_frames_1fps(
         [
             "ffmpeg",
             "-y",
+            "-threads",
+            str(FRAME_DECODE_THREADS),
             "-ss",
             str(start_seconds),
             "-i",
@@ -69,7 +79,7 @@ def extract_frames_1fps(
         ],
         capture_output=True,
         check=True,
-        timeout=FFMPEG_TIMEOUT_SECONDS,
+        timeout=FRAME_TIMEOUT_SECONDS,
     )
     return sorted(out_dir.glob("*.jpg"))
 
