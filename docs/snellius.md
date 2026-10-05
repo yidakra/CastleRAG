@@ -75,9 +75,10 @@ Download the CASTLE 2024 release once, into scratch:
 
 ```bash
 # pip install huggingface_hub if it isn't already in your venv
-huggingface-cli download CASTLE-Dataset/CASTLE2024 \
-    --repo-type dataset \
-    --local-dir /scratch/$USER/castle2024
+# huggingface_hub 2.x: the CLI is `hf`, `hf` is gone.
+# Use the download job: it fetches auxiliary data as one zip (its ~20k loose
+# files trip the anonymous rate limit) and retries on failure.
+sbatch --export=ALL,DAYS="1 2" scripts/slurm/download_castle.slurm
 ```
 
 The dataset is around 450 GiB; the download can run for several hours.  If

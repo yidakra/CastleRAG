@@ -99,10 +99,10 @@ on the login node:
 
 ```bash
 export HF_HOME=/scratch-shared/$USER/hf_cache
-huggingface-cli download Qwen/Qwen3-VL-8B-Instruct
-huggingface-cli download Tevatron/Qwen2.5-Omni-7B-Thinker     # OmniEmbed base
-huggingface-cli download Tevatron/OmniEmbed-v0.1-multivent    # OmniEmbed LoRA
-huggingface-cli download Qwen/Qwen2.5-Omni-7B                 # OmniEmbed processor
+hf download Qwen/Qwen3-VL-8B-Instruct
+hf download Tevatron/Qwen2.5-Omni-7B-Thinker     # OmniEmbed base
+hf download Tevatron/OmniEmbed-v0.1-multivent    # OmniEmbed LoRA
+hf download Qwen/Qwen2.5-Omni-7B                 # OmniEmbed processor
 ```
 
 The model ids are the defaults of `scripts/omniembed_server.py` and of the
@@ -118,9 +118,9 @@ skip day 1 in §3. Then run `ingest_day.slurm` with `DAY=1` and the default
 
 ```bash
 export HF_HOME=/scratch-shared/$USER/hf_cache
-huggingface-cli download CASTLE-Dataset/CASTLE2024 --repo-type dataset \
-    --local-dir /scratch-shared/$USER/castle2024 \
-    --include "main/day1/*" "main/day2/*"
+cd ~/code/CastleRAG
+sbatch --account=gisr109364 --export=ALL,DAYS="1 2" scripts/slurm/download_castle.slurm
+# ~4.4 TB, roughly 3 h. When the job has finished:
 ls /scratch-shared/$USER/castle2024/main/day1      # 15 camera dirs expected (no Bao)
 myquota                                            # scratch headroom: see §5 for sizes
 ```
@@ -130,7 +130,7 @@ The jobs never run `--aux`, so the `auxiliary/` tree is not needed.
 Submit from the repo root, so that `SLURM_SUBMIT_DIR` is the repo:
 
 ```bash
-cd ~/CastleRAG
+cd ~/code/CastleRAG
 A=gisr109364
 FIXED="Kitchen Living1 Living2 Meeting Reading"
 EGO_A="Allie Bjorn Cathal Florian Klaus"
@@ -180,9 +180,16 @@ sbatch --account=$A --dependency=afterok:$D1C \
 First do §5 for days 1 and 2: archive them, then free the space. Then:
 
 ```bash
-huggingface-cli download CASTLE-Dataset/CASTLE2024 --repo-type dataset \
-    --local-dir /scratch-shared/$USER/castle2024 \
-    --include "main/day3/*" "main/day4/*"
+# Same variables as wave 1 (a new login shell won't have them).
+cd ~/code/CastleRAG
+A=gisr109364
+FIXED="Kitchen Living1 Living2 Meeting Reading"
+EGO_A="Allie Bjorn Cathal Florian Klaus"
+EGO_B="Luca Onanong Stevan Tien Werner"
+S=scripts/slurm/ingest_day.slurm
+
+# Download days 3+4 (~3.8 TB). Wait for it to finish before the D3A chain.
+sbatch --account=$A --export=ALL,DAYS="3 4",AUX=0 scripts/slurm/download_castle.slurm
 
 D3A=$(sbatch --parsable --account=$A --job-name=castle-ingest-day3 \
         --export=ALL,DAY=3,CAMS="$FIXED" $S)

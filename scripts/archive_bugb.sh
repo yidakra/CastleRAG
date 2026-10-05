@@ -78,11 +78,16 @@ echo "[archive] 2/3 embedding caches + BM25 index ..."
   cd "${EMB}"
   files=()
   for d in "${DAY_ARR[@]}"; do
+    # Count caches and the manifest separately: a manifest alone must not pass
+    # as "cached", and a cache without its manifest can't be restored and
+    # resumed (ingest_day.slurm backs the manifest up before indexing).
     n=0
-    for f in *_day"${d}".npz manifest_day"${d}".json; do
+    for f in *_day"${d}".npz; do
       [ -e "${f}" ] && { files+=("${f}"); n=$((n + 1)); }
     done
-    [ "${n}" -gt 0 ] || { echo "[archive] ABORT: no day-${d} embedding caches in ${EMB}"; exit 2; }
+    [ "${n}" -gt 0 ] || { echo "[archive] ABORT: no day-${d} embedding caches (*_day${d}.npz) in ${EMB}"; exit 2; }
+    [ -s "manifest_day${d}.json" ] || { echo "[archive] ABORT: day-${d} caches exist but manifest_day${d}.json is missing or empty"; exit 2; }
+    files+=("manifest_day${d}.json")
   done
   for f in transcripts.pkl visual_text.json query_cache.npz; do
     [ -e "${f}" ] && files+=("${f}")
