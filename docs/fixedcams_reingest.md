@@ -5,8 +5,9 @@ Reading) to the existing Qdrant collection `castle_multimodal_v1` for day 1.
 It does not rebuild the ego index. It then re-runs the 40-question day-1 eval
 and checks the zero-evidence list from issue #50.
 
-Nothing here has been run yet. All commands are for Snellius. The account is
-`gpuuva082`; change it if yours is different.
+Nothing here has been run yet. All commands are for Snellius and use
+`--account=gisr109364`. The account is per user (`accinfo` shows yours).
+For days 2-4 see `docs/ingest_all_days.md`.
 
 ## 0. What we already know
 
@@ -48,7 +49,7 @@ Nothing here has been run yet. All commands are for Snellius. The account is
 | Reranker pack | Adds a `Room: <room> (fixed room camera)` line when `room` is set | Fixed-camera packs used to read "Participant: N/A" with no location. Ego prompts are byte-identical. |
 | UI `padding_roster` | Pads with the fixed cameras too when `camera_scope == "all"` | All 5 fixed cameras are in `youtube_mirror.csv` for day 1 (Kitchen, Living1, Living2 and Meeting have 13 h each; Reading has 10 h), so they embed. |
 | `scripts/qdrant_camera_counts.py` | Read-only count of points per `camera_type` and per camera × `source_type`, plus the list of missing fixed cameras | Checks the index state before and after the ingest |
-| `scripts/slurm/fixedcams_day1.slurm` | One job: state check, backup and snapshot, preprocess (camera × hour workers), embed per modality, additive index, verify | See §3 |
+| `scripts/slurm/fixedcams_day1.slurm` (now a `DAY=1` wrapper around `ingest_day.slurm`) | One job: state check, backup and snapshot, preprocess (camera × hour workers), embed per modality, additive index, verify | See §3 |
 | `scripts/compare_bugb_eval.py` | Scores a smoke run against the 8 questions from #50, including whether the CSV anchor camera appears in the evidence | See §5 |
 | `smoke_day1_roomfix.slurm`, `_smoke_wandb.slurm`, `ui_live.slurm` | `CONF` can be overridden with `--export` | Lets these jobs run with the fixed-camera config |
 
@@ -77,9 +78,9 @@ The `rome` partition name is a guess; use whichever CPU partition your budget
 allows.
 
 ```bash
-srun --account=gpuuva082 --partition=rome --ntasks=1 --cpus-per-task=4 \
+srun --account=gisr109364 --partition=rome --ntasks=1 --cpus-per-task=4 \
      --mem=16G --time=00:30:00 --pty bash
-module purge; module load 2024 Python/3.12.3-GCCcore-13.3.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source ~/castlerag_venv/bin/activate; cd ~/CastleRAG
 QDRANT__STORAGE__STORAGE_PATH=/scratch-shared/$USER/qdrant_storage/storage ~/qdrant/qdrant > /tmp/q.log 2>&1 &
 sleep 15
@@ -105,23 +106,24 @@ OmniEmbed for the embed stage. It never passes `--create-collection`.
 ```bash
 cd ~/CastleRAG
 # default CAMS=auto -> only fixed cams with 0 main_clip points; exits 0 if none are missing
-JOB=$(sbatch --parsable --account=gpuuva082 scripts/slurm/fixedcams_day1.slurm)
+JOB=$(sbatch --parsable --account=gisr109364 scripts/slurm/fixedcams_day1.slurm)
 # or explicitly:
-# JOB=$(sbatch --parsable --account=gpuuva082 --export=ALL,CAMS="Reading" scripts/slurm/fixedcams_day1.slurm)
+# JOB=$(sbatch --parsable --account=gisr109364 --export=ALL,CAMS="Reading" scripts/slurm/fixedcams_day1.slurm)
 tail -f logs/castle-fixedcams-day1_${JOB}.out
 ```
 
-What the job does, in order (from `scripts/slurm/fixedcams_day1.slurm`):
+What the job does, in order (from `scripts/slurm/ingest_day.slurm`, which `fixedcams_day1.slurm` runs with `DAY=1`):
 
 0. Starts Qdrant on the existing storage. Aborts if there are fewer than 25,000
-   points. Prints the per-camera counts to `logs/fixed_counts_before_<job>.txt`
+   points. Prints the per-camera counts to `logs/ingest_day1_counts_before_<job>.txt`
    and resolves `CAMS`. Checks the camera names with `preprocess --dry-run`.
    Checks that raw day-1 video exists for each camera.
-1. Rollback material. Copies `*_day1.npz`, `manifest_day1.json` and
-   `transcripts.pkl` to
-   `castle_derived/embeddings_backup_pre_fixedcams_<job>/`. Takes a Qdrant
+1. Rollback material. Copies `*_day1.npz`, `manifest_day1.json`,
+   `transcripts.pkl` and (if present) `visual_text.json` to
+   `castle_derived/embeddings_backup_pre_ingest_day1_<job>/`. Takes a Qdrant
    snapshot into `/scratch-shared/$USER/qdrant_snapshots/`. Records sha1
-   checksums of every ego chunk file.
+   checksums of every chunk file of the cameras it is not ingesting (the ego
+   cameras, for this job).
 2. Preprocess: base, caption and events. Each worker handles one camera and a
    group of hours. With `SPLIT=auto` there are about 10 workers in total, so
    Reading alone gets 10 workers. Each worker runs:
@@ -145,7 +147,7 @@ What the job does, in order (from `scripts/slurm/fixedcams_day1.slurm`):
    ```bash
    castlerag index --config configs/snellius_fixedcams.yaml --day 1      # NO --create-collection
    ```
-6. Verification. Writes `logs/fixed_counts_after_<job>.txt`. The job fails if
+6. Verification. Writes `logs/ingest_day1_counts_after_<job>.txt`. The job fails if
    any requested camera still has 0 `main_clip` points.
 
 Knobs you can pass with `--export=ALL,...`:
@@ -214,7 +216,7 @@ The smoke output directory is fixed
 ### 5a. Participant-filter fix only, on the current index (run first)
 
 ```bash
-J=$(sbatch --parsable --account=gpuuva082 \
+J=$(sbatch --parsable --account=gisr109364 \
       --export=ALL,CONF=configs/snellius_fixedcams.yaml scripts/slurm/smoke_day1_roomfix.slurm)
 # after it finishes:
 cp -r /scratch-shared/$USER/castle_outputs/smoke_test /scratch-shared/$USER/castle_outputs/smoke_test_participantfix_$J
@@ -229,7 +231,7 @@ the UI padding roster matches.
 ### 5b. After the ingest (if §3 ran)
 
 ```bash
-J2=$(sbatch --parsable --account=gpuuva082 --dependency=afterok:${JOB} \
+J2=$(sbatch --parsable --account=gisr109364 --dependency=afterok:${JOB} \
        --export=ALL,CONF=configs/snellius_fixedcams.yaml scripts/slurm/smoke_day1_roomfix.slurm)
 cp -r /scratch-shared/$USER/castle_outputs/smoke_test /scratch-shared/$USER/castle_outputs/smoke_test_fixedcams_$J2
 ```
@@ -272,12 +274,12 @@ Post the `compare_bugb_eval.py` output as a comment on #50. Questions in the
   fixed-camera transcripts. It no longer fails, and the dense points survive.
   Consider switching `snellius_me.yaml` to `camera_scope: "all"` once this is
   validated.
-- UI: `sbatch --account=gpuuva082 --export=ALL,CONF=configs/snellius_fixedcams.yaml scripts/slurm/ui_live.slurm`.
+- UI: `sbatch --account=gisr109364 --export=ALL,CONF=configs/snellius_fixedcams.yaml scripts/slurm/ui_live.slurm`.
 
 ## 7. Rollback
 
 - Embedding caches and BM25: copy
-  `castle_derived/embeddings_backup_pre_fixedcams_<job>/*` back into
+  `castle_derived/embeddings_backup_pre_ingest_day1_<job>/*` back into
   `castle_derived/embeddings/`.
 - Qdrant: restore the snapshot from `/scratch-shared/$USER/qdrant_snapshots/`
   (`PUT /collections/castle_multimodal_v1/snapshots/recover` with
