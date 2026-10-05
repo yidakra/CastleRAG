@@ -212,7 +212,8 @@ state check before any GPU work. That is what would happen with Tien on day 4.
 
 ## 5. What to keep, what to delete
 
-Keep these. They are expensive to rebuild and small next to video and frames:
+Keep these. They are expensive to rebuild and small next to video and frames
+(frames themselves are covered below):
 
 | Artifact | Where it is | Why |
 |---|---|---|
@@ -251,24 +252,59 @@ because the index can be rebuilt from the chunks and caches with
 `embeddings_backup_pre_ingest_day*_<job>/` dirs and older Qdrant snapshots can
 go once the next job of the chain has passed.
 
-Delete before wave 2, once days 1 and 2 are indexed, verified and archived:
+### Frames: thin, don't delete
+
+Frames are read again at question time: the reranker sends 4 frames per clip
+and the answer generator 8 to Qwen3-VL. Deleting a day's frames silently turns
+that day text-only. So keep frames for every day, but thin them once the day's
+captioning and events are done (both read the full set):
+
+```bash
+python scripts/thin_frames.py --config configs/snellius_fixedcams.yaml --day 1          # dry run
+python scripts/thin_frames.py --config configs/snellius_fixedcams.yaml --day 1 --apply
+```
+
+It keeps the 8 evenly spaced frames per clip that the generator would pick
+(the reranker's 4 are drawn from those), deletes the other ~22, and rewrites
+`sampled_frame_paths` in the chunk JSONLs (with a `.prethin` copy). Readers
+sample from the frames that still exist (`frame_encoding.available_frames`),
+so already-indexed days need no re-index. That cuts frames from ~500 GB to
+~130 GB per day.
+
+### Back up each day off scratch
+
+The 14-day purge and the loss of a login are both real risks, and with the raw
+video deleted frames can't be regenerated. After a day is ingested and
+thinned, back it up to the team's **private** Hugging Face dataset repo (CASTLE's
+terms forbid distributing derivative works, so the job refuses a public repo):
+
+```bash
+# once: create the private dataset repo on huggingface.co, then on a login node
+hf auth login                     # write token; the job never handles it
+sbatch --account=gisr109364 --export=ALL,DAY=1 scripts/slurm/upload_artifacts.slurm
+```
+
+Per day it uploads the chunks, the embedding caches and manifest, the thinned
+frames (one tar per camera-hour), plus the current `transcripts.pkl` and
+`visual_text.json`. It's resumable: files already on the Hub are skipped.
+Restore = download, untar into `castle_derived/`, `castlerag index --day N`
+(CPU only, no re-embedding).
+
+A second copy on a laptop costs nothing (`scripts/pull_artifacts.sh`, run
+locally; `FRAMES=1` adds the frames).
+
+### Delete before wave 2
+
+Once days 1 and 2 are indexed, thinned and backed up, delete only their raw
+video (it can be downloaded again):
 
 ```bash
 rm -rf /scratch-shared/$USER/castle2024/main/day1 /scratch-shared/$USER/castle2024/main/day2
-rm -rf /scratch-shared/$USER/castle_derived/frames_1fps/day1 /scratch-shared/$USER/castle_derived/frames_1fps/day2
 ```
 
-- Raw video can be downloaded again.
-- Sampled frames are the bulk of the space: about 330 GB for day-1 ego, plus
-  about 170 GB expected for the fixed cameras. They can be re-extracted from
-  raw video. A day's frames are needed until that day's `embed --modality
-  video` has run.
-- Deleting frames has a cost. Qdrant payloads keep `sampled_frame_paths`, and
-  the visual reranker and answer generation send those frames to Qwen3-VL. For
-  days whose frames are gone, missing files are skipped (`frame_encoding.py`),
-  so those days fall back to text-only evidence (captions, OCR, transcripts)
-  at query time. If scratch has room, keep the frames of the days you will
-  demo.
+Space on scratch (8 TiB quota): wave 1 peaks at ~5.4 TB (4.4 TB video + frames),
+wave 2 at ~5 TB (3.8 TB video + thinned frames of all days), and after deleting
+days 3-4 video about 0.5 TB of thinned frames remain.
 
 ## 6. Compute estimate
 
