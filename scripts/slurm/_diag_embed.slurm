@@ -4,7 +4,7 @@
 # stall dumps the exact Python stack instead of going silent.
 #SBATCH --job-name=castle-diag-embed
 #SBATCH --partition=gpu_a100
-#SBATCH --account=gpuuva082
+#SBATCH --account=gisr109364
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=16 --mem=120G --gres=gpu:1
 #SBATCH --time=00:25:00
 #SBATCH --output=logs/%x_%j.out
@@ -12,9 +12,9 @@
 
 set -uo pipefail
 export HF_HOME="/scratch-shared/${USER}/hf_cache" HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1
-module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0; module load CUDA/12.6.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source "${HOME}/castlerag_venv/bin/activate"
-cd "${SLURM_SUBMIT_DIR}"
+cd "${SLURM_SUBMIT_DIR}" || exit 1
 
 echo "[diag] host=$(hostname) start=$(date -Iseconds)"
 nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv 2>&1 | head -3

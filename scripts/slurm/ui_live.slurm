@@ -9,7 +9,7 @@
 # Reach it from your laptop with an SSH tunnel to the compute node (the script
 # prints the exact command once the node is known):
 #
-#   sbatch --account=gpuuva082 scripts/slurm/ui_live.slurm
+#   sbatch --account=gisr109364 scripts/slurm/ui_live.slurm
 #   # then, from your laptop (NODE printed in logs/castle-ui-live_<jobid>.out):
 #   ssh -L 8050:<NODE>:8050 scur0225@snellius.surf.nl
 #   # open http://localhost:8050  (top-bar chip should read "live RAG")
@@ -36,11 +36,7 @@ export HF_HUB_OFFLINE=1
 export HF_HUB_DISABLE_TELEMETRY=1
 export VLLM_LOGGING_LEVEL=WARNING
 
-module purge
-module load 2024
-module load Python/3.12.3-GCCcore-13.3.0
-module load CUDA/12.6.0
-module load FFmpeg/7.0.2-GCCcore-13.3.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source "${HOME}/castlerag_venv/bin/activate"
 cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 mkdir -p logs

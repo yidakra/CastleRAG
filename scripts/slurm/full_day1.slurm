@@ -4,7 +4,11 @@
 # clients against 2 Qwen3-VL servers (vLLM batches the concurrent requests) + 1 custom
 # OmniEmbed server, then embed -> index -> smoke-test.  3 GPUs on one node.
 #
-#   sbatch --account=gpuuva082 scripts/slurm/full_day1.slurm
+#   sbatch --account=gisr109364 scripts/slurm/full_day1.slurm
+#
+# DAY-1 ONLY, kept for the record. For days 2-4 use scripts/slurm/ingest_day.slurm
+# (DAY=N, additive) and docs/ingest_all_days.md. This job passes
+# --create-collection, which WIPES every day already in castle_multimodal_v1.
 
 #SBATCH --job-name=castle-full-day1
 #SBATCH --partition=gpu_a100
@@ -32,13 +36,9 @@ CAMS=(Allie Bjorn Cathal Florian Klaus Luca Onanong Stevan Tien Werner)
 echo "[full] host=$(hostname) start=$(date -Iseconds)"
 nvidia-smi -L 2>/dev/null | head -3
 
-module purge
-module load 2024
-module load Python/3.12.3-GCCcore-13.3.0
-module load CUDA/12.6.0
-module load FFmpeg/7.0.2-GCCcore-13.3.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source "${HOME}/castlerag_venv/bin/activate"
-cd /gpfs/home2/scur0225/CastleRAG
+cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}" || exit 1
 mkdir -p logs
 
 wait_ready() { # port label logfile

@@ -27,8 +27,11 @@ exact missing dependency rather than silently serving the offline placeholder.
 
 ## SSH tunnel (default — for developers)
 
+The commands below use `--account=gisr109364`. The account is per user, so
+run `accinfo` on Snellius and use the one it shows for you.
+
 ```bash
-sbatch --account=gpuuva082 scripts/slurm/ui_live.slurm
+sbatch --account=gisr109364 scripts/slurm/ui_live.slurm
 # NODE is printed in logs/castle-ui-live_<jobid>.out, then from your laptop:
 ssh -L 8050:<NODE>:8050 <user>@snellius.surf.nl
 # open http://localhost:8050  (top-bar chip should read "live RAG")
@@ -58,7 +61,7 @@ No shared password. Requires a Cloudflare account with a domain (zone).
 ### Run it (demo day)
 
 ```bash
-sbatch --account=gpuuva082 \
+sbatch --account=gisr109364 \
   --export=ALL,NAMED_TUNNEL_TOKEN=eyJ...<your token>... \
   scripts/slurm/ui_live.slurm
 ```
@@ -82,7 +85,7 @@ The URL **rotates every run** and has no uptime guarantee, so share it at the
 start of the demo and tear down after.
 
 ```bash
-sbatch --account=gpuuva082 \
+sbatch --account=gisr109364 \
   --export=ALL,PUBLIC_TUNNEL=1,CASTLERAG_UI_BASIC_AUTH=demo:<password> \
   scripts/slurm/ui_live.slurm
 # public URL prints in logs/castle-ui-live_<jobid>.out

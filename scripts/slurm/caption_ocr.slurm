@@ -30,10 +30,7 @@ VENV="${VENV:-${HOME}/castlerag_venv}"
 
 echo "[caption_ocr] day=${DAY}  host=$(hostname)  start=$(date -Iseconds)"
 
-module purge
-module load 2024
-module load CUDA/12.6.0
-module load Python/3.11.3-GCCcore-12.3.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 
 source "${VENV}/bin/activate"
 

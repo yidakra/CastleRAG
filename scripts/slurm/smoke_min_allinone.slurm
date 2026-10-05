@@ -4,7 +4,7 @@
 # 2 ego cams, day 1, hour 08) inside ONE gpu_a100 quarter-node, hosting both vLLM
 # models on the single A100.  Validates pipeline + models end-to-end at ~1 A100-h.
 #
-#   sbatch --account=gpuuva082 scripts/slurm/smoke_min_allinone.slurm
+#   sbatch --account=gisr109364 scripts/slurm/smoke_min_allinone.slurm
 
 #SBATCH --job-name=castle-smoke-min
 #SBATCH --partition=gpu_a100
@@ -29,11 +29,7 @@ export VLLM_LOGGING_LEVEL=WARNING
 
 echo "[smoke-min] host=$(hostname) gpu=$(nvidia-smi -L 2>/dev/null | head -1) start=$(date -Iseconds)"
 
-module purge
-module load 2024
-module load Python/3.12.3-GCCcore-13.3.0
-module load CUDA/12.6.0
-module load FFmpeg/7.0.2-GCCcore-13.3.0
+module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source "${HOME}/castlerag_venv/bin/activate"
 cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 mkdir -p logs
