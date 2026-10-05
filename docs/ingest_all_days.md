@@ -80,7 +80,7 @@ camera-hours, at roughly 8-15 h each, chained with `afterok`:
 |---|---|
 | `FIXED` | Kitchen Living1 Living2 Meeting Reading |
 | `EGO_A` | Allie Bjorn Cathal Florian Klaus |
-| `EGO_B` | Luca Onanong Stevan Tien Werner (day 4: no Tien) |
+| `EGO_B` | Luca Onanong Stevan Tien Werner (day 4: Bao instead of Tien) |
 
 Each job is a complete additive ingest of its own group. The second and third
 jobs checksum the chunks written by the earlier ones. If a job fails, the
@@ -191,13 +191,13 @@ D3B=$(sbatch --parsable --account=$A --job-name=castle-ingest-day3 --dependency=
 D3C=$(sbatch --parsable --account=$A --job-name=castle-ingest-day3 --dependency=afterok:$D3B \
         --export=ALL,DAY=3,CAMS="$EGO_B" $S)
 
-# Day 4 has no Tien stream (and a Bao stream, see §7)
+# Day 4 has no Tien stream but does have Bao's (Bao exists only on day 4)
 D4A=$(sbatch --parsable --account=$A --job-name=castle-ingest-day4 --dependency=afterok:$D3C \
         --export=ALL,DAY=4,CAMS="$FIXED" $S)
 D4B=$(sbatch --parsable --account=$A --job-name=castle-ingest-day4 --dependency=afterok:$D4A \
         --export=ALL,DAY=4,CAMS="$EGO_A" $S)
 D4C=$(sbatch --parsable --account=$A --job-name=castle-ingest-day4 --dependency=afterok:$D4B \
-        --export=ALL,DAY=4,CAMS="Luca Onanong Stevan Werner" $S)
+        --export=ALL,DAY=4,CAMS="Luca Onanong Stevan Werner Bao" $S)
 ```
 
 If you pass a camera that has no raw video for the day, the job aborts in the
@@ -284,13 +284,12 @@ Embedding and the index upsert are included and small (under an hour per job).
 
 ## 7. Open points
 
-- **Bao on day 4.** Bao's ego stream exists only on day 4 (9 hours).
-  `configs/snellius_me.yaml` and `configs/snellius_fixedcams.yaml` leave Bao
-  out of `ego_cameras`, so `preprocess --camera Bao` is rejected by the scope
-  check and `CAMS=auto` doesn't pick Bao up. Ingesting Bao needs Bao added to
-  `ego_cameras` in both configs. That also changes `known_participants` at
-  query time, because questions that name Bao would then apply a dense
-  participant filter. Decide before day 4.
+- **Bao on day 4 (decided: ingest).** Bao's ego stream exists only on day 4
+  (9 hours), and Bao is now in `ego_cameras` in both Snellius configs, so the
+  day-4 `EGO_B` group includes Bao. At query time this is safe: since #64 the
+  dense participant filter keys on the (participant, day) pairs actually present
+  in the indexed transcript windows, so a question naming Bao about days 1-3
+  drops the filter instead of matching nothing.
 - The 14-day purge counts from "last use". Whether reads by the index step
   count as use for the day-1/2 chunks has not been checked, so archive after
   each wave rather than rely on it.
