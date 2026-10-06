@@ -30,22 +30,47 @@ import json
 import os
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from castlerag.config import load_config
 from castlerag.frame_encoding import available_frames, sample_frames_evenly
 
 PLAN_NAME = ".thin_plan.json"
+# Stats and unlinks are metadata operations on a shared filesystem (GPFS on
+# Snellius): one at a time they ran at ~80/s, and a 478k-frame day did not
+# finish in 6 h. Run them on a thread pool.
+IO_WORKERS = 32
 
 
-def plan_clip(paths: List[str], keep: int) -> Tuple[List[str], List[str]]:
+def _size(path: str) -> int:
+    try:
+        return Path(path).stat().st_size
+    except OSError:
+        return 0
+
+
+def _unlink(path: str) -> None:
+    Path(path).unlink(missing_ok=True)
+
+
+def plan_clip(
+    paths: List[str], keep: int, existing: Optional[Set[str]] = None
+) -> Tuple[List[str], List[str]]:
     """Return (kept, dropped) frame paths for one clip.
 
     Kept frames are picked from the files that still exist, the same way the
     readers pick them, so a record never ends up listing missing files.
+    ``existing`` is a precomputed set of paths on disk (checked in parallel by
+    ``thin_day``); without it each path is checked here.
     """
-    kept = sample_frames_evenly(available_frames(paths), keep)
+    if existing is None:
+        present = available_frames(paths)
+    else:
+        # Same rule as available_frames: if nothing exists, keep the list as is.
+        present = [p for p in paths if p in existing] or list(paths)
+    kept = sample_frames_evenly(present, keep)
     kept_set = set(kept)
     return kept, [p for p in paths if p not in kept_set]
 
@@ -68,7 +93,9 @@ def _rewrite_jsonl(path: Path, rows: List[dict]) -> None:
         raise
 
 
-def thin_day(chunks_day: Path, keep: int, apply: bool) -> Dict[str, int]:
+def thin_day(
+    chunks_day: Path, keep: int, apply: bool, workers: int = IO_WORKERS
+) -> Dict[str, int]:
     """Thin every clip under ``chunks_day``; return counters."""
     stats = {"clips": 0, "kept": 0, "dropped": 0, "dropped_bytes": 0, "files": 0}
     plan_file = chunks_day / PLAN_NAME
@@ -77,25 +104,36 @@ def thin_day(chunks_day: Path, keep: int, apply: bool) -> Dict[str, int]:
     dropped_all: Set[str] = set()
     if plan_file.exists():
         dropped_all.update(json.loads(plan_file.read_text()))
-    planned: List[Tuple[Path, List[dict]]] = []
+    loaded = []
     for clips_file in sorted(chunks_day.rglob("clips.jsonl")):
         lines = clips_file.read_text().splitlines()
-        rows = [json.loads(line) for line in lines if line.strip()]
+        loaded.append(
+            (clips_file, [json.loads(line) for line in lines if line.strip()])
+        )
+    candidates = sorted(
+        {
+            p
+            for _, rows in loaded
+            for row in rows
+            if len(row.get("sampled_frame_paths") or []) > keep
+            for p in row["sampled_frame_paths"]
+        }
+    )
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        flags = pool.map(lambda p: Path(p).exists(), candidates, chunksize=256)
+        existing = {p for p, ok in zip(candidates, flags) if ok}
+    planned: List[Tuple[Path, List[dict]]] = []
+    for clips_file, rows in loaded:
         changed = False
         for row in rows:
             paths = row.get("sampled_frame_paths") or []
             if len(paths) <= keep:
                 stats["kept"] += len(paths)
                 continue
-            kept, dropped = plan_clip(paths, keep)
+            kept, dropped = plan_clip(paths, keep, existing)
             stats["clips"] += 1
             stats["kept"] += len(kept)
             stats["dropped"] += len(dropped)
-            for p in dropped:
-                try:
-                    stats["dropped_bytes"] += Path(p).stat().st_size
-                except OSError:
-                    pass
             dropped_all.update(dropped)
             row["sampled_frame_paths"] = kept
             changed = True
@@ -123,10 +161,15 @@ def thin_day(chunks_day: Path, keep: int, apply: bool) -> Dict[str, int]:
         if changed and apply:
             _rewrite_jsonl(other, rows)
             stats["files"] += 1
-    if apply:
-        for p in dropped_all:
-            Path(p).unlink(missing_ok=True)
-        plan_file.unlink(missing_ok=True)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        if apply:
+            list(pool.map(_unlink, sorted(dropped_all), chunksize=256))
+            plan_file.unlink(missing_ok=True)
+        else:
+            # Only the dry run reports the space it would free.
+            stats["dropped_bytes"] = sum(
+                pool.map(_size, sorted(dropped_all), chunksize=256)
+            )
     return stats
 
 
