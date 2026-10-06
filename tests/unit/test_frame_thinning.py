@@ -146,3 +146,13 @@ def test_main_rejects_missing_config(tmp_path: Path, monkeypatch, capsys):
     else:
         raise AssertionError("missing --config was accepted")
     assert "does not exist" in capsys.readouterr().err
+
+
+def test_bounded_map_keeps_order_across_batches():
+    from concurrent.futures import ThreadPoolExecutor
+
+    tf = _load_thin_frames()
+    items = [str(i) for i in range(10)]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        out = list(tf._bounded_map(pool, lambda x: int(x) * 2, items, batch=4))
+    assert out == [i * 2 for i in range(10)]
