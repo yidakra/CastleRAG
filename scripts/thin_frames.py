@@ -32,7 +32,7 @@ import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from castlerag.config import load_config
 from castlerag.frame_encoding import available_frames, sample_frames_evenly
@@ -53,6 +53,13 @@ def _size(path: str) -> int:
 
 def _unlink(path: str) -> None:
     Path(path).unlink(missing_ok=True)
+
+
+def _bounded_map(pool, fn, items: List[str], batch: int = 4096) -> Iterator:
+    """``pool.map`` in slices, so at most ``batch`` tasks are pending at once
+    (``Executor.map`` submits every item up front; a day has ~650k frames)."""
+    for start in range(0, len(items), batch):
+        yield from pool.map(fn, items[start : start + batch])
 
 
 def plan_clip(
@@ -120,7 +127,7 @@ def thin_day(
         }
     )
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        flags = pool.map(lambda p: Path(p).exists(), candidates, chunksize=256)
+        flags = _bounded_map(pool, lambda p: Path(p).exists(), candidates)
         existing = {p for p, ok in zip(candidates, flags) if ok}
     planned: List[Tuple[Path, List[dict]]] = []
     for clips_file, rows in loaded:
@@ -163,13 +170,11 @@ def thin_day(
             stats["files"] += 1
     with ThreadPoolExecutor(max_workers=workers) as pool:
         if apply:
-            list(pool.map(_unlink, sorted(dropped_all), chunksize=256))
+            list(_bounded_map(pool, _unlink, sorted(dropped_all)))
             plan_file.unlink(missing_ok=True)
         else:
             # Only the dry run reports the space it would free.
-            stats["dropped_bytes"] = sum(
-                pool.map(_size, sorted(dropped_all), chunksize=256)
-            )
+            stats["dropped_bytes"] = sum(_bounded_map(pool, _size, sorted(dropped_all)))
     return stats
 
 
@@ -211,10 +216,11 @@ def main() -> int:
         return 2
     stats = thin_day(chunks_day, args.keep, args.apply)
     mode = "APPLIED" if args.apply else "DRY RUN"
+    # Sizes are only measured in the dry run (one stat per frame is slow).
+    size = "" if args.apply else f" ({stats['dropped_bytes'] / 1e9:.1f} GB)"
     print(
         f"[{mode}] day{args.day}: {stats['clips']} clips thinned, "
-        f"{stats['kept']} frames kept, {stats['dropped']} dropped "
-        f"({stats['dropped_bytes'] / 1e9:.1f} GB), "
+        f"{stats['kept']} frames kept, {stats['dropped']} dropped{size}, "
         f"{stats['files']} chunk files rewritten"
     )
     return 0
