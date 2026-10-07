@@ -219,10 +219,54 @@ def test_events_rebuild_clears_events_no_longer_possible(tmp_path: Path):
     result = CliRunner().invoke(
         app,
         [
-            "preprocess", "--config", str(_cfg_file(tmp_path, chunks)), "--day", "1",
-            "--skip-base", "--events", "--camera", "Reading",
+            "preprocess",
+            "--config",
+            str(_cfg_file(tmp_path, chunks)),
+            "--day",
+            "1",
+            "--skip-base",
+            "--events",
+            "--camera",
+            "Reading",
         ],
         env={"VLLM_BASE_URL": "http://stub/v1"},
     )
     assert result.exit_code == 0, result.output
     assert (hour / "events.jsonl").read_text() == ""
+
+
+def test_index_prunes_a_day_with_nothing_left_to_index(tmp_path: Path, monkeypatch):
+    """All clips re-flagged, no events or transcripts: prune instead of failing."""
+    import castlerag.cli as cli
+
+    chunks = tmp_path / "chunks"
+    card = _clip("Reading", 0, fixed=True).model_copy(update={"is_placeholder": True})
+    write_jsonl_records([card], chunks / "day1" / "Reading" / "08" / "clips.jsonl")
+    calls = []
+
+    def _prune(cfg, records, day):
+        calls.append((day, [c.clip_id for c in records.clips]))
+        return 3
+
+    monkeypatch.setattr(cli, "prune_day_without_index", _prune)
+    result = CliRunner().invoke(
+        app,
+        ["index", "--config", str(_cfg_file(tmp_path, chunks)), "--day", "1"],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls == [(1, [card.clip_id])]
+    assert "pruned 3 stale points" in result.output
+
+
+def test_index_still_fails_for_a_day_without_chunks(tmp_path: Path):
+    chunks = tmp_path / "chunks"
+    write_jsonl_records(
+        [_clip("Reading", 0, fixed=True)],
+        chunks / "day1" / "Reading" / "08" / "clips.jsonl",
+    )
+    result = CliRunner().invoke(
+        app,
+        ["index", "--config", str(_cfg_file(tmp_path, chunks)), "--day", "2"],
+    )
+    assert result.exit_code == 1
+    assert "No chunk records found for day 2" in result.output

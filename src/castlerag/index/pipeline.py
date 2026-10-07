@@ -448,6 +448,23 @@ def build_qdrant_index(
     return vector_size, [artifact.path for artifact in cache_artifacts]
 
 
+def prune_day_without_index(
+    cfg: CastleRAGConfig, records: LoadedArtifacts, day: int
+) -> int:
+    """Prune a day that has chunk records but nothing left to index.
+
+    E.g. every clip re-flagged as a placeholder and no events or transcripts:
+    there is no dense cache to upsert, but the day's old points must still go.
+    Needs no cache or vector size. Returns points deleted (0 if no collection).
+    """
+    from castlerag.index.qdrant import _collection_exists, get_client
+
+    client = get_client(host=cfg.qdrant.host, port=cfg.qdrant.port)
+    if not _collection_exists(client, cfg.qdrant.collection):
+        return 0
+    return prune_stale_points(client, cfg, records, day=day)
+
+
 def prune_stale_points(
     client: Any,
     cfg: CastleRAGConfig,

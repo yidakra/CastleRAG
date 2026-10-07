@@ -28,6 +28,7 @@ from castlerag.index.pipeline import (
     cache_dense_embeddings,
     filter_records,
     load_chunk_records,
+    prune_day_without_index,
 )
 from castlerag.retrieval.search import retrieve as retrieve_evidence
 from castlerag.routing.question_router import route_question
@@ -596,9 +597,18 @@ def index(
         return
     records = load_chunk_records(Path(cfg.preprocessing.chunks_dir))
     scoped_all = filter_records(records, cfg)
-    if _count_records(scoped_all) == 0:
+    if _count_records(records) == 0:
         console.print("[red]No chunk records found — run preprocess first.[/red]")
         raise typer.Exit(1)
+    if day is None and _count_records(scoped_all) == 0 and not lexical_only:
+        # Chunks exist but nothing is indexable on any day: prune each day.
+        days = sorted({c.day for c in records.clips if c.day})
+        removed = sum(
+            prune_day_without_index(cfg, records, int(d.removeprefix("day")))
+            for d in days
+        )
+        console.print(f"  nothing to index; pruned {removed} stale points")
+        return
     # The lexical indexes are rebuilt from every loaded day, so --lexical-only
     # does not need day-scoped records and skips the per-day guard below.
     if lexical_only:
@@ -610,6 +620,15 @@ def index(
         console.print("  dense   : skipped (--lexical-only)")
         return
     if day is not None and _count_records(filter_records(records, cfg, day=day)) == 0:
+        day_label = f"day{day}"
+        if any(c.day == day_label for c in records.clips):
+            # Chunks exist but nothing is indexable (all placeholders, no
+            # events or transcripts): only remove the day's stale points.
+            removed = prune_day_without_index(cfg, records, day)
+            console.print(
+                f"  day {day}: nothing to index; pruned {removed} stale points"
+            )
+            return
         console.print(
             f"[red]No chunk records found for day {day} — "
             f"run `castlerag preprocess --day {day}` first.[/red]"

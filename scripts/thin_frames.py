@@ -110,10 +110,10 @@ def thin_day(
     # no longer listed there, so only the saved plan still knows them.
     dropped_all: Set[str] = set()
     if plan_file.exists():
-        dropped_all.update(json.loads(plan_file.read_text()))
+        dropped_all.update(json.loads(plan_file.read_text(encoding="utf-8")))
     loaded = []
     for clips_file in sorted(chunks_day.rglob("clips.jsonl")):
-        lines = clips_file.read_text().splitlines()
+        lines = clips_file.read_text(encoding="utf-8").splitlines()
         loaded.append(
             (clips_file, [json.loads(line) for line in lines if line.strip()])
         )
@@ -157,7 +157,7 @@ def thin_day(
     for other in sorted(chunks_day.rglob("*.jsonl")):
         if other.name == "clips.jsonl":
             continue
-        lines = other.read_text().splitlines()
+        lines = other.read_text(encoding="utf-8").splitlines()
         rows = [json.loads(line) for line in lines if line.strip()]
         changed = False
         for row in rows:

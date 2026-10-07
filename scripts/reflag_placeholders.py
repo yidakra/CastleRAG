@@ -82,7 +82,7 @@ def reflag_day(
     }
     files = []
     for clips_file in sorted(chunks_day.rglob("clips.jsonl")):
-        lines = clips_file.read_text().splitlines()
+        lines = clips_file.read_text(encoding="utf-8").splitlines()
         files.append((clips_file, [json.loads(line) for line in lines if line.strip()]))
     rows = [row for _, file_rows in files for row in file_rows]
     with ThreadPoolExecutor(max_workers=workers) as pool:
