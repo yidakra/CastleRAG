@@ -377,7 +377,7 @@ def preprocess(
         from castlerag.preprocess.caption_ocr import annotate_clip
 
         vllm_url = _vllm_base_url()
-        n_annotated = 0
+        n_annotated = n_failed = 0
         for clips_path in _iter_clip_paths():
             clip_records = load_clip_records(clips_path)
             updated: list[ClipRecord] = []
@@ -400,13 +400,22 @@ def preprocess(
                             }
                         )
                     )
+                    n_annotated += 1
                 except Exception as exc:
+                    # Keep the clip (uncaptioned) rather than dropping it from
+                    # clips.jsonl: the record still carries its frames and
+                    # transcript, a rerun can caption it, and the ingest's
+                    # ">= 98 % captioned" gate then sees the failure.
+                    updated.append(cr)
+                    n_failed += 1
                     console.print(
-                        f"[yellow]  caption skipped {cr.clip_id}: {exc}[/yellow]"
+                        f"[yellow]  caption failed {cr.clip_id} (kept "
+                        f"uncaptioned): {exc}[/yellow]"
                     )
             write_jsonl_records(updated, clips_path)
-            n_annotated += len(updated)
-        console.print(f"  caption/OCR   : {n_annotated} clips annotated")
+        console.print(
+            f"  caption/OCR   : {n_annotated} clips annotated, {n_failed} failed"
+        )
 
     # ------------------------------------------------------------------ #
     # Event compression phase                                              #
