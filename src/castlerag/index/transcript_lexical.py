@@ -13,7 +13,7 @@ import pickle
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 from rank_bm25 import BM25Okapi
 
@@ -24,7 +24,7 @@ from castlerag.schemas import TranscriptWindow
 class BM25IndexBundle:
     """Persistable transcript BM25 bundle."""
 
-    bm25: BM25Okapi
+    bm25: Optional[BM25Okapi]  # None for an empty corpus (rank_bm25 cannot build one)
     windows: List[TranscriptWindow]
     tokenized_corpus: List[List[str]]
 
@@ -46,7 +46,7 @@ def build_bm25_index(
     Returns the in-memory index object for immediate use.
     """
     tokenized_corpus = [_tokenize(window.transcript_text) for window in windows]
-    bm25 = BM25Okapi(tokenized_corpus)
+    bm25 = BM25Okapi(tokenized_corpus) if tokenized_corpus else None
     bundle = BM25IndexBundle(
         bm25=bm25,
         windows=windows,
@@ -70,7 +70,7 @@ def load_bm25_index(index_path: Path) -> Any:
 
     windows = [TranscriptWindow.model_validate(window) for window in payload["windows"]]
     tokenized_corpus = payload["tokenized_corpus"]
-    bm25 = BM25Okapi(tokenized_corpus)
+    bm25 = BM25Okapi(tokenized_corpus) if tokenized_corpus else None
     return BM25IndexBundle(
         bm25=bm25,
         windows=windows,

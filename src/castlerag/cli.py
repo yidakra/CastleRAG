@@ -529,6 +529,12 @@ def embed(
         console.print(f"  dim     : {embed_client.dim}")
 
 
+def _rebuild_lexical(scoped_all, cache_dir: Path) -> None:
+    """Rebuild the transcript and visual-text BM25 indexes from all days."""
+    console.print(f"  BM25    : {build_bm25_artifact(scoped_all, cache_dir)}")
+    console.print(f"  visual  : {build_visual_bm25_artifact(scoped_all, cache_dir)}")
+
+
 @app.command()
 def index(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
@@ -608,15 +614,12 @@ def index(
             for d in days
         )
         console.print(f"  nothing to index; pruned {removed} stale points")
+        _rebuild_lexical(scoped_all, Path(cfg.embedding.cache_dir))
         return
     # The lexical indexes are rebuilt from every loaded day, so --lexical-only
     # does not need day-scoped records and skips the per-day guard below.
     if lexical_only:
-        cache_dir = Path(cfg.embedding.cache_dir)
-        bm25_path = build_bm25_artifact(scoped_all, cache_dir)
-        visual_path = build_visual_bm25_artifact(scoped_all, cache_dir)
-        console.print(f"  BM25    : {bm25_path}")
-        console.print(f"  visual  : {visual_path}")
+        _rebuild_lexical(scoped_all, Path(cfg.embedding.cache_dir))
         console.print("  dense   : skipped (--lexical-only)")
         return
     if day is not None and _count_records(filter_records(records, cfg, day=day)) == 0:
@@ -628,6 +631,9 @@ def index(
             console.print(
                 f"  day {day}: nothing to index; pruned {removed} stale points"
             )
+            # The lexical indexes span all days; rebuild them so the pruned
+            # day's placeholder captions stop matching there too.
+            _rebuild_lexical(scoped_all, Path(cfg.embedding.cache_dir))
             return
         console.print(
             f"[red]No chunk records found for day {day} — "

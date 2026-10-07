@@ -45,6 +45,8 @@ def _cfg_file(tmp_path: Path, chunks: Path) -> Path:
         "  camera_scope: all\n"
         "preprocessing:\n"
         f"  chunks_dir: {chunks}\n"
+        "embedding:\n"
+        f"  cache_dir: {tmp_path / 'embeddings'}\n"
     )
     return cfg
 
@@ -256,6 +258,9 @@ def test_index_prunes_a_day_with_nothing_left_to_index(tmp_path: Path, monkeypat
     assert result.exit_code == 0, result.output
     assert calls == [(1, [card.clip_id])]
     assert "pruned 3 stale points" in result.output
+    # lexical indexes rebuilt after pruning, without the placeholder clip
+    visual = json.loads((tmp_path / "embeddings" / "visual_text.json").read_text())
+    assert card.clip_id not in json.dumps(visual)
 
 
 def test_index_still_fails_for_a_day_without_chunks(tmp_path: Path):
@@ -270,3 +275,14 @@ def test_index_still_fails_for_a_day_without_chunks(tmp_path: Path):
     )
     assert result.exit_code == 1
     assert "No chunk records found for day 2" in result.output
+
+
+def test_transcript_bm25_handles_an_empty_corpus(tmp_path: Path):
+    from castlerag.index.transcript_lexical import build_bm25_index, load_bm25_index
+    from castlerag.retrieval.transcript_lexical import score_windows
+
+    path = tmp_path / "transcripts.pkl"
+    built = build_bm25_index([], path)
+    assert built.bm25 is None
+    loaded = load_bm25_index(path)
+    assert score_windows(loaded, [], "what did she say", {}) == []
