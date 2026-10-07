@@ -51,7 +51,8 @@ for d in $DAYS; do
   [ -d "$SRC_FR/day$d" ] || { echo "day$d: no frames on scratch, skipped"; continue; }
   mkdir -p "$DST_FR/day$d"
   # One rsync per camera directory, 8 at a time: GPFS metadata is the cost.
-  ls "$SRC_FR/day$d" | xargs -P 8 -I{} rsync -a "$SRC_FR/day$d/{}" "$DST_FR/day$d/" || fail=1
+  find "$SRC_FR/day$d" -mindepth 1 -maxdepth 1 -print0 \
+    | xargs -0 -P 8 -I{} rsync -a {} "$DST_FR/day$d/" || fail=1
   s=$(count "$SRC_FR/day$d"); t=$(count "$DST_FR/day$d")
   echo "day$d frames: $s on scratch, $t in project"; [ "$t" -ge "$s" ] || fail=1
 done
