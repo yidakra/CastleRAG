@@ -39,6 +39,44 @@ def estimate_image_tokens(width: int, height: int) -> int:
     return math.ceil(width / _PATCH) * math.ceil(height / _PATCH)
 
 
+_FRAME_PATH_ALIASES: List[Tuple[str, str]] = []
+
+
+def set_frame_path_aliases(aliases: "dict[str, str]") -> None:
+    """Register old-prefix -> new-prefix rewrites for stored frame paths.
+
+    Called by ``load_config`` from ``preprocessing.frame_path_aliases``. The
+    longest matching prefix wins.
+    """
+    _FRAME_PATH_ALIASES[:] = sorted(
+        ((old.rstrip("/"), new.rstrip("/")) for old, new in aliases.items()),
+        key=lambda pair: len(pair[0]),
+        reverse=True,
+    )
+
+
+def relocate_frame_path(path: str) -> str:
+    """Apply the first matching alias to ``path`` (no existence check)."""
+    for old, new in _FRAME_PATH_ALIASES:
+        if path == old or path.startswith(old + "/"):
+            return new + path[len(old) :]
+    return path
+
+
+def resolve_frame_path(path: str) -> str:
+    """Return where a stored frame path lives now.
+
+    The stored path if it exists, else its aliased location if that exists,
+    else the stored path unchanged (callers treat it as missing).
+    """
+    if Path(path).exists():
+        return path
+    moved = relocate_frame_path(path)
+    if moved != path and Path(moved).exists():
+        return moved
+    return path
+
+
 def available_frames(paths: Sequence[str]) -> List[str]:
     """Return the frames in ``paths`` that still exist on disk.
 
@@ -50,9 +88,9 @@ def available_frames(paths: Sequence[str]) -> List[str]:
     tests) the list is returned unchanged and callers skip unreadable files as
     before.
     """
-    frames = list(paths)
+    frames = [resolve_frame_path(p) for p in paths]
     existing = [p for p in frames if Path(p).exists()]
-    return existing if existing else frames
+    return existing if existing else list(paths)
 
 
 def sample_frames_evenly(paths: Sequence[str], max_frames: int) -> List[str]:

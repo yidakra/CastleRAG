@@ -35,7 +35,11 @@ from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from castlerag.config import load_config
-from castlerag.frame_encoding import available_frames, sample_frames_evenly
+from castlerag.frame_encoding import (
+    available_frames,
+    resolve_frame_path,
+    sample_frames_evenly,
+)
 
 PLAN_NAME = ".thin_plan.json"
 # Stats and unlinks are metadata operations on a shared filesystem (GPFS on
@@ -46,13 +50,15 @@ IO_WORKERS = 32
 
 def _size(path: str) -> int:
     try:
-        return Path(path).stat().st_size
+        return Path(resolve_frame_path(path)).stat().st_size
     except OSError:
         return 0
 
 
 def _unlink(path: str) -> None:
-    Path(path).unlink(missing_ok=True)
+    # Delete the frame where it lives now (frame_path_aliases), not only
+    # at the stored path.
+    Path(resolve_frame_path(path)).unlink(missing_ok=True)
 
 
 def _bounded_map(pool, fn, items: List[str], batch: int = 4096) -> Iterator:
@@ -127,7 +133,9 @@ def thin_day(
         }
     )
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        flags = _bounded_map(pool, lambda p: Path(p).exists(), candidates)
+        flags = _bounded_map(
+            pool, lambda p: Path(resolve_frame_path(p)).exists(), candidates
+        )
         existing = {p for p, ok in zip(candidates, flags) if ok}
     planned: List[Tuple[Path, List[dict]]] = []
     for clips_file, rows in loaded:
