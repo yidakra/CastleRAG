@@ -36,11 +36,14 @@ EMB="$DERIVED/embeddings"
 FRAMES_DIR="$DERIVED/frames_1fps"
 STAGE="$SC/hf_stage"
 export HF_HUB_DISABLE_TELEMETRY=1
-# Read the login token from where `hf auth login` wrote it, even when the
-# submitting shell exported HF_HOME (e.g. the model cache on scratch): with
-# --export=ALL, HF_HOME made the day-2 upload look for $HF_HOME/token and abort
-# as "not logged in".
-[ -z "${HF_TOKEN:-}" ] && export HF_TOKEN_PATH="${HF_TOKEN_PATH:-$HOME/.cache/huggingface/token}"
+# The submitting shell may have exported HF_HOME for something else (e.g. the
+# model cache on scratch); with --export=ALL the day-2 upload then looked for
+# $HF_HOME/token, found none and aborted as "not logged in". If no token is
+# configured there, fall back to where `hf auth login` writes by default.
+if [ -z "${HF_TOKEN:-}" ] && [ -z "${HF_TOKEN_PATH:-}" ] \
+   && [ ! -s "${HF_HOME:-$HOME/.cache/huggingface}/token" ]; then
+  export HF_TOKEN_PATH="$HOME/.cache/huggingface/token"
+fi
 # Start from a clean day stage so files left by an earlier run (e.g. frame
 # tars from a FRAMES=1 attempt) are never uploaded with this one.
 rm -rf "${STAGE:?}/day${DAY}"
