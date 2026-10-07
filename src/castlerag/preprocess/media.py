@@ -162,10 +162,12 @@ def frame_stats(frame_path: Path) -> "tuple[float, float]":
 # consistently exceed 20. The CASTLE test card is colourful (std ~70).
 BLANK_STD = 8.0
 
-# Flatness above this is the CASTLE test card: a synthetic graphic (flat grey
-# grid, colour bars) scoring ~0.83, while camera footage has sensor noise
-# everywhere and scored at most 0.55 on 600 sampled day 1-3 clips, still
-# fixed-camera rooms included (0.29-0.49).
+# Flatness above this is the CASTLE test card, a synthetic graphic (flat grey
+# grid, colour bars). Measured on days 1-3 with draft decoding: card frames
+# score ~0.91; real frames have sensor noise and scored median 0.35-0.44, with
+# a rare overexposed frame up to 0.81. A clip needs >80 % such frames to be a
+# placeholder; on 600 sampled real clips (300 still, 300 normal) none was,
+# apart from one near-black covered-lens clip that is blank anyway.
 TEST_CARD_FLAT_FRACTION = 0.65
 
 
