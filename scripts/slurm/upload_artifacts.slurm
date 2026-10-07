@@ -36,6 +36,16 @@ EMB="$DERIVED/embeddings"
 FRAMES_DIR="$DERIVED/frames_1fps"
 STAGE="$SC/hf_stage"
 export HF_HUB_DISABLE_TELEMETRY=1
+# The submitting shell may have exported HF_HOME for something else (e.g. the
+# model cache on scratch); with --export=ALL the day-2 upload then looked for
+# $HF_HOME/token, found none and aborted as "not logged in". If no token is
+# configured there, fall back to where `hf auth login` writes by default
+# (huggingface_hub's default HF_HOME, which follows XDG_CACHE_HOME).
+HF_DEFAULT_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/huggingface"
+if [ -z "${HF_TOKEN:-}" ] && [ -z "${HF_TOKEN_PATH:-}" ] \
+   && [ ! -s "${HF_HOME:-$HF_DEFAULT_HOME}/token" ]; then
+  export HF_TOKEN_PATH="$HF_DEFAULT_HOME/token"
+fi
 # Start from a clean day stage so files left by an earlier run (e.g. frame
 # tars from a FRAMES=1 attempt) are never uploaded with this one.
 rm -rf "${STAGE:?}/day${DAY}"
