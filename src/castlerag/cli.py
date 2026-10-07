@@ -377,11 +377,17 @@ def preprocess(
         from castlerag.preprocess.caption_ocr import annotate_clip
 
         vllm_url = _vllm_base_url()
-        n_annotated = n_failed = 0
+        n_annotated = n_failed = n_placeholder = 0
         for clips_path in _iter_clip_paths():
             clip_records = load_clip_records(clips_path)
             updated: list[ClipRecord] = []
             for cr in clip_records:
+                if cr.is_placeholder:
+                    # Test card or blank: nothing to caption, and the clip is
+                    # left out of embedding and the index as well.
+                    updated.append(cr)
+                    n_placeholder += 1
+                    continue
                 frames = [Path(p) for p in cr.sampled_frame_paths]
                 try:
                     ann = annotate_clip(
@@ -414,7 +420,8 @@ def preprocess(
                     )
             write_jsonl_records(updated, clips_path)
         console.print(
-            f"  caption/OCR   : {n_annotated} clips annotated, {n_failed} failed"
+            f"  caption/OCR   : {n_annotated} clips annotated, {n_failed} failed, "
+            f"{n_placeholder} placeholders skipped"
         )
 
     # ------------------------------------------------------------------ #

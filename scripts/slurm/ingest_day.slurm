@@ -66,6 +66,8 @@ CONF="${CONF:-configs/snellius_fixedcams.yaml}"
 COLL="castle_multimodal_v1"
 CAMS="${CAMS:-auto}"
 SKIP_BASE="${SKIP_BASE:-0}"       # 1 = chunks/frames already exist for CAMS
+CAPTION="${CAPTION:-1}"           # 0 = with SKIP_BASE=1: rebuild events only (captions kept),
+                                  #     e.g. after scripts/reflag_placeholders.py
 SKIP_PREPROCESS="${SKIP_PREPROCESS:-0}" # 1 = Phase 1 (base+caption+events) finished for CAMS in an
                                   #     earlier job: validate, embed and index only
 SNAPSHOT="${SNAPSHOT:-1}"         # 1 = Qdrant snapshot before upserting
@@ -358,6 +360,10 @@ if [ "${SKIP_PREPROCESS}" = "1" ]; then
 else
 echo "${T} === Phase 1: preprocess ${CAM_ARR[*]} hours=${HOURS} split=${SPLIT} $(date -Iseconds) ==="
 BASE_FLAG=(); [ "${SKIP_BASE}" = "1" ] && BASE_FLAG=(--skip-base)
+CAPTION_FLAG=(--caption); [ "${CAPTION}" = "0" ] && CAPTION_FLAG=()
+if [ "${CAPTION}" = "0" ] && [ "${SKIP_BASE}" != "1" ]; then
+  echo "${T} ABORT: CAPTION=0 needs SKIP_BASE=1 (a new base pass needs captions)"; exit 1
+fi
 declare -a P PC
 w=0
 for cam in "${CAM_ARR[@]}"; do
@@ -370,7 +376,7 @@ for cam in "${CAM_ARR[@]}"; do
     ( T0=$(date +%s)
       VLLM_BASE_URL="http://localhost:${port}/v1" \
         castlerag preprocess --config "${CONF}" --day "${DAY}" --camera "${cam}" "${HFLAGS[@]}" \
-          "${BASE_FLAG[@]}" --caption --events > "${L}_cam_${tag}_${J}.log" 2>&1
+          "${BASE_FLAG[@]}" "${CAPTION_FLAG[@]}" --events > "${L}_cam_${tag}_${J}.log" 2>&1
       rc=$?; echo "${T} ${tag} (port ${port}) rc=${rc} in $(( $(date +%s)-T0 ))s"; exit $rc
     ) & P+=($!); PC+=("${tag}")
   done
@@ -384,7 +390,8 @@ fi
 
 # --- Phase 1b: validate ----------------------------------------------------
 # Fixed cams: camera_type == {"fixed"}, room == {<cam>}. Ego cams:
-# camera_type == {"ego"}, room == {None}. Both: >=98 % captioned, no corrupt
+# camera_type == {"ego"}, room == {None}. Both: >=98 % of real (non-placeholder)
+# clips captioned, no corrupt
 # lines, and events wherever they can exist: event compression needs 4 adjacent
 # non-placeholder clips, which a mostly idle camera may never have (day 1
 # Reading: 1147 of 1201 clips blank or frozen, 0 events).
@@ -394,7 +401,7 @@ root, cams = sys.argv[1], sys.argv[2:]
 fixed = set(os.environ.get("FIXED_CAMS", "").split())
 ok = True
 for cam in cams:
-    tot = cap = bad = ev = groups = 0; rooms = set(); types = set()
+    tot = real = cap = bad = ev = groups = 0; rooms = set(); types = set()
     for f in glob.glob(f"{root}/{cam}/*/clips.jsonl"):
         usable = []
         for line in open(f):
@@ -404,9 +411,10 @@ for cam in cams:
                 d = json.loads(line)
             except Exception:
                 bad += 1; continue
-            tot += 1; cap += bool(d.get("clip_caption"))
+            tot += 1
             rooms.add(d.get("room")); types.add(d.get("camera_type"))
-            if not d.get("is_placeholder"):
+            if not d.get("is_placeholder"):  # test card / blank: never captioned
+                real += 1; cap += bool(d.get("clip_caption"))
                 usable.append((d.get("absolute_start"), d.get("absolute_end")))
         # Same grouping as `preprocess --events`: consecutive runs of 4 usable
         # clips, kept only when each clip ends where the next one starts.
@@ -416,9 +424,9 @@ for cam in cams:
             groups += all(g[k][1] == g[k + 1][0] for k in range(3))
     for f in glob.glob(f"{root}/{cam}/*/events.jsonl"):
         ev += sum(1 for line in open(f) if line.strip())
-    pct = 100 * cap / max(tot, 1)
+    pct = 100 * cap / real if real else 100.0
     want_type, want_room = ({"fixed"}, {cam}) if cam in fixed else ({"ego"}, {None})
-    print(f"  {cam}: clips={tot} captioned={cap} ({pct:.0f}%) events={ev} "
+    print(f"  {cam}: clips={tot} real={real} captioned={cap} ({pct:.0f}%) events={ev} "
           f"(possible {groups}) bad={bad} camera_type={types} room={rooms}")
     if bad or tot == 0 or (groups and ev == 0) or pct < 98 or types != want_type or rooms != want_room:
         ok = False

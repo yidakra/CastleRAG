@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Sequence
+from typing import Any, Callable, Iterable, List, Optional, Sequence
 
 import numpy as np
 
@@ -50,6 +51,8 @@ _CACHE_CLIPS = "clips.npz"
 _CACHE_AUX_TEXT = "aux_text.npz"
 _CACHE_AUX_IMAGE = "aux_image.npz"
 _CACHE_AUX_VIDEO = "aux_video.npz"
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -134,11 +137,13 @@ def filter_records(
             if (day_label is None or row.day == day_label)
             and _camera_allowed(row.camera_id, row.camera_type)
         ],
+        # Placeholder clips (test card, blank) are not embedded or indexed.
         clips=[
             row
             for row in records.clips
             if (day_label is None or row.day == day_label)
             and _camera_allowed(row.camera_id, row.camera_type)
+            and not row.is_placeholder
         ],
         events=[
             row
@@ -437,7 +442,86 @@ def build_qdrant_index(
                 payloads=payloads[start:stop],
             )
 
+    removed = prune_stale_points(client, cfg, records, day=day)
+    if removed:
+        log.info("pruned %d stale clip/event points", removed)
     return vector_size, [artifact.path for artifact in cache_artifacts]
+
+
+def prune_stale_points(
+    client: Any,
+    cfg: CastleRAGConfig,
+    records: LoadedArtifacts,
+    day: Optional[int] = None,
+) -> int:
+    """Delete clip and event points that the chunk files no longer back.
+
+    Upserts only add, so a re-flagged clip (now a placeholder) or an event that
+    re-grouping replaced would otherwise stay searchable. For each day and
+    camera that has clip records loaded, delete its ``main_clip`` points whose
+    clip is a placeholder, and its ``main_event_summary`` points whose id is not
+    in the current events. Cameras without chunk records are left alone, so a
+    missing chunk file never wipes a camera's points. Returns points deleted.
+    """
+    from qdrant_client.http import models as qm
+
+    in_scope = filter_records(records, cfg, day=day)
+    groups = {(c.day, c.camera_id) for c in records.clips if c.day and c.camera_id}
+    if day is not None:
+        groups = {g for g in groups if g[0] == f"day{day}"}
+    allowed_events = {(e.day, e.camera_id, e.event_summary_id) for e in in_scope.events}
+    removed = 0
+    for d, cam in sorted(groups):
+        placeholders = [
+            c.clip_id
+            for c in records.clips
+            if c.day == d and c.camera_id == cam and c.is_placeholder
+        ]
+        keep_events = [eid for (ed, ec, eid) in allowed_events if ed == d and ec == cam]
+        base = [
+            qm.FieldCondition(key="day", match=qm.MatchValue(value=d)),
+            qm.FieldCondition(key="camera_id", match=qm.MatchValue(value=cam)),
+        ]
+        selectors = []
+        for start in range(0, len(placeholders), 1000):
+            selectors.append(
+                qm.Filter(
+                    must=base
+                    + [
+                        qm.FieldCondition(
+                            key="source_type", match=qm.MatchValue(value="main_clip")
+                        ),
+                        qm.FieldCondition(
+                            key="record_id",
+                            match=qm.MatchAny(any=placeholders[start : start + 1000]),
+                        ),
+                    ]
+                )
+            )
+        event_filter = qm.Filter(
+            must=base
+            + [
+                qm.FieldCondition(
+                    key="source_type", match=qm.MatchValue(value="main_event_summary")
+                )
+            ],
+            must_not=(
+                [qm.FieldCondition(key="record_id", match=qm.MatchAny(any=keep_events))]
+                if keep_events
+                else []
+            ),
+        )
+        selectors.append(event_filter)
+        for flt in selectors:
+            n = client.count(cfg.qdrant.collection, count_filter=flt, exact=True).count
+            if n:
+                client.delete(
+                    cfg.qdrant.collection,
+                    points_selector=qm.FilterSelector(filter=flt),
+                    wait=True,
+                )
+                removed += n
+    return removed
 
 
 def _cache_records(

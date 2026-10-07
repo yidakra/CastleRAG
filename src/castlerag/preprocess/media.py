@@ -137,12 +137,11 @@ def extract_subclip(
 
 
 def is_placeholder_frame(frame_path: Path) -> bool:
-    """Return True if the frame matches the CASTLE test-card placeholder.
+    """Return True if the frame is blank (near-uniform, e.g. a black frame).
 
-    The CASTLE test card is a low-variance static card (near-uniform color or
-    simple test pattern).  We use grayscale standard deviation < 8 as the
-    heuristic; real scene frames consistently exceed 20.  This threshold can
-    be tightened once the exact test-card image is available from the dataset.
+    Grayscale standard deviation < 8; real scene frames consistently exceed 20.
+    The CASTLE test card itself is colourful (std ~70) and is caught by
+    ``is_test_card_frame`` instead.
     """
     import numpy as np
     from PIL import Image
@@ -152,38 +151,31 @@ def is_placeholder_frame(frame_path: Path) -> bool:
     return float(arr.std()) < 8.0
 
 
-def is_static_window(frame_paths: List[Path], diff_threshold: float = 2.0) -> bool:
-    """Return True if frames across the window are nearly identical.
+# Share of horizontally adjacent pixels with exactly equal grayscale values, at
+# 960x540. The CASTLE test card is a synthetic graphic (flat grey grid, colour
+# bars) and scores ~0.83; camera footage has sensor noise everywhere and scored
+# at most 0.55 on 600 sampled day 1-3 clips, still fixed-camera rooms included
+# (0.29-0.49).
+TEST_CARD_FLAT_FRACTION = 0.65
 
-    Computes the median mean-absolute-difference between consecutive grayscale
-    frames sampled evenly across the window.  A static test card produces a
-    value near zero regardless of its colour or pattern; real egocentric scenes
-    at 1 fps consistently exceed the threshold even when the participant is
-    sitting still (camera noise, subtle motion).
 
-    This catches colorful or patterned test cards that is_placeholder_frame
-    alone would miss.  Requires at least 2 frames; returns False for shorter
-    inputs.
-    """
-    if len(frame_paths) < 2:
-        return False
-
+def frame_flatness(frame_path: Path) -> float:
+    """Fraction of horizontally adjacent pixels that are exactly equal."""
     import numpy as np
     from PIL import Image
 
-    sample_count = min(8, len(frame_paths))
-    idx = np.linspace(0, len(frame_paths) - 1, num=sample_count, dtype=int)
-    sample = [frame_paths[i] for i in sorted(set(idx.tolist()))]
+    with Image.open(frame_path) as img:
+        gray = img.convert("L")
+        if gray.width > 960:  # 4K source frames: measure at 960x540, never upscale
+            gray = gray.resize((960, round(960 * gray.height / gray.width)))
+        arr = np.asarray(gray, dtype=np.int16)
+    return float((np.diff(arr, axis=1) == 0).mean())
 
-    diffs: List[float] = []
-    prev: "np.ndarray | None" = None
-    for fp in sample:
-        with Image.open(fp) as img:
-            arr = np.array(img.convert("L"), dtype=np.float32)
-        if prev is not None:
-            diffs.append(float(np.mean(np.abs(arr - prev))))
-        prev = arr
 
-    if not diffs:
-        return False
-    return float(np.median(diffs)) < diff_threshold
+def is_test_card_frame(frame_path: Path) -> bool:
+    """Return True if the frame shows the CASTLE test card (a flat graphic).
+
+    Detected positively from flatness rather than from stillness: a fixed
+    camera filming an empty room is still too, but it is real footage.
+    """
+    return frame_flatness(frame_path) > TEST_CARD_FLAT_FRACTION
