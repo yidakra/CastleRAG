@@ -190,7 +190,13 @@ echo "${T} day${DAY} points already in ${COLL}: ${DAY_PTS}"
 if [ "${CAMS}" = "auto" ]; then
   CAND=(); NOVID=()
   for c in ${SCOPE_CAMS}; do
-    if has_video "$c"; then CAND+=("$c"); else NOVID+=("$c"); fi
+    # Skip modes work from existing chunks, so a deleted raw video doesn't
+    # rule a camera out.
+    if has_video "$c" || [ "${SKIP_BASE}" = "1" ] || [ "${SKIP_PREPROCESS}" = "1" ]; then
+      CAND+=("$c")
+    else
+      NOVID+=("$c")
+    fi
   done
   [ "${#NOVID[@]}" -gt 0 ] && echo "${T} no raw day-${DAY} video, not auto candidates: ${NOVID[*]}"
   if [ "${#CAND[@]}" -eq 0 ]; then
