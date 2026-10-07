@@ -452,8 +452,10 @@ def preprocess(
                     event_records.append(ev)
                 except Exception as exc:
                     console.print(f"[yellow]  event compress skipped: {exc}[/yellow]")
-            if event_records:
-                ev_path = clips_path.parent / "events.jsonl"
+            ev_path = clips_path.parent / "events.jsonl"
+            # Rewrite even when empty, so a rebuild (e.g. after re-flagging
+            # placeholders) never leaves events from an older grouping behind.
+            if event_records or ev_path.exists():
                 write_jsonl_records(event_records, ev_path)
                 n_events += len(event_records)
         console.print(f"  events        : {n_events} event summaries written")

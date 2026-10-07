@@ -204,3 +204,25 @@ def test_reflag_day_unflags_still_rooms_and_flags_cards(tmp_path: Path):
     assert flags == [False, True, True]  # the frameless clip keeps its flag
     assert (chunks / "clips.jsonl.preflag").exists()
     assert rf.reflag_day(day, apply=True)["files"] == 0  # idempotent
+
+
+def test_events_rebuild_clears_events_no_longer_possible(tmp_path: Path):
+    """Re-flagging can leave an hour with no 4 usable clips: the old events go."""
+    chunks = tmp_path / "chunks"
+    hour = chunks / "day1" / "Reading" / "08"
+    clips = [
+        _clip("Reading", i, fixed=True).model_copy(update={"is_placeholder": True})
+        for i in range(4)
+    ]
+    write_jsonl_records(clips, hour / "clips.jsonl")
+    write_jsonl_records([_event("Reading", "ev_stale")], hour / "events.jsonl")
+    result = CliRunner().invoke(
+        app,
+        [
+            "preprocess", "--config", str(_cfg_file(tmp_path, chunks)), "--day", "1",
+            "--skip-base", "--events", "--camera", "Reading",
+        ],
+        env={"VLLM_BASE_URL": "http://stub/v1"},
+    )
+    assert result.exit_code == 0, result.output
+    assert (hour / "events.jsonl").read_text() == ""
