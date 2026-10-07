@@ -785,6 +785,12 @@ def test_preprocess_caption_keeps_a_clip_whose_captioning_fails(
     clips = [
         _clip("Allie", i).model_copy(update={"clip_caption": None}) for i in range(3)
     ]
+    clips[1] = clips[1].model_copy(
+        update={
+            "sampled_frame_paths": ["/tmp/frame.jpg"],
+            "transcript_text": "Allie said hello.",
+        }
+    )
     write_jsonl_records(clips, path)
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(
@@ -816,4 +822,5 @@ def test_preprocess_caption_keeps_a_clip_whose_captioning_fails(
     after = load_clip_records(path)
     assert [c.clip_id for c in after] == [c.clip_id for c in clips]
     assert [c.clip_caption for c in after] == ["NEW", None, "NEW"]
-    assert after[1].sampled_frame_paths == clips[1].sampled_frame_paths
+    assert after[1].sampled_frame_paths == ["/tmp/frame.jpg"]
+    assert after[1].transcript_text == "Allie said hello."
