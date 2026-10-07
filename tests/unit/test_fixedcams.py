@@ -771,3 +771,49 @@ def test_participant_or_fixed_filter_is_binding_in_qdrant():
     )
     hits = client.query_points("t", query=[1.0, 0.0], query_filter=flt, limit=10).points
     assert sorted(h.payload["camera_id"] for h in hits) == ["Kitchen", "Werner"]
+
+
+def test_preprocess_caption_keeps_a_clip_whose_captioning_fails(
+    tmp_path: Path, monkeypatch
+):
+    """A failed captioning call leaves the clip in clips.jsonl, uncaptioned."""
+    from castlerag.index.io import load_clip_records, write_jsonl_records
+    from castlerag.preprocess import caption_ocr
+
+    chunks = tmp_path / "chunks"
+    path = chunks / "day1" / "Allie" / "08" / "clips.jsonl"
+    clips = [
+        _clip("Allie", i).model_copy(update={"clip_caption": None}) for i in range(3)
+    ]
+    write_jsonl_records(clips, path)
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        "dataset:\n"
+        f"  ego_cameras: {EGO}\n"
+        f"  exo_cameras: {EXO}\n"
+        "  camera_scope: all\n"
+        "preprocessing:\n"
+        f"  chunks_dir: {chunks}\n"
+    )
+    failing = clips[1].clip_id
+
+    def _flaky_annotate(**kwargs):
+        if kwargs["clip_id"] == failing:
+            raise RuntimeError("vLLM 503")
+        return SimpleNamespace(clip_caption="NEW", ocr_text=None, scene_graph_text=None)
+
+    monkeypatch.setattr(caption_ocr, "annotate_clip", _flaky_annotate)
+    monkeypatch.setenv("VLLM_BASE_URL", "http://stub/v1")
+    result = CliRunner().invoke(
+        app,
+        [
+            "preprocess", "--config", str(cfg_path), "--day", "1",
+            "--skip-base", "--caption", "--camera", "Allie",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "2 clips annotated, 1 failed" in result.output
+    after = load_clip_records(path)
+    assert [c.clip_id for c in after] == [c.clip_id for c in clips]
+    assert [c.clip_caption for c in after] == ["NEW", None, "NEW"]
+    assert after[1].sampled_frame_paths == clips[1].sampled_frame_paths
