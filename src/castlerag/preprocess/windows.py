@@ -84,7 +84,7 @@ def mark_placeholder_windows(
     """
     if not (0.0 <= placeholder_threshold <= 1.0):
         raise ValueError("placeholder_threshold must be between 0.0 and 1.0")
-    from castlerag.preprocess.media import is_placeholder_frame, is_test_card_frame
+    from castlerag.preprocess.media import is_placeholder_or_card
 
     result: List[VideoWindow] = []
     for w in windows:
@@ -93,9 +93,7 @@ def mark_placeholder_windows(
         if not frames:
             result.append(w)
             continue
-        n_placeholder = sum(
-            1 for f in frames if is_placeholder_frame(f) or is_test_card_frame(f)
-        )
+        n_placeholder = sum(1 for f in frames if is_placeholder_or_card(f))
         frac = n_placeholder / len(frames)
         result.append(
             VideoWindow(

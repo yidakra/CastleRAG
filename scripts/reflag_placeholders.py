@@ -36,7 +36,7 @@ from typing import Dict, List, Optional
 
 from castlerag.config import load_config
 from castlerag.frame_encoding import available_frames
-from castlerag.preprocess.media import is_placeholder_frame, is_test_card_frame
+from castlerag.preprocess.media import is_placeholder_or_card
 
 PLACEHOLDER_THRESHOLD = 0.80  # same default as mark_placeholder_windows
 IO_WORKERS = 16
@@ -47,11 +47,7 @@ def clip_is_placeholder(frame_paths: List[str]) -> Optional[bool]:
     frames = [p for p in available_frames(frame_paths) if Path(p).exists()]
     if not frames:
         return None
-    hits = sum(
-        1
-        for f in frames
-        if is_placeholder_frame(Path(f)) or is_test_card_frame(Path(f))
-    )
+    hits = sum(1 for f in frames if is_placeholder_or_card(Path(f)))
     return hits / len(frames) > PLACEHOLDER_THRESHOLD
 
 

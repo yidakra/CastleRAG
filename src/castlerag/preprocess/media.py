@@ -136,40 +136,42 @@ def extract_subclip(
     return out_path
 
 
-def is_placeholder_frame(frame_path: Path) -> bool:
-    """Return True if the frame is blank (near-uniform, e.g. a black frame).
+def frame_stats(frame_path: Path) -> "tuple[float, float]":
+    """Return (grayscale std, flatness) for one frame, from a single decode.
 
-    Grayscale standard deviation < 8; real scene frames consistently exceed 20.
-    The CASTLE test card itself is colourful (std ~70) and is caught by
-    ``is_test_card_frame`` instead.
+    JPEG frames are decoded at reduced scale (draft mode: 3840x2160 decodes
+    straight to 960x540, several times faster than a full decode). Flatness is
+    the fraction of horizontally adjacent pixels with exactly equal values.
+    Smaller images are measured as they are (never upscaled).
     """
     import numpy as np
     from PIL import Image
 
     with Image.open(frame_path) as img:
-        arr = np.array(img.convert("L"), dtype=np.float32)
-    return float(arr.std()) < 8.0
+        if img.format == "JPEG" and img.width > 960:
+            img.draft("L", (960, 540))
+        gray = img.convert("L")
+        if gray.width > 960:
+            gray = gray.resize((960, round(960 * gray.height / gray.width)))
+        arr = np.asarray(gray, dtype=np.int16)
+    flat = float((np.diff(arr, axis=1) == 0).mean()) if arr.shape[1] > 1 else 0.0
+    return float(arr.std()), flat
 
 
-# Share of horizontally adjacent pixels with exactly equal grayscale values, at
-# 960x540. The CASTLE test card is a synthetic graphic (flat grey grid, colour
-# bars) and scores ~0.83; camera footage has sensor noise everywhere and scored
-# at most 0.55 on 600 sampled day 1-3 clips, still fixed-camera rooms included
-# (0.29-0.49).
+# Grayscale std below this is a blank frame (black, lights off); real scenes
+# consistently exceed 20. The CASTLE test card is colourful (std ~70).
+BLANK_STD = 8.0
+
+# Flatness above this is the CASTLE test card: a synthetic graphic (flat grey
+# grid, colour bars) scoring ~0.83, while camera footage has sensor noise
+# everywhere and scored at most 0.55 on 600 sampled day 1-3 clips, still
+# fixed-camera rooms included (0.29-0.49).
 TEST_CARD_FLAT_FRACTION = 0.65
 
 
-def frame_flatness(frame_path: Path) -> float:
-    """Fraction of horizontally adjacent pixels that are exactly equal."""
-    import numpy as np
-    from PIL import Image
-
-    with Image.open(frame_path) as img:
-        gray = img.convert("L")
-        if gray.width > 960:  # 4K source frames: measure at 960x540, never upscale
-            gray = gray.resize((960, round(960 * gray.height / gray.width)))
-        arr = np.asarray(gray, dtype=np.int16)
-    return float((np.diff(arr, axis=1) == 0).mean())
+def is_placeholder_frame(frame_path: Path) -> bool:
+    """Return True if the frame is blank (near-uniform, e.g. a black frame)."""
+    return frame_stats(frame_path)[0] < BLANK_STD
 
 
 def is_test_card_frame(frame_path: Path) -> bool:
@@ -178,4 +180,10 @@ def is_test_card_frame(frame_path: Path) -> bool:
     Detected positively from flatness rather than from stillness: a fixed
     camera filming an empty room is still too, but it is real footage.
     """
-    return frame_flatness(frame_path) > TEST_CARD_FLAT_FRACTION
+    return frame_stats(frame_path)[1] > TEST_CARD_FLAT_FRACTION
+
+
+def is_placeholder_or_card(frame_path: Path) -> bool:
+    """Blank or test card, from one decode (used per frame by the window rule)."""
+    std, flat = frame_stats(frame_path)
+    return std < BLANK_STD or flat > TEST_CARD_FLAT_FRACTION
