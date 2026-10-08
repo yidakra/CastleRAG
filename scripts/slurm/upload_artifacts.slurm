@@ -29,12 +29,15 @@ REPO="${REPO:-yidakra/castlerag-artifacts}"
 FRAMES="${FRAMES:-0}"
 CONF="${CONF:-configs/snellius_fixedcams.yaml}"
 HF_VENV="${HF_VENV:-$HOME/hfdl_venv}"
+CASTLE_VENV="${CASTLE_VENV:-$HOME/castlerag_venv}"
 SC="/scratch-shared/$USER"
-DERIVED="$SC/castle_derived"
-CHUNKS="$DERIVED/chunks"
-EMB="$DERIVED/embeddings"
-FRAMES_DIR="$DERIVED/frames_1fps"
-STAGE="$SC/hf_stage"
+# Artifact locations come from CONF (scratch or the project space).
+PATHS="$("$CASTLE_VENV/bin/castlerag" paths --config "$CONF")" \
+  || { echo "ABORT: castlerag paths failed for $CONF"; exit 2; }
+eval "$PATHS"
+CHUNKS="$CHUNKS_DIR"
+EMB="$EMB_DIR"
+STAGE="$SC/hf_stage"   # temporary: staging stays on scratch
 export HF_HUB_DISABLE_TELEMETRY=1
 # The submitting shell may have exported HF_HOME for something else (e.g. the
 # model cache on scratch); with --export=ALL the day-2 upload then looked for

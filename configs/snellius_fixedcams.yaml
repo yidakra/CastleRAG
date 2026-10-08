@@ -31,6 +31,7 @@ embedding:
 qdrant:
   host: "localhost"
   port: 6333
+  storage_path: "/scratch-shared/$USER/qdrant_storage"
 outputs:
   dir:             "/scratch-shared/$USER/castle_outputs"
   predictions:     "/scratch-shared/$USER/castle_outputs/predictions.json"

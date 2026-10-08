@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
 from castlerag.config import load_config
+from castlerag.frame_encoding import relocate_frame_path, resolve_frame_path
 from castlerag.preprocess.media import extract_frames_1fps
 
 
@@ -43,7 +44,7 @@ def iter_missing(chunks_day: Path) -> Iterator[dict]:
                 continue
             row = json.loads(line)
             paths = row.get("sampled_frame_paths") or []
-            if any(not Path(p).exists() for p in paths):
+            if any(not Path(resolve_frame_path(p)).exists() for p in paths):
                 yield row
 
 
@@ -59,7 +60,8 @@ def regen_clip(row: dict, video_root: Optional[Path] = None) -> int:
         video = video_root.joinpath(*parts[tail:])
     if not video.exists():
         raise FileNotFoundError(f"raw video missing: {video}")
-    wanted = [Path(p) for p in row["sampled_frame_paths"]]
+    # Rebuilt frames go to the current home of the frames (frame_path_aliases).
+    wanted = [Path(relocate_frame_path(p)) for p in row["sampled_frame_paths"]]
     out_dir = wanted[0].parent
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=out_dir.parent, prefix=".regen_") as tmp:
@@ -91,7 +93,10 @@ def regen_day(
     stats = {
         "clips": len(rows),
         "frames": sum(
-            1 for r in rows for p in r["sampled_frame_paths"] if not Path(p).exists()
+            1
+            for r in rows
+            for p in r["sampled_frame_paths"]
+            if not Path(resolve_frame_path(p)).exists()
         ),
         "written": 0,
         "failed": 0,

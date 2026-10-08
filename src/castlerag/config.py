@@ -56,6 +56,10 @@ class PreprocessingConfig(BaseModel):
     clips_dir: str = "data/derived/clips"
     manifests_dir: str = "data/manifests"
     chunks_dir: str = "data/derived/chunks"
+    # Old frame-path prefix -> new prefix. Chunks and Qdrant payloads store
+    # absolute frame paths; after the frames move (e.g. scratch -> project
+    # space) readers try the new prefix when a stored path no longer exists.
+    frame_path_aliases: Dict[str, str] = Field(default_factory=dict)
 
 
 class EmbeddingBatchSizes(BaseModel):
@@ -88,6 +92,9 @@ class QdrantConfig(BaseModel):
     vector_size: Optional[int] = None  # discovered from first batch
     distance: str = "Cosine"
     on_disk_payload: bool = True
+    # Where the Qdrant server keeps its data; read by the Slurm scripts via
+    # `castlerag paths` (the server itself is configured by environment).
+    storage_path: Optional[str] = None
 
 
 class RetrievalConfig(BaseModel):
@@ -302,7 +309,11 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 def _expand_env(obj: Any) -> Any:
     """Recursively expand $VAR / ${VAR} environment variables in string values."""
     if isinstance(obj, dict):
-        return {k: _expand_env(v) for k, v in obj.items()}
+        # Keys too: frame_path_aliases maps path prefixes that may use $USER.
+        return {
+            (os.path.expandvars(k) if isinstance(k, str) else k): _expand_env(v)
+            for k, v in obj.items()
+        }
     if isinstance(obj, list):
         return [_expand_env(v) for v in obj]
     if isinstance(obj, str):
@@ -354,4 +365,10 @@ def load_config(
             data = _deep_merge(data, override_data)
 
     data = _expand_env(data)
-    return CastleRAGConfig.model_validate(data)
+    cfg = CastleRAGConfig.model_validate(data)
+    # Frame readers (retrieval, generation) have no config handle; register the
+    # aliases process-wide so stored scratch paths resolve after a move.
+    from castlerag.frame_encoding import set_frame_path_aliases
+
+    set_frame_path_aliases(cfg.preprocessing.frame_path_aliases)
+    return cfg

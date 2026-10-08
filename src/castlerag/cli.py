@@ -785,6 +785,36 @@ def answer(
     _print_support_split(result.support_split)
 
 
+@app.command()
+def paths(
+    config: Optional[Path] = typer.Option(None, help="Config override YAML."),
+) -> None:
+    """Print the config's storage paths as shell assignments.
+
+    For Slurm scripts: ``eval "$(castlerag paths --config "$CONF")"`` sets
+    DATA_ROOT, CHUNKS_DIR, EMB_DIR, FRAMES_DIR, OUTPUTS_DIR and QDRANT_STORAGE, so a job
+    takes every derived path from one config instead of hard-coding them.
+    """
+    import shlex
+
+    from castlerag.config import load_config
+
+    if config is not None and not config.is_file():
+        typer.echo(f"config not found: {config}", err=True)
+        raise typer.Exit(2)
+    cfg = load_config(override_path=config) if config else load_config()
+    values = {
+        "DATA_ROOT": cfg.dataset.root,
+        "CHUNKS_DIR": cfg.preprocessing.chunks_dir,
+        "EMB_DIR": cfg.embedding.cache_dir,
+        "FRAMES_DIR": cfg.preprocessing.frames_dir,
+        "OUTPUTS_DIR": cfg.outputs.dir,
+        "QDRANT_STORAGE": cfg.qdrant.storage_path or "",
+    }
+    for key, value in values.items():
+        typer.echo(f"{key}={shlex.quote(str(value))}")
+
+
 @app.command(name="eval")
 def eval_cmd(
     questions_path: Path = typer.Argument(..., help="CASTLE questions JSON or CSV"),
