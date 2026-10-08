@@ -286,3 +286,44 @@ def test_transcript_bm25_handles_an_empty_corpus(tmp_path: Path):
     assert built.bm25 is None
     loaded = load_bm25_index(path)
     assert score_windows(loaded, [], "what did she say", {}) == []
+
+
+def test_load_caches_drops_rows_of_replaced_events(tmp_path: Path, caplog):
+    import numpy as np
+
+    from castlerag.index.io import write_embedding_cache
+    from castlerag.index.pipeline import load_dense_caches
+
+    cache = tmp_path / "emb"
+    cache.mkdir()
+    write_embedding_cache(
+        ["ev_new", "ev_old"],
+        np.ones((2, 3), dtype=np.float32),
+        cache / "events_day1.npz",
+    )
+    records = LoadedArtifacts(
+        transcripts=[], clips=[], events=[_event("Reading", "ev_new")], aux=[]
+    )
+    with caplog.at_level("WARNING"):
+        (art,) = load_dense_caches(cache, records, pattern="*_day1.npz", scope=records)
+    assert art.record_ids == ["ev_new"] and art.vectors.shape == (1, 3)
+    assert "dropping 1 cached rows" in caplog.text
+
+
+def test_load_caches_still_rejects_a_cache_from_other_chunks(tmp_path: Path):
+    import numpy as np
+    import pytest
+
+    from castlerag.index.io import write_embedding_cache
+    from castlerag.index.pipeline import load_dense_caches
+
+    cache = tmp_path / "emb"
+    cache.mkdir()
+    write_embedding_cache(
+        ["x1", "x2"], np.ones((2, 3), dtype=np.float32), cache / "events_day1.npz"
+    )
+    records = LoadedArtifacts(
+        transcripts=[], clips=[], events=[_event("Reading", "ev_new")], aux=[]
+    )
+    with pytest.raises(KeyError, match="Missing records"):
+        load_dense_caches(cache, records, pattern="*_day1.npz")

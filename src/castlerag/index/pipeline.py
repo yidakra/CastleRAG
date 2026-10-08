@@ -352,8 +352,12 @@ def load_dense_caches(
     ``*.npz`` under ``cache_dir``.  Pass ``*_day{N}.npz`` when only the
     day-N subset should be upserted.
 
-    Every cached id must resolve in ``records`` (else ``KeyError`` — a stale
-    cache). When ``scope`` is given, cached rows whose ids are not in ``scope``
+    Caches are append-only, so after a rebuild (e.g. events re-grouped by the
+    placeholder re-flag) they can hold rows whose records no longer exist.
+    Those rows are dropped with a warning, and ``prune_stale_points`` removes
+    their old Qdrant points. A cache in which *no* id resolves is a different
+    cache altogether (wrong path, other chunks) and raises ``KeyError``.
+    When ``scope`` is given, cached rows whose ids are not in ``scope``
     are dropped, so a cache that also holds out-of-scope rows (e.g. fixed-camera
     clips appended by a ``camera_scope="all"`` run) can still be indexed under
     a narrower scope without error.
@@ -365,8 +369,20 @@ def load_dense_caches(
     for path in cache_paths:
         record_ids, vectors = load_embedding_cache(path)
         missing = [record_id for record_id in record_ids if record_id not in index]
-        if missing:
+        if missing and len(missing) == len(record_ids):
             raise KeyError(f"Missing records for cached ids in {path}: {missing[:5]}")
+        if missing:
+            log.warning(
+                "%s: dropping %d cached rows whose records no longer exist "
+                "(e.g. events replaced by a rebuild): %s",
+                path.name,
+                len(missing),
+                missing[:5],
+            )
+            gone = set(missing)
+            keep = [i for i, rid in enumerate(record_ids) if rid not in gone]
+            record_ids = [record_ids[i] for i in keep]
+            vectors = vectors[keep]
         if allowed is not None:
             keep = [i for i, record_id in enumerate(record_ids) if record_id in allowed]
             if len(keep) != len(record_ids):
