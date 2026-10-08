@@ -365,6 +365,49 @@ that are now placeholders and the events that re-grouping replaced
 re-flag reads the frames still on disk; thinned days keep 8 per clip, enough
 for the >80 % rule. Clips with no frames left keep their old flag.
 
+### Move to the project space
+
+Since 2026-10-07 the team has a 2 TiB project space, `/projects/prjs2298`,
+with no purge. Everything that took GPU time to build belongs there: chunks,
+thinned frames (~100 GB per day), embedding caches and the Qdrant storage. The
+raw video stays on scratch; it can be downloaded again. Access is through the
+Unix group `prjs2298`; if it is denied right after being added, close the
+reused SSH connection (`ssh -O exit snellius`) and log in again.
+
+Every Slurm script takes its paths from its config (`castlerag paths --config
+$CONF`). `configs/snellius_fixedcams.yaml` keeps the scratch layout and
+`configs/snellius_project.yaml` the project one. Chunks and Qdrant payloads
+written on scratch store scratch frame paths; the project config's
+`preprocessing.frame_path_aliases` resolves them to the moved copies, so
+nothing has to be rewritten.
+
+Run it when it is your only job: anything else may write data or run Qdrant
+on the scratch storage, and the move refuses while other jobs are queued or
+running. It also refuses a `DAYS` that leaves out an ingested day.
+
+```bash
+cd ~/code/CastleRAG
+sbatch --account=$A scripts/slurm/move_to_project.slurm    # resumable
+# check the log: frame and file counts must match exactly
+```
+
+Until it completes, a re-run syncs the project copy to scratch: files gone
+from scratch since an earlier attempt are removed from it, and scratch itself
+is never written. A completed move leaves `chunks/.moved_from_scratch` and is
+final: from then on the project copy is authoritative, and the move refuses to
+run again unless `FORCE=1`, which is only safe before any job has used the
+project config.
+
+From then on, pass `CONF=configs/snellius_project.yaml` to every job (re-flag,
+eval, UI demo, uploads), e.g.
+
+```bash
+sbatch --account=$A --export=ALL,CONF=configs/snellius_project.yaml,DAY=1,CAMS="$ALL",SKIP_BASE=1,CAPTION=0,MIN_POINTS=1 $S
+```
+
+Delete the scratch copies of `castle_derived/` and `qdrant_storage/` only after
+a job has run against the project copy, e.g. an eval.
+
 ## 6. Compute estimate
 
 Per day, for all 15 cameras on 3 A100s at 128 SBU per GPU-hour. This scales

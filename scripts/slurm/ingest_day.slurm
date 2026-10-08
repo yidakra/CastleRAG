@@ -73,9 +73,6 @@ SKIP_PREPROCESS="${SKIP_PREPROCESS:-0}" # 1 = Phase 1 (base+caption+events) fini
 SNAPSHOT="${SNAPSHOT:-1}"         # 1 = Qdrant snapshot before upserting
 MIN_POINTS="${MIN_POINTS:-25000}" # whole collection; the ego-only day-1 index had 25,920
 BOOTSTRAP="${BOOTSTRAP:-0}"       # 1 = empty scratch: no collection yet (first job only)
-RAW="${SC}/castle2024/main/day${DAY}"
-CHUNKS="${SC}/castle_derived/chunks/day${DAY}"
-EMB="${SC}/castle_derived/embeddings"
 export HF_HOME="${SC}/hf_cache" HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1
 export VLLM_LOGGING_LEVEL=WARNING
 export QDRANT_CLIENT_TIMEOUT="${QDRANT_CLIENT_TIMEOUT:-300}"
@@ -90,6 +87,15 @@ module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12
 source "${HOME}/castlerag_venv/bin/activate"
 cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}" || exit 1
 mkdir -p logs
+# Every derived path comes from CONF (scratch for snellius_fixedcams.yaml, the
+# project space for snellius_project.yaml), so a job can't mix the two.
+PATHS="$(castlerag paths --config "${CONF}")" || { echo "${T} ABORT: castlerag paths failed for ${CONF}"; exit 1; }
+eval "${PATHS}"
+RAW="${DATA_ROOT}/main/day${DAY}"
+CHUNKS="${CHUNKS_DIR}/day${DAY}"
+EMB="${EMB_DIR}"
+QSTORE="${QDRANT_STORAGE:-${SC}/qdrant_storage}"
+echo "${T} paths: raw=${RAW} chunks=${CHUNKS} emb=${EMB} qdrant=${QSTORE}"
 
 wait_ready() { # url label logfile pid
   local pid="${4:-}"
@@ -131,8 +137,9 @@ fi
 HOURS="${HOURS:-${DEFAULT_HOURS}}"
 
 # --- Qdrant on the EXISTING persisted storage (no create-collection, ever) ---
-export QDRANT__STORAGE__STORAGE_PATH="${SC}/qdrant_storage/storage"
-export QDRANT__STORAGE__SNAPSHOTS_PATH="${SC}/qdrant_snapshots"
+export QDRANT__STORAGE__STORAGE_PATH="${QSTORE}/storage"
+QSNAP="$(dirname "${QSTORE}")/qdrant_snapshots"
+export QDRANT__STORAGE__SNAPSHOTS_PATH="${QSNAP}"
 mkdir -p "${QDRANT__STORAGE__SNAPSHOTS_PATH}"
 QLOG="${L}_qdrant_${J}.log"
 "${HOME}/qdrant/qdrant" > "${QLOG}" 2>&1 &
@@ -183,7 +190,13 @@ echo "${T} day${DAY} points already in ${COLL}: ${DAY_PTS}"
 if [ "${CAMS}" = "auto" ]; then
   CAND=(); NOVID=()
   for c in ${SCOPE_CAMS}; do
-    if has_video "$c"; then CAND+=("$c"); else NOVID+=("$c"); fi
+    # Skip modes work from existing chunks, so a deleted raw video doesn't
+    # rule a camera out.
+    if has_video "$c" || [ "${SKIP_BASE}" = "1" ] || [ "${SKIP_PREPROCESS}" = "1" ]; then
+      CAND+=("$c")
+    else
+      NOVID+=("$c")
+    fi
   done
   [ "${#NOVID[@]}" -gt 0 ] && echo "${T} no raw day-${DAY} video, not auto candidates: ${NOVID[*]}"
   if [ "${#CAND[@]}" -eq 0 ]; then
@@ -224,15 +237,19 @@ CAM_FLAGS=(); for c in "${CAM_ARR[@]}"; do CAM_FLAGS+=(--camera "$c"); done
 # Fail fast on a typo / wrong scope before any GPU time is spent.
 castlerag preprocess --config "${CONF}" --day "${DAY}" "${CAM_FLAGS[@]}" --dry-run || exit 1
 
-# Raw video present for every requested camera?
-for c in "${CAM_ARR[@]}"; do
-  n=$(ls "${RAW}/${c}/video/"*.mp4 2>/dev/null | wc -l)
-  echo "${T} raw video ${c}: ${n} hour files"
-  [ "${n}" -gt 0 ] || { echo "${T} ABORT: no raw day-${DAY} video for ${c}"; exit 2; }
-done
+# Raw video present for every requested camera? Only the base pass cuts frames
+# from it; SKIP_BASE / SKIP_PREPROCESS runs (e.g. the re-flag events rebuild,
+# after the raw video was deleted) work from the existing chunks.
+if [ "${SKIP_BASE}" != "1" ] && [ "${SKIP_PREPROCESS}" != "1" ]; then
+  for c in "${CAM_ARR[@]}"; do
+    n=$(ls "${RAW}/${c}/video/"*.mp4 2>/dev/null | wc -l)
+    echo "${T} raw video ${c}: ${n} hour files"
+    [ "${n}" -gt 0 ] || { echo "${T} ABORT: no raw day-${DAY} video for ${c}"; exit 2; }
+  done
+fi
 
 # --- Phase 0b: rollback material -----------------------------------------
-BK="${SC}/castle_derived/embeddings_backup_pre_ingest_day${DAY}_${J}"
+BK="$(dirname "${EMB}")/embeddings_backup_pre_ingest_day${DAY}_${J}"
 mkdir -p "${BK}"
 shopt -s nullglob
 DAY_NPZ=("${EMB}"/*_day"${DAY}".npz)

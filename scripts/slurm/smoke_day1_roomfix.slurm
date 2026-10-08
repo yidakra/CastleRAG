@@ -40,6 +40,9 @@ echo "[smoke] branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) commit=$(git
 module purge; module load 2024; module load Python/3.12.3-GCCcore-13.3.0 CUDA/12.6.0 FFmpeg/7.0.2-GCCcore-13.3.0
 source "${HOME}/castlerag_venv/bin/activate"
 cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
+PATHS="$(castlerag paths --config "${CONF}")" || { echo "ABORT: castlerag paths failed for ${CONF}"; exit 1; }
+eval "${PATHS}"
+QSTORE="${QDRANT_STORAGE:-${SC}/qdrant_storage}"
 mkdir -p logs
 
 wait_ready() { # url label logfile pid
@@ -66,7 +69,7 @@ CUDA_VISIBLE_DEVICES=1 vllm serve Qwen/Qwen3-VL-8B-Instruct \
     > "${GEN_LOG}" 2>&1 &
 GEN_PID=$!
 # --- Qdrant against EXISTING persisted storage (NO create-collection) ---
-export QDRANT__STORAGE__STORAGE_PATH="${SC}/qdrant_storage/storage"
+export QDRANT__STORAGE__STORAGE_PATH="${QSTORE}/storage"
 QLOG="logs/smoke_qdrant_${SLURM_JOB_ID}.log"
 "${HOME}/qdrant/qdrant" > "${QLOG}" 2>&1 &
 QPID=$!
@@ -106,7 +109,7 @@ export OMNIEMBED_QUERY_CACHE="${SMOKE_CACHE}"
 echo "[smoke] === smoke-test (${NQ} questions, ${QFILE}) ==="
 castlerag smoke-test "${QFILE}" --n "${NQ}" --config "${CONF}"
 
-OUT="${SC}/castle_outputs/smoke_test"
+OUT="${OUTPUTS_DIR}/smoke_test"
 echo "[smoke] === metrics.json ==="
 cat "${OUT}/metrics.json" 2>/dev/null || find "${OUT}" -name 'metrics*.json' -exec cat {} \;
 echo
