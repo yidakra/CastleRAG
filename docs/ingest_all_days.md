@@ -381,14 +381,21 @@ written on scratch store scratch frame paths; the project config's
 `preprocessing.frame_path_aliases` resolves them to the moved copies, so
 nothing has to be rewritten.
 
-Once no ingest, thinning, upload or re-flag job is queued or running (the move
-job checks and refuses otherwise):
+Run it when it is your only job: anything else may write data or run Qdrant
+on the scratch storage, and the move refuses while other jobs are queued or
+running. It also refuses a `DAYS` that leaves out an ingested day.
 
 ```bash
 cd ~/code/CastleRAG
-sbatch --account=$A scripts/slurm/move_to_project.slurm    # copies, never deletes; resumable
-# check the log: per-day frame counts and file counts must match
+sbatch --account=$A scripts/slurm/move_to_project.slurm    # resumable
+# check the log: frame and file counts must match exactly
 ```
+
+The project copy is synced to scratch: files gone from scratch since an
+earlier copy are removed from it, and scratch itself is never written. A
+successful move leaves `chunks/.moved_from_scratch`. Once any project file is
+newer than that marker (i.e. jobs have switched to the project config), the
+move refuses to run again rather than overwrite them.
 
 From then on, pass `CONF=configs/snellius_project.yaml` to every job (re-flag,
 eval, UI demo, uploads), e.g.

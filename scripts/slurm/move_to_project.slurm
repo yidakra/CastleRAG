@@ -12,7 +12,10 @@
 #   sbatch scripts/slurm/move_to_project.slurm
 # Optional: DAYS (frames/chunks to copy, default "1 2 3 4"), SRC_CONF and
 # DST_CONF (defaults: configs/snellius_fixedcams.yaml -> snellius_project.yaml).
-# rsync makes it resumable; it copies, never deletes. See
+# Resumable: the project copy is synced to scratch (files gone from scratch are
+# removed from the copy; scratch is never written). After a successful move it
+# leaves a marker and refuses to run again once the project copy has newer
+# files, i.e. after jobs have switched to the project config. See
 # docs/ingest_all_days.md, "Move to the project space".
 set -uo pipefail
 DAYS="${DAYS:-1 2 3 4}"
@@ -24,13 +27,16 @@ module load Python/3.12.3-GCCcore-13.3.0 >/dev/null 2>&1
 source "${HOME}/castlerag_venv/bin/activate"
 cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}" || exit 1
 
-# A job still writing chunks, caches or Qdrant would leave a torn copy. Check
-# squeue's own status first: an empty answer from a failed squeue is not "idle".
-JOBS="$(squeue -u "$USER" -h -o "%i %j")" || { echo "ABORT: squeue failed"; exit 2; }
-BUSY="$(printf '%s\n' "$JOBS" | grep -E "castle-(ingest|thin|upload|reflag|regen)" \
-        | grep -v "^${SLURM_JOB_ID:-x} ")"
+# Any other job of ours may write chunks or caches, or run Qdrant on the scratch
+# storage (ingest, eval, UI demo, smoke tests...), and copying a live Qdrant
+# directory gives a torn copy. So the move runs only when it is our only job.
+# Check squeue's own status first: an empty answer from a failed squeue is not
+# "idle".
+JOBS="$(squeue -u "$USER" -h -o "%i %j %T")" || { echo "ABORT: squeue failed"; exit 2; }
+BUSY="$(printf '%s\n' "$JOBS" | grep -v '^$' | grep -v "^${SLURM_JOB_ID:-x} ")"
 if [ -n "$BUSY" ]; then
-  echo "ABORT: jobs that write derived data are queued or running:"; echo "$BUSY"; exit 2
+  echo "ABORT: other jobs are queued or running (they may write data or run Qdrant):"
+  echo "$BUSY"; exit 2
 fi
 
 # `castlerag paths` prints shell-quoted assignments; eval them (prefixed) so
@@ -47,6 +53,22 @@ for v in SRC_CHUNKS DST_CHUNKS SRC_EMB DST_EMB SRC_FR DST_FR SRC_Q DST_Q; do
   [ -n "${!v}" ] || { echo "ABORT: $v is empty"; exit 2; }
 done
 [ "$SRC_CHUNKS" != "$DST_CHUNKS" ] || { echo "ABORT: source and destination are the same"; exit 2; }
+# Chunks, caches and Qdrant are copied whole, so every ingested day's frames
+# must be copied too: refuse a DAYS that leaves out an ingested day.
+for c in "$SRC_CHUNKS"/day*; do
+  [ -d "$c" ] || continue
+  dn="$(basename "$c")"; dn="${dn#day}"
+  case " $DAYS " in *" $dn "*) ;; *)
+    echo "ABORT: day$dn is ingested (chunks on scratch) but not in DAYS='$DAYS'"; exit 2;;
+  esac
+done
+# After the switch the project copy is the source of truth: a later run would
+# delete or overwrite its newer files.
+MARK="$DST_CHUNKS/.moved_from_scratch"
+if [ -e "$MARK" ] && [ -n "$(find "$DST_CHUNKS" "$DST_EMB" "$DST_Q" "$DST_FR" -type f ! -name .moved_from_scratch \
+                                -newer "$MARK" -print -quit 2>/dev/null)" ]; then
+  echo "ABORT: the project copy changed after the last move ($MARK); refusing to sync over it"; exit 2
+fi
 echo "start $(date -Iseconds): $SRC_CONF -> $DST_CONF, days: $DAYS"
 
 count() { find "$1" -type f 2>/dev/null | wc -l; }
@@ -73,15 +95,20 @@ for d in $DAYS; do
   echo "day$d frames: $s on scratch, $t in project"; [ "$t" -eq "$s" ] || fail=1
 done
 mkdir -p "$DST_CHUNKS" "$DST_EMB" "$DST_Q"
-rsync -a "$SRC_CHUNKS/" "$DST_CHUNKS/" || fail=1
-rsync -a "$SRC_EMB/" "$DST_EMB/" || fail=1
-rsync -a "$SRC_Q/" "$DST_Q/" || fail=1
+# --delete: files gone from scratch since an earlier copy go from the project
+# copy too (the marker is kept). Scratch is never written.
+rsync -a --delete --exclude=.moved_from_scratch "$SRC_CHUNKS/" "$DST_CHUNKS/" || fail=1
+rsync -a --delete "$SRC_EMB/" "$DST_EMB/" || fail=1
+rsync -a --delete "$SRC_Q/" "$DST_Q/" || fail=1
 SRCS=("$SRC_CHUNKS" "$SRC_EMB" "$SRC_Q"); DSTS=("$DST_CHUNKS" "$DST_EMB" "$DST_Q")
 for i in "${!SRCS[@]}"; do
   s="${SRCS[$i]}"; t="${DSTS[$i]}"
-  echo "$(basename "$s"): $(count "$s") files on scratch, $(count "$t") in project"
-  [ "$(count "$t")" -ge "$(count "$s")" ] || fail=1
+  ns=$(count "$s"); nt=$(count "$t")
+  [ "$t" = "$DST_CHUNKS" ] && [ -e "$MARK" ] && nt=$((nt - 1))   # the marker
+  echo "$(basename "$s"): $ns files on scratch, $nt in project"
+  [ "$nt" -eq "$ns" ] || fail=1
 done
 du -sh "$DST_FR" "$DST_CHUNKS" "$DST_EMB" "$DST_Q" 2>/dev/null
 echo "end $(date -Iseconds) fail=$fail"
-[ "$fail" = 0 ]
+[ "$fail" = 0 ] || exit 1
+touch "$MARK" && echo "marked $MARK"
