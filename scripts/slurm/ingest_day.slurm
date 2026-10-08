@@ -294,9 +294,10 @@ is_target() { local x; for x in "${CAM_ARR[@]}"; do [ "$1" = "$x" ] && return 0;
 [ "${FRESH}" = "1" ] && mkdir -p "${CHUNKS}"
 [ -d "${CHUNKS}" ] || { echo "${T} ABORT: ${CHUNKS} missing although day${DAY} is already indexed"; exit 2; }
 shopt -s nullglob
-NT_DIRS=()
+NT_DIRS=(); T_DIRS=()
 for d in "${CHUNKS}"/*/; do
-  d="$(basename "$d")"; is_target "$d" || NT_DIRS+=("$d")
+  d="$(basename "$d")"
+  if is_target "$d"; then T_DIRS+=("$d"); else NT_DIRS+=("$d"); fi
 done
 shopt -u nullglob
 SUM_CHECK=1
@@ -305,8 +306,14 @@ if [ "${#NT_DIRS[@]}" -eq 0 ]; then
     # Nothing else exists for this day yet, so there is nothing to protect.
     SUM_CHECK=0; : > "${OTHER_SUM}"
     echo "${T} no other cameras' chunks in ${CHUNKS} yet; checksum baseline not needed"
+  elif [ "${#T_DIRS[@]}" -gt 0 ]; then
+    # A whole-day rebuild (e.g. the re-flag events pass): every camera dir of
+    # the day is a target, so there are no other cameras to protect.
+    SUM_CHECK=0; : > "${OTHER_SUM}"
+    echo "${T} all ${#T_DIRS[@]} camera dirs in ${CHUNKS} are targets (whole-day rebuild); checksum baseline not needed"
   else
-    echo "${T} ABORT: day${DAY} is indexed but ${CHUNKS} has no non-target camera dirs"; exit 2
+    # Indexed, yet no camera dirs at all: most likely a wrong chunks path.
+    echo "${T} ABORT: day${DAY} is indexed but ${CHUNKS} has no camera dirs"; exit 2
   fi
 else
   # An empty baseline would make the later `sha1sum -c` pass vacuously, so the
