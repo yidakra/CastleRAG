@@ -391,11 +391,12 @@ sbatch --account=$A scripts/slurm/move_to_project.slurm    # resumable
 # check the log: frame and file counts must match exactly
 ```
 
-The project copy is synced to scratch: files gone from scratch since an
-earlier copy are removed from it, and scratch itself is never written. A
-successful move leaves `chunks/.moved_from_scratch`. Once any project file is
-newer than that marker (i.e. jobs have switched to the project config), the
-move refuses to run again rather than overwrite them.
+Until it completes, a re-run syncs the project copy to scratch: files gone
+from scratch since an earlier attempt are removed from it, and scratch itself
+is never written. A completed move leaves `chunks/.moved_from_scratch` and is
+final: from then on the project copy is authoritative, and the move refuses to
+run again unless `FORCE=1`, which is only safe before any job has used the
+project config.
 
 From then on, pass `CONF=configs/snellius_project.yaml` to every job (re-flag,
 eval, UI demo, uploads), e.g.

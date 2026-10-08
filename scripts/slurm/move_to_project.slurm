@@ -12,10 +12,10 @@
 #   sbatch scripts/slurm/move_to_project.slurm
 # Optional: DAYS (frames/chunks to copy, default "1 2 3 4"), SRC_CONF and
 # DST_CONF (defaults: configs/snellius_fixedcams.yaml -> snellius_project.yaml).
-# Resumable: the project copy is synced to scratch (files gone from scratch are
-# removed from the copy; scratch is never written). After a successful move it
-# leaves a marker and refuses to run again once the project copy has newer
-# files, i.e. after jobs have switched to the project config. See
+# Resumable: until it completes, re-runs sync the project copy to scratch
+# (files gone from scratch are removed from the copy; scratch is never
+# written). A completed move leaves a marker, and later runs refuse unless
+# FORCE=1, because by then the project copy is authoritative. See
 # docs/ingest_all_days.md, "Move to the project space".
 set -uo pipefail
 DAYS="${DAYS:-1 2 3 4}"
@@ -62,12 +62,14 @@ for c in "$SRC_CHUNKS"/day*; do
     echo "ABORT: day$dn is ingested (chunks on scratch) but not in DAYS='$DAYS'"; exit 2;;
   esac
 done
-# After the switch the project copy is the source of truth: a later run would
-# delete or overwrite its newer files.
+# A completed move is final: after the switch the project copy is the source
+# of truth, and a re-sync could restore files deleted there or overwrite new
+# ones. A failed move leaves no marker and simply resumes; repeating a
+# completed one needs FORCE=1 (only before any job has used the project copy).
 MARK="$DST_CHUNKS/.moved_from_scratch"
-if [ -e "$MARK" ] && [ -n "$(find "$DST_CHUNKS" "$DST_EMB" "$DST_Q" "$DST_FR" -type f ! -name .moved_from_scratch \
-                                -newer "$MARK" -print -quit 2>/dev/null)" ]; then
-  echo "ABORT: the project copy changed after the last move ($MARK); refusing to sync over it"; exit 2
+if [ -e "$MARK" ] && [ "${FORCE:-0}" != "1" ]; then
+  echo "ABORT: the move already completed ($MARK); the project copy is authoritative."
+  echo "       Re-run with FORCE=1 only if no job has used the project config yet."; exit 2
 fi
 echo "start $(date -Iseconds): $SRC_CONF -> $DST_CONF, days: $DAYS"
 
