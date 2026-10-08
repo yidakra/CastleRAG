@@ -416,11 +416,21 @@ def test_cache_rejects_dim_mismatch(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
+class _NoPointsQdrant:
+    """Bootstrap stand-in: an empty collection, so pruning finds nothing."""
+
+    def count(self, *args, **kwargs):
+        return SimpleNamespace(count=0)
+
+    def delete(self, *args, **kwargs):
+        raise AssertionError("nothing should be deleted")
+
+
 def _capture_index(monkeypatch) -> list[dict]:
     upserts: list[dict] = []
     monkeypatch.setattr(
         "castlerag.index.pipeline.bootstrap_collection",
-        lambda **kwargs: object(),
+        lambda **kwargs: _NoPointsQdrant(),
     )
     monkeypatch.setattr(
         "castlerag.index.pipeline.upsert_batch",

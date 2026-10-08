@@ -6,7 +6,9 @@ Policy (fixed by spec):
   fps         = 1 (for derived retrieval frames)
 
 Placeholder detection:
-  skip windows where >80% of sampled frames match the CASTLE test-card.
+  skip windows where >80% of sampled frames are blank or show the CASTLE
+  test card. Stillness alone is not a placeholder: a fixed camera filming an
+  empty room is real footage.
 """
 
 from __future__ import annotations
@@ -73,15 +75,16 @@ def mark_placeholder_windows(
 ) -> List[VideoWindow]:
     """Return windows with is_placeholder set based on per-frame checks.
 
-    A window is marked placeholder when the fraction of frames that match
-    the CASTLE test-card exceeds placeholder_threshold (default 0.80).
+    A window is marked placeholder when the fraction of frames that are blank
+    or show the CASTLE test card exceeds placeholder_threshold (default 0.80).
+    A clip that only ends on the card (recording stopped mid-clip) is kept.
 
     frame_dir must contain per-clip sub-directories named by clip_index
     (e.g. frame_dir/0/, frame_dir/1/, ...).
     """
     if not (0.0 <= placeholder_threshold <= 1.0):
         raise ValueError("placeholder_threshold must be between 0.0 and 1.0")
-    from castlerag.preprocess.media import is_placeholder_frame, is_static_window
+    from castlerag.preprocess.media import is_placeholder_or_card
 
     result: List[VideoWindow] = []
     for w in windows:
@@ -90,11 +93,8 @@ def mark_placeholder_windows(
         if not frames:
             result.append(w)
             continue
-        n_placeholder = sum(1 for f in frames if is_placeholder_frame(f))
+        n_placeholder = sum(1 for f in frames if is_placeholder_or_card(f))
         frac = n_placeholder / len(frames)
-        # Also flag windows where all frames are nearly identical regardless of
-        # their per-frame variance (catches coloured or patterned test cards).
-        static = is_static_window(frames)
         result.append(
             VideoWindow(
                 camera_id=w.camera_id,
@@ -104,7 +104,7 @@ def mark_placeholder_windows(
                 start_seconds=w.start_seconds,
                 end_seconds=w.end_seconds,
                 source_video_path=w.source_video_path,
-                is_placeholder=frac > placeholder_threshold or static,
+                is_placeholder=frac > placeholder_threshold,
             )
         )
     return result

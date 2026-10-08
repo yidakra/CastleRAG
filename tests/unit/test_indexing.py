@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -545,7 +546,8 @@ def test_build_qdrant_index_upserts_all_cached_artifacts(tmp_path: Path, monkeyp
     cache_dense_embeddings(records, cfg, FakeEmbedClient())
 
     class FakeQdrantClient:
-        pass
+        def count(self, *args, **kwargs):  # empty collection: nothing to prune
+            return SimpleNamespace(count=0)
 
     captured: dict[str, object] = {}
 
@@ -616,7 +618,8 @@ def test_build_qdrant_index_day_filter_only_upserts_matching_day(
     captured_upserts: list[dict] = []
 
     class FakeQdrantClient:
-        pass
+        def count(self, *args, **kwargs):  # empty collection: nothing to prune
+            return SimpleNamespace(count=0)
 
     monkeypatch.setattr(
         "castlerag.index.pipeline.bootstrap_collection",

@@ -136,54 +136,56 @@ def extract_subclip(
     return out_path
 
 
-def is_placeholder_frame(frame_path: Path) -> bool:
-    """Return True if the frame matches the CASTLE test-card placeholder.
+def frame_stats(frame_path: Path) -> "tuple[float, float]":
+    """Return (grayscale std, flatness) for one frame, from a single decode.
 
-    The CASTLE test card is a low-variance static card (near-uniform color or
-    simple test pattern).  We use grayscale standard deviation < 8 as the
-    heuristic; real scene frames consistently exceed 20.  This threshold can
-    be tightened once the exact test-card image is available from the dataset.
+    JPEG frames are decoded at reduced scale (draft mode: 3840x2160 decodes
+    straight to 960x540, several times faster than a full decode). Flatness is
+    the fraction of horizontally adjacent pixels with exactly equal values.
+    Smaller images are measured as they are (never upscaled).
     """
     import numpy as np
     from PIL import Image
 
     with Image.open(frame_path) as img:
-        arr = np.array(img.convert("L"), dtype=np.float32)
-    return float(arr.std()) < 8.0
+        if img.format == "JPEG" and img.width > 960:
+            img.draft("L", (960, 540))
+        gray = img.convert("L")
+        if gray.width > 960:
+            gray = gray.resize((960, round(960 * gray.height / gray.width)))
+        arr = np.asarray(gray, dtype=np.int16)
+    flat = float((np.diff(arr, axis=1) == 0).mean()) if arr.shape[1] > 1 else 0.0
+    return float(arr.std()), flat
 
 
-def is_static_window(frame_paths: List[Path], diff_threshold: float = 2.0) -> bool:
-    """Return True if frames across the window are nearly identical.
+# Grayscale std below this is a blank frame (black, lights off); real scenes
+# consistently exceed 20. The CASTLE test card is colourful (std ~70).
+BLANK_STD = 8.0
 
-    Computes the median mean-absolute-difference between consecutive grayscale
-    frames sampled evenly across the window.  A static test card produces a
-    value near zero regardless of its colour or pattern; real egocentric scenes
-    at 1 fps consistently exceed the threshold even when the participant is
-    sitting still (camera noise, subtle motion).
+# Flatness above this is the CASTLE test card, a synthetic graphic (flat grey
+# grid, colour bars). Measured on days 1-3 with draft decoding: card frames
+# score ~0.91; real frames have sensor noise and scored median 0.35-0.44, with
+# a rare overexposed frame up to 0.81. A clip needs >80 % such frames to be a
+# placeholder; on 600 sampled real clips (300 still, 300 normal) none was,
+# apart from one near-black covered-lens clip that is blank anyway.
+TEST_CARD_FLAT_FRACTION = 0.65
 
-    This catches colorful or patterned test cards that is_placeholder_frame
-    alone would miss.  Requires at least 2 frames; returns False for shorter
-    inputs.
+
+def is_placeholder_frame(frame_path: Path) -> bool:
+    """Return True if the frame is blank (near-uniform, e.g. a black frame)."""
+    return frame_stats(frame_path)[0] < BLANK_STD
+
+
+def is_test_card_frame(frame_path: Path) -> bool:
+    """Return True if the frame shows the CASTLE test card (a flat graphic).
+
+    Detected positively from flatness rather than from stillness: a fixed
+    camera filming an empty room is still too, but it is real footage.
     """
-    if len(frame_paths) < 2:
-        return False
+    return frame_stats(frame_path)[1] > TEST_CARD_FLAT_FRACTION
 
-    import numpy as np
-    from PIL import Image
 
-    sample_count = min(8, len(frame_paths))
-    idx = np.linspace(0, len(frame_paths) - 1, num=sample_count, dtype=int)
-    sample = [frame_paths[i] for i in sorted(set(idx.tolist()))]
-
-    diffs: List[float] = []
-    prev: "np.ndarray | None" = None
-    for fp in sample:
-        with Image.open(fp) as img:
-            arr = np.array(img.convert("L"), dtype=np.float32)
-        if prev is not None:
-            diffs.append(float(np.mean(np.abs(arr - prev))))
-        prev = arr
-
-    if not diffs:
-        return False
-    return float(np.median(diffs)) < diff_threshold
+def is_placeholder_or_card(frame_path: Path) -> bool:
+    """Blank or test card, from one decode (used per frame by the window rule)."""
+    std, flat = frame_stats(frame_path)
+    return std < BLANK_STD or flat > TEST_CARD_FLAT_FRACTION

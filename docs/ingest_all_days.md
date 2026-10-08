@@ -340,6 +340,31 @@ Space on scratch (8 TiB quota): wave 1 peaks at ~5.4 TB (4.4 TB video + frames),
 wave 2 at ~5 TB (3.8 TB video + thinned frames of all days), and after deleting
 days 3-4 video about 0.5 TB of thinned frames remain.
 
+### Re-flag placeholders on days ingested before #68
+
+Clips that are blank or show the CASTLE test card are *placeholders*: they are
+not captioned, embedded or indexed, and event summaries skip them. Days 1-3
+were ingested with the old rule, which flagged by stillness. That marked real
+footage of idle fixed-camera rooms as placeholders (5,395 clips, so those
+stretches got no event summaries) and missed some test-card clips. To bring
+an ingested day up to the current rule:
+
+```bash
+cd ~/code/CastleRAG
+python scripts/reflag_placeholders.py --config configs/snellius_fixedcams.yaml --day 1           # dry run
+python scripts/reflag_placeholders.py --config configs/snellius_fixedcams.yaml --day 1 --apply   # ~1 h CPU, run as a job
+ALL="$FIXED $EGO_A $EGO_B"   # day 4: Bao instead of Tien
+sbatch --account=$A --job-name=castle-reflag-day1 \
+       --export=ALL,DAY=1,CAMS="$ALL",SKIP_BASE=1,CAPTION=0,MIN_POINTS=1 $S
+```
+
+The job rebuilds only the event summaries (captions are kept, `CAPTION=0`),
+embeds the new ones and re-indexes the day. Its index step deletes the clips
+that are now placeholders and the events that re-grouping replaced
+(`prune_stale_points`), so the day's points match its chunk files again. The
+re-flag reads the frames still on disk; thinned days keep 8 per clip, enough
+for the >80 % rule. Clips with no frames left keep their old flag.
+
 ## 6. Compute estimate
 
 Per day, for all 15 cameras on 3 A100s at 128 SBU per GPU-hour. This scales

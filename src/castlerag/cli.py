@@ -28,6 +28,7 @@ from castlerag.index.pipeline import (
     cache_dense_embeddings,
     filter_records,
     load_chunk_records,
+    prune_day_without_index,
 )
 from castlerag.retrieval.search import retrieve as retrieve_evidence
 from castlerag.routing.question_router import route_question
@@ -377,11 +378,17 @@ def preprocess(
         from castlerag.preprocess.caption_ocr import annotate_clip
 
         vllm_url = _vllm_base_url()
-        n_annotated = n_failed = 0
+        n_annotated = n_failed = n_placeholder = 0
         for clips_path in _iter_clip_paths():
             clip_records = load_clip_records(clips_path)
             updated: list[ClipRecord] = []
             for cr in clip_records:
+                if cr.is_placeholder:
+                    # Test card or blank: nothing to caption, and the clip is
+                    # left out of embedding and the index as well.
+                    updated.append(cr)
+                    n_placeholder += 1
+                    continue
                 frames = [Path(p) for p in cr.sampled_frame_paths]
                 try:
                     ann = annotate_clip(
@@ -414,7 +421,8 @@ def preprocess(
                     )
             write_jsonl_records(updated, clips_path)
         console.print(
-            f"  caption/OCR   : {n_annotated} clips annotated, {n_failed} failed"
+            f"  caption/OCR   : {n_annotated} clips annotated, {n_failed} failed, "
+            f"{n_placeholder} placeholders skipped"
         )
 
     # ------------------------------------------------------------------ #
@@ -445,8 +453,10 @@ def preprocess(
                     event_records.append(ev)
                 except Exception as exc:
                     console.print(f"[yellow]  event compress skipped: {exc}[/yellow]")
-            if event_records:
-                ev_path = clips_path.parent / "events.jsonl"
+            ev_path = clips_path.parent / "events.jsonl"
+            # Rewrite even when empty, so a rebuild (e.g. after re-flagging
+            # placeholders) never leaves events from an older grouping behind.
+            if event_records or ev_path.exists():
                 write_jsonl_records(event_records, ev_path)
                 n_events += len(event_records)
         console.print(f"  events        : {n_events} event summaries written")
@@ -519,6 +529,12 @@ def embed(
         console.print(f"  dim     : {embed_client.dim}")
 
 
+def _rebuild_lexical(scoped_all, cache_dir: Path) -> None:
+    """Rebuild the transcript and visual-text BM25 indexes from all days."""
+    console.print(f"  BM25    : {build_bm25_artifact(scoped_all, cache_dir)}")
+    console.print(f"  visual  : {build_visual_bm25_artifact(scoped_all, cache_dir)}")
+
+
 @app.command()
 def index(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
@@ -587,20 +603,38 @@ def index(
         return
     records = load_chunk_records(Path(cfg.preprocessing.chunks_dir))
     scoped_all = filter_records(records, cfg)
-    if _count_records(scoped_all) == 0:
+    if _count_records(records) == 0:
         console.print("[red]No chunk records found — run preprocess first.[/red]")
         raise typer.Exit(1)
+    if day is None and _count_records(scoped_all) == 0 and not lexical_only:
+        # Chunks exist but nothing is indexable on any day: prune each day.
+        days = sorted({c.day for c in records.clips if c.day})
+        removed = sum(
+            prune_day_without_index(cfg, records, int(d.removeprefix("day")))
+            for d in days
+        )
+        console.print(f"  nothing to index; pruned {removed} stale points")
+        _rebuild_lexical(scoped_all, Path(cfg.embedding.cache_dir))
+        return
     # The lexical indexes are rebuilt from every loaded day, so --lexical-only
     # does not need day-scoped records and skips the per-day guard below.
     if lexical_only:
-        cache_dir = Path(cfg.embedding.cache_dir)
-        bm25_path = build_bm25_artifact(scoped_all, cache_dir)
-        visual_path = build_visual_bm25_artifact(scoped_all, cache_dir)
-        console.print(f"  BM25    : {bm25_path}")
-        console.print(f"  visual  : {visual_path}")
+        _rebuild_lexical(scoped_all, Path(cfg.embedding.cache_dir))
         console.print("  dense   : skipped (--lexical-only)")
         return
     if day is not None and _count_records(filter_records(records, cfg, day=day)) == 0:
+        day_label = f"day{day}"
+        if any(c.day == day_label for c in records.clips):
+            # Chunks exist but nothing is indexable (all placeholders, no
+            # events or transcripts): only remove the day's stale points.
+            removed = prune_day_without_index(cfg, records, day)
+            console.print(
+                f"  day {day}: nothing to index; pruned {removed} stale points"
+            )
+            # The lexical indexes span all days; rebuild them so the pruned
+            # day's placeholder captions stop matching there too.
+            _rebuild_lexical(scoped_all, Path(cfg.embedding.cache_dir))
+            return
         console.print(
             f"[red]No chunk records found for day {day} — "
             f"run `castlerag preprocess --day {day}` first.[/red]"

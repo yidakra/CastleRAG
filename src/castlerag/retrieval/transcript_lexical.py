@@ -43,7 +43,7 @@ def score_windows(
 ) -> List[RetrievalHit]:
     """Score transcript windows with BM25 + metadata bonuses and return top-k hits."""
     query_tokens = _tokenize(query)
-    if not query_tokens:
+    if not query_tokens or bm25_index.bm25 is None:  # empty transcript corpus
         return []
 
     base_scores = np.asarray(bm25_index.bm25.get_scores(query_tokens), dtype=np.float32)
